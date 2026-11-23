@@ -1,0 +1,39 @@
+# Local development. Docker Compose merges this file into docker-compose.yml
+# automatically. For a production-like run without it, use:
+#   docker compose -f docker-compose.yml up -d
+
+x-dev: &dev
+  build:
+    context: .
+    dockerfile: docker/app/Dockerfile
+    target: dev
+    args:
+      UID: ${NOONGUN_UID:-1000}
+      GID: ${NOONGUN_GID:-1000}
+  image: noongun-app:dev
+  restart: "no"
+  volumes:
+    - .:/app
+    - ./storage:/app/storage
+
+services:
+  app:
+    <<: *dev
+    environment:
+      NOONGUN_ROLE: app
+
+  horizon:
+    <<: *dev
+
+  scheduler:
+    <<: *dev
+
+  vite:
+    <<: *dev
+    profiles: ["vite"]
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]
+    environment:
+      VITE_HMR_PORT: ${NOONGUN_VITE_PORT:-5173}
+    ports:
+      - "${NOONGUN_VITE_PORT:-5173}:5173"
+    depends_on: []

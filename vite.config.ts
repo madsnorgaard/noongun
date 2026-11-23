@@ -32,6 +32,12 @@ export default defineConfig({
         }),
     ]),
     server: {
+        hmr: process.env.VITE_HMR_PORT
+            ? { host: 'localhost', clientPort: Number(process.env.VITE_HMR_PORT) }
+            : undefined,
+        origin: process.env.VITE_HMR_PORT
+            ? `http://localhost:${process.env.VITE_HMR_PORT}`
+            : undefined,
         watch: {
             ignored: [
                 '**/.agents/**',
