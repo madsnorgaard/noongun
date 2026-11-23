@@ -1,0 +1,15 @@
+# Secrets and spike state
+.env
+.env.*
+!.env.example
+scripts/spike/.state/
+
+# Jumbo local memory
+.jumbo/
+
+# Internal drafts and correspondence belong in ~/Notes/noongun/
+*-email-*.md
+*-hosting-notes.md
+*-draft.md
+*-notes.md
+!docs/platform-notes/**
