@@ -23,3 +23,32 @@ scripts/spike/.state/
 .github/hooks/
 .github/copilot-instructions.md
 GEMINI.md
+
+# Claude Code worktrees
+/.claude/worktrees/
+
+# Laravel
+/.phpunit.cache
+/bootstrap/ssr
+/node_modules
+/public/build
+/public/fonts-manifest.dev.json
+/public/hot
+/public/storage
+/storage/*.key
+/storage/pail
+/resources/js/actions
+/resources/js/routes
+/resources/js/wayfinder
+/vendor
+.phpunit.result.cache
+npm-debug.log
+/auth.json
+
+# Editors
+.DS_Store
+/.fleet
+/.idea
+/.nova
+/.vscode
+/.zed
