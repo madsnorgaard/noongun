@@ -79,3 +79,10 @@ read the current official documentation linked in `docs/BRIEF.md` and record wha
 you found in `docs/platform-notes/`. If the documentation contradicts the brief,
 stop and raise it instead of guessing. Record significant choices as short ADRs in
 `docs/adr/`.
+
+# CLAUDE.md
+
+## Instructions for Agents on how to collaborate with Jumbo
+
+See JUMBO.md and follow all instructions. If the file does not exist, then ignore this instruction.
+

@@ -13,3 +13,13 @@ scripts/spike/.state/
 *-draft.md
 *-notes.md
 !docs/platform-notes/**
+
+
+# Jumbo files for agents other than Claude Code (not used yet)
+.agents/
+.codex/
+.cursor/
+.vibe/
+.github/hooks/
+.github/copilot-instructions.md
+GEMINI.md
