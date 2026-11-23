@@ -32,6 +32,18 @@ cp .env.example .env            # fill in app id, secret, short-lived token, pho
 ./06-delete.sh                  # delete every post the spike created
 ```
 
+Run the sequence twice:
+
+1. **Development mode** (the default for a new app). Expect the posts to be
+   hidden from a logged-out browser; Meta shows Development mode content to app
+   role users only.
+2. **Live mode.** Switch the app mode toggle in the App Dashboard toolbar, note
+   everything the dashboard asks for before it allows the switch, get a fresh
+   token in Graph API Explorer, update `META_SHORT_USER_TOKEN`, and run 01 to 06
+   again. This run answers whether Phase 1 works without App Review.
+
+Record both runs in `docs/platform-notes/meta.md` under "Spike results".
+
 `./05-permalink.sh <post_id>` reads a post back at any time.
 
 When done, remove the app secret from `.env` or delete `.env` and `.state/`.
