@@ -64,14 +64,39 @@ Source: developers.facebook.com/docs/graph-api/guides/secure-requests
 
 To be filled in after running `scripts/spike/`.
 
+The app modes page states that data created in Development mode "can only be seen
+by role users". Whether a Business app in Live mode can still use `pages_manage_posts`
+with Standard Access for its own role users, without App Review, is not stated. The
+spike therefore posts twice: once in Development mode, once in Live mode.
+
 - Date run:
-- App mode (Development or Live):
+- App type and use case:
 - Scopes on the working user token:
 - Page token `expires_at` from `debug_token`:
+
+Run A - Development mode
+
 - Text post id, permalink, `permalink_url` returned (yes or no):
 - Photo post id, caption shown (yes or no):
-- Visible from a logged-out browser (text, photo):
+- Visible from a logged-out browser (expected: no):
 - Delete worked (text, photo):
+
+Run B - Live mode (switch the app mode toggle in the dashboard toolbar, then get a
+fresh Explorer token and rerun steps 01 to 06)
+
+- What the dashboard required before it allowed Live mode (privacy policy URL, data
+  deletion, category, icon, anything else):
+- Did the Explorer still grant `pages_manage_posts` without App Review (yes or no):
+- Text post published (yes, or the exact error):
+- Visible from a logged-out browser (yes or no):
+- Delete worked:
+
+Conclusion for Phase 1 (one of):
+
+- Live mode with Standard Access is enough. The brief stands.
+- App Review for `pages_manage_posts` is needed even for our own Page. Raise it:
+  Phase 1 then depends on App Review and probably Business Verification.
+
 - Errors met and how they were resolved:
 
 ## 2026-11-23 - OAuth connect flow for a self-hosted instance
