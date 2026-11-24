@@ -179,6 +179,7 @@ class PostPreconditions
         return match (true) {
             $channel->status === ChannelStatus::NeedsReconnect => self::text(':channel must be connected again before it can publish.', $name),
             $channel->status === ChannelStatus::Disconnected => self::text(':channel is disconnected.', $name),
+            $channel->status === ChannelStatus::Pending => self::text(':channel is waiting to be confirmed on the Channels page.', $name),
             $channel->tokenExpired() => self::text('The access to :channel has expired. Connect it again.', $name),
             default => self::text(':channel cannot publish right now.', $name),
         };

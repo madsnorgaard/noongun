@@ -45,6 +45,7 @@ describe('new post page', function () {
     it('offers the channels that can publish, with their limits', function (Role $role) {
         $reconnect = channelIn($this->workspace, ['display_name' => 'Bravo', 'status' => 'needs_reconnect']);
         channelIn($this->workspace, ['display_name' => 'Gone', 'status' => 'disconnected', 'access_token' => null]);
+        channelIn($this->workspace, ['display_name' => 'Unconfirmed', 'status' => 'pending']);
 
         $response = $this->actingAs(userWithRole($this->workspace, $role))->get(route('posts.create'));
 

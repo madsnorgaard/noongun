@@ -108,8 +108,9 @@ final class PostPresenter
     }
 
     /**
-     * The channels the editor offers: every channel that is not
-     * disconnected, and whatever the post already uses.
+     * The channels the editor offers: every channel that is neither
+     * disconnected nor waiting to be confirmed, and whatever the post
+     * already uses.
      *
      * @return list<array<string, mixed>>
      */
@@ -118,7 +119,7 @@ final class PostPresenter
         $used = $post?->variants->pluck('channel_id')->all() ?? [];
 
         return array_values(Channel::query()
-            ->where(fn ($query) => $query->where('status', '!=', ChannelStatus::Disconnected)->orWhereIn('id', $used))
+            ->where(fn ($query) => $query->whereNotIn('status', [ChannelStatus::Disconnected, ChannelStatus::Pending])->orWhereIn('id', $used))
             ->orderBy('platform')
             ->orderBy('display_name')
             ->get()

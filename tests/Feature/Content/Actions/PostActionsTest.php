@@ -13,6 +13,7 @@ use App\Domain\Content\Exceptions\PostActionNotAllowed;
 use App\Domain\Content\Exceptions\PostNotPublishable;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
+use App\Domain\Content\PostPreconditions;
 use App\Domain\Content\PostState;
 use App\Domain\Workspaces\Exceptions\CrossWorkspaceWrite;
 use App\Domain\Workspaces\Models\Workspace;
@@ -429,4 +430,11 @@ describe('RetryPost', function () {
 
         expect(freshPost($post)->state)->toBe($state);
     })->with([PostState::Draft, PostState::Approved, PostState::Scheduled, PostState::Publishing, PostState::Published, PostState::Rejected]);
+});
+
+it('names a channel that is waiting to be confirmed', function () {
+    $channel = Channel::factory()->pending()->make(['display_name' => 'Unconfirmed']);
+
+    expect(PostPreconditions::channelProblem($channel))
+        ->toBe('Unconfirmed is waiting to be confirmed on the Channels page.');
 });
