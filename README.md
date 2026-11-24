@@ -122,6 +122,35 @@ Two things to know when operating it:
   text "Publishing was interrupted before a result was recorded". Look at the
   channel before you retry it, or the post can appear twice.
 
+### Queue, calendar and editor
+
+- **Queue** (`/queue`) is the working list: drafts that wait for approval,
+  then approved and scheduled posts in time order, then posts that failed.
+  A draft can be approved or rejected right there, one at a time or as a
+  selection that you tick yourself. Nothing is ever ticked for you. Published
+  and rejected posts are under History.
+- **Calendar** (`/calendar`) shows a week or a month in the timezone of the
+  workspace. A draft or an approved post with a planned time is drawn with a
+  dashed outline: it is a plan and does not go out until it is scheduled.
+- **Editor** (`/posts/{id}`) is where a post is written: one text per channel,
+  an optional link and an optional planned time. It shows the characters that
+  are left for each channel and what stands in the way of approval.
+
+Times are entered and shown on the clock of the workspace and stored in UTC.
+
+A post can only be edited while it is a draft. To change an approved or
+scheduled post, return it to draft. That removes the approval, and the post
+must be approved again. Approving is refused when the post was changed after
+the page was opened, so that nobody approves a text they have not read.
+
+Only drafts and rejected posts can be deleted, and only when none of their
+texts is on a platform. Everything that is approved or later is kept, because
+it is, or is about to become, the record of something public. Deleting a post
+in Noon Gun never deletes anything from a platform. See
+`docs/adr/0010-post-editing-and-deletion.md`.
+
+Owners and editors write, approve, schedule and delete. Viewers can look.
+
 ## Running on a home server
 
 `./setup` gives a development stack: it mounts the source code and runs in debug
