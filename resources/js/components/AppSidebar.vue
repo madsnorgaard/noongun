@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { Link } from '@inertiajs/vue3';
-import { LayoutGrid, Share2 } from '@lucide/vue';
+import { CalendarDays, LayoutGrid, ListChecks, Share2 } from '@lucide/vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavMain from '@/components/NavMain.vue';
 import NavUser from '@/components/NavUser.vue';
@@ -14,7 +14,9 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
+import { index as calendar } from '@/routes/calendar';
 import { index as channels } from '@/routes/channels';
+import { index as queue } from '@/routes/queue';
 import type { NavItem } from '@/types';
 
 const mainNavItems: NavItem[] = [
@@ -22,6 +24,16 @@ const mainNavItems: NavItem[] = [
         title: 'Dashboard',
         href: dashboard(),
         icon: LayoutGrid,
+    },
+    {
+        title: 'Queue',
+        href: queue(),
+        icon: ListChecks,
+    },
+    {
+        title: 'Calendar',
+        href: calendar(),
+        icon: CalendarDays,
     },
     {
         title: 'Channels',
