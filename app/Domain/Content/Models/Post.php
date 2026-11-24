@@ -4,6 +4,7 @@ namespace App\Domain\Content\Models;
 
 use App\Domain\Content\Exceptions\ApprovalNotAllowed;
 use App\Domain\Content\Exceptions\IllegalPostTransition;
+use App\Domain\Content\Policies\PostPolicy;
 use App\Domain\Content\PostState;
 use App\Domain\Workspaces\Concerns\BelongsToWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
@@ -14,6 +15,7 @@ use DateTimeInterface;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
+use Illuminate\Database\Eloquent\Attributes\UsePolicy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -41,6 +43,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 #[Fillable(['scheduled_at'])]
 #[UseFactory(PostFactory::class)]
+#[UsePolicy(PostPolicy::class)]
 class Post extends Model
 {
     use BelongsToWorkspace;
