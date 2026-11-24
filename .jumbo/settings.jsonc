@@ -1,0 +1,43 @@
+{
+  // Stable project identity
+  "project": {
+    // Generated at project initialization and reused for project event streams
+    "id": "6935a3a7-32b0-472e-893a-8204afb42c55"
+  },
+
+  // Quality Assurance settings for goal completion
+  "qa": {
+    // Default turn limit for QA iterations on goal completion
+    // When this limit is reached, the goal is automatically completed
+    "defaultTurnLimit": 3
+  },
+
+  // Claim settings for goal ownership and concurrency control
+  "claims": {
+    // Duration in minutes that a goal claim remains valid
+    // After this duration, the claim expires and another worker can claim the goal
+    "claimDurationMinutes": 30
+  },
+
+  // Telemetry consent and anonymous identity settings
+  "telemetry": {
+    // Whether anonymous usage telemetry is enabled (opt-out model)
+    "enabled": true,
+    // Anonymous identifier used for telemetry events after consent
+    "anonymousId": "3a16b03d-e012-4e53-8702-f3bb254c0bd8",
+    // Whether the user has explicitly made a telemetry consent decision
+    "consentGiven": true
+  },
+
+  // TUI presentation preferences
+  "tui": {
+    // Whether the Cockpit launchpad welcome panel should be shown
+    "showLaunchpadWelcome": true
+  },
+
+  // Session workflow preferences
+  "session": {
+    // Maximum number of available backlog goals to include in session start
+    "backlogPreviewSize": 5
+  }
+}

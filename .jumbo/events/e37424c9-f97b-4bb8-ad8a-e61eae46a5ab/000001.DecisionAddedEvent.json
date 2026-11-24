@@ -1,0 +1,16 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "e37424c9-f97b-4bb8-ad8a-e61eae46a5ab",
+  "version": 1,
+  "timestamp": "2026-11-23T12:28:06.923Z",
+  "payload": {
+    "title": "LinkedIn self-serve products only until M9",
+    "context": "Community Management API requires a registered legal entity and allows no re-application; entity deferred to M9",
+    "rationale": "Apply once, with the right entity",
+    "alternatives": [
+      "Choose an entity early and apply now"
+    ],
+    "consequences": "M5 personal profiles only; M6 insights Facebook only; M7 must alert and offer reconnect for 60-day LinkedIn tokens; see docs/adr/0007"
+  },
+  "seq": 1
+}

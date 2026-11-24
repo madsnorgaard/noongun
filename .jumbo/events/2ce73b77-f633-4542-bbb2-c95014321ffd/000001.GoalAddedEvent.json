@@ -1,0 +1,25 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "2ce73b77-f633-4542-bbb2-c95014321ffd",
+  "version": 1,
+  "timestamp": "2026-11-23T10:50:44.334Z",
+  "payload": {
+    "title": "M10 Launch: public deployment and closed beta (#10)",
+    "objective": "Public hosted edition and closed beta.",
+    "successCriteria": [
+      "VPS behind Traefik v3, GitHub Actions deploys tagged images",
+      "Image identical to self-hosted",
+      "Status page",
+      "Terms, privacy policy, DPA",
+      "Content policy and abuse controls",
+      "Closed beta with feedback channel"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined",
+    "prerequisiteGoals": [
+      "ade9dca7-1e4e-4453-a593-ace066818f08"
+    ]
+  },
+  "seq": 1
+}

@@ -1,0 +1,93 @@
+name: noongun
+
+x-app: &app
+  build:
+    context: .
+    dockerfile: docker/app/Dockerfile
+    target: prod
+    args:
+      UID: ${NOONGUN_UID:-1000}
+      GID: ${NOONGUN_GID:-1000}
+  image: noongun-app:${NOONGUN_IMAGE_TAG:-latest}
+  env_file: .env
+  restart: unless-stopped
+  volumes:
+    - storage:/app/storage
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  app:
+    <<: *app
+    environment:
+      NOONGUN_ROLE: app
+    ports:
+      - "${NOONGUN_HTTP_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/up"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+
+  horizon:
+    <<: *app
+    command: ["php", "artisan", "horizon"]
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "php", "artisan", "horizon:status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      app:
+        condition: service_healthy
+
+  scheduler:
+    <<: *app
+    command: ["php", "artisan", "schedule:work"]
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "artisan schedule:work"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      app:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:19-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-noongun}
+      POSTGRES_USER: ${DB_USERNAME:-noongun}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD is not set. Run ./setup first.}
+    volumes:
+      - postgres:/var/lib/postgresql
+      - ./docker/postgres/create-testing-database.sh:/docker-entrypoint-initdb.d/10-create-testing-database.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:8.10-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  storage:
+  postgres:
+  redis:

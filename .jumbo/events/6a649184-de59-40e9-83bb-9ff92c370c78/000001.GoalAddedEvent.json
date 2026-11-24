@@ -1,0 +1,30 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "6a649184-de59-40e9-83bb-9ff92c370c78",
+  "version": 1,
+  "timestamp": "2026-11-23T10:46:10.296Z",
+  "payload": {
+    "title": "M1 Spike: publish to a Facebook Page (#1)",
+    "objective": "Prove with throwaway scripts in scripts/spike/ that Noon Gun can publish publicly visible text and photo posts to a Facebook Page we manage via the Graph API, and record findings in docs/platform-notes/meta.md. No application code.",
+    "successCriteria": [
+      "Meta app exists with Page publishing permissions; app mode recorded",
+      "Short-lived user token exchanged for long-lived; Page token derived",
+      "debug_token output for the Page token recorded (type, scopes, expiry)",
+      "One text post and one photo post published via the Graph API",
+      "Both posts visible from a logged-out browser",
+      "Both posts deleted via the API",
+      "No token or secret committed, printed or logged",
+      "meta.md records findings and differences from the brief"
+    ],
+    "scopeIn": [
+      "scripts/spike",
+      "docs/platform-notes"
+    ],
+    "scopeOut": [
+      "app"
+    ],
+    "status": "defined",
+    "branch": "chore/1-kickoff-docs-and-meta-spike"
+  },
+  "seq": 1
+}

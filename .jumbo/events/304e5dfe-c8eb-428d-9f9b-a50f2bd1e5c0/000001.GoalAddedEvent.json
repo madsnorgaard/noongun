@@ -1,0 +1,30 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "304e5dfe-c8eb-428d-9f9b-a50f2bd1e5c0",
+  "version": 1,
+  "timestamp": "2026-11-23T10:50:43.056Z",
+  "payload": {
+    "title": "M4 Draft: brief, pillars and Claude drafting (#4)",
+    "objective": "Brief-driven drafting with Claude through DraftGenerator, so a week of drafts can be reviewed and approved in one sitting.",
+    "successCriteria": [
+      "Versioned brief editor with voice rules as data",
+      "Pillars with weekly targets",
+      "PrismDraftGenerator behind DraftGenerator; model from config",
+      "Versioned Blade prompts; version stored on draft_run",
+      "Structured output validated; one retry then visible failure",
+      "Propose a week action",
+      "draft_runs record provider, model, tokens, cost",
+      "Instance and workspace keys supported, encrypted",
+      "Only brief and post content sent to the LLM",
+      "Tests use faked LLM responses",
+      "A week of drafts reviewed and approved in one sitting"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined",
+    "prerequisiteGoals": [
+      "473ede65-f4b3-42a8-84ba-2736114baa8d"
+    ]
+  },
+  "seq": 1
+}

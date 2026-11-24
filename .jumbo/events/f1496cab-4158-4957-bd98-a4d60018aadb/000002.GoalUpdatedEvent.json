@@ -1,0 +1,18 @@
+{
+  "type": "GoalUpdatedEvent",
+  "aggregateId": "f1496cab-4158-4957-bd98-a4d60018aadb",
+  "version": 2,
+  "timestamp": "2026-11-23T12:28:07.516Z",
+  "payload": {
+    "successCriteria": [
+      "linkedin.md findings confirmed in a LinkedIn spike (self-serve /rest/posts, sub as person id, permalink form)",
+      "LinkedIn adapter for personal profile posting via Share on LinkedIn and OpenID Connect",
+      "Link posts supply title, description and thumbnail since LinkedIn builds no preview",
+      "One idea produces one variant per channel within capabilities",
+      "Editor shows variants side by side",
+      "OpenAI selectable per workspace",
+      "Recorded LinkedIn fixtures and isolation tests"
+    ]
+  },
+  "seq": 2
+}

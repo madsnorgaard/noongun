@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "e460e88e-79ba-46e7-bb8f-f11a6c904fe0",
+  "version": 1,
+  "timestamp": "2026-11-23T10:46:09.263Z",
+  "payload": {
+    "title": "Vendor code stays behind our interfaces",
+    "description": "Controllers, jobs and UI never call the Graph API, LinkedIn API, Prism or a payment SDK directly; they call ChannelAdapter, DraftGenerator and BillingGateway.",
+    "rationale": "Platform rules and vendors change often; swaps must touch one folder."
+  },
+  "seq": 1
+}

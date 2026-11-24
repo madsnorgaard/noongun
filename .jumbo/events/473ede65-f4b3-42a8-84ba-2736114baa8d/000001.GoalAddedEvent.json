@@ -1,0 +1,30 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+  "version": 1,
+  "timestamp": "2026-11-23T10:50:42.850Z",
+  "payload": {
+    "title": "M3 Publish: Facebook adapter and scheduling (#3)",
+    "objective": "Manually written posts approved by a human are published to Facebook at their scheduled minute through an idempotent job.",
+    "successCriteria": [
+      "ChannelAdapter, ChannelCapabilities, PublishResult and ChannelManager",
+      "Facebook adapter with connect flow and Page selection",
+      "Channels with encrypted tokens and expiry",
+      "Posts and variants with the brief's state machine; only humans approve",
+      "Scheduler dispatches due posts every minute",
+      "Idempotent PublishPostJob with per-variant lock and external_id check",
+      "Test proves double dispatch never makes two platform calls",
+      "Queue, calendar and editor UI",
+      "Isolation tests for every new model",
+      "Graph API tests use Http::fake fixtures",
+      "Approved post goes out at its scheduled minute and shows its permalink"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined",
+    "prerequisiteGoals": [
+      "f4c1ba12-bb65-46e2-92b4-fa6633543d2c"
+    ]
+  },
+  "seq": 1
+}

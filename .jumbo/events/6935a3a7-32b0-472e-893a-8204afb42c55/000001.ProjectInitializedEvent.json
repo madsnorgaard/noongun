@@ -1,0 +1,11 @@
+{
+  "type": "ProjectInitializedEvent",
+  "aggregateId": "6935a3a7-32b0-472e-893a-8204afb42c55",
+  "version": 1,
+  "timestamp": "2026-11-23T10:45:23.520Z",
+  "payload": {
+    "name": "Noon Gun",
+    "purpose": "Self-hosted social publishing hub that drafts posts with an LLM from a maintained content brief, holds them for human approval, and publishes them on schedule to Facebook Pages and LinkedIn. Starts as a personal tool on a home server and grows into a low-priced multi-tenant SaaS for South African and international users."
+  },
+  "seq": 1
+}

@@ -1,0 +1,11 @@
+{
+  "type": "AudiencePainAddedEvent",
+  "aggregateId": "4799be0b-4a35-4cfa-9589-52103ff540d4",
+  "version": 1,
+  "timestamp": "2026-11-23T10:45:23.559Z",
+  "payload": {
+    "title": "Posting consistently takes time they do not have",
+    "description": "Existing schedulers start from an empty editor, are priced in dollars, and do too much"
+  },
+  "seq": 1
+}

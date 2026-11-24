@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+#
+# One-command setup for Noon Gun. Safe to run again at any time.
+#
+#   ./setup
+#
+# Set NOONGUN_HTTP_PORT before the first run to use another port than 8080:
+#
+#   NOONGUN_HTTP_PORT=8081 ./setup
+
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+say() { printf '\n==> %s\n' "$*"; }
+fail() { printf '\nsetup: %s\n' "$*" >&2; exit 1; }
+
+env_get() {
+    grep -E "^$1=" .env | tail -n 1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//'
+}
+
+env_set() {
+    if grep -qE "^$1=" .env; then
+        sed -i.bak -e "s|^$1=.*|$1=$2|" .env && rm -f .env.bak
+    else
+        printf '%s=%s\n' "$1" "$2" >> .env
+    fi
+}
+
+random_secret() {
+    LC_ALL=C tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 32
+}
+
+say "Checking Docker"
+command -v docker > /dev/null || fail "Docker is not installed. See https://docs.docker.com/get-docker/"
+docker compose version > /dev/null 2>&1 || fail "Docker Compose v2 is not available. Install the compose plugin."
+docker info > /dev/null 2>&1 || fail "Cannot talk to the Docker daemon. Is it running, and is your user allowed to use it?"
+
+say "Preparing .env"
+if [ ! -f .env ]; then
+    cp .env.example .env
+    port="${NOONGUN_HTTP_PORT:-8080}"
+    env_set NOONGUN_HTTP_PORT "$port"
+    env_set APP_URL "http://localhost:$port"
+    echo "Created .env from .env.example"
+else
+    echo ".env already exists, keeping it"
+fi
+
+[ "$(env_get NOONGUN_UID)" = "$(id -u)" ] || env_set NOONGUN_UID "$(id -u)"
+[ "$(env_get NOONGUN_GID)" = "$(id -g)" ] || env_set NOONGUN_GID "$(id -g)"
+if [ -z "$(env_get DB_PASSWORD)" ]; then
+    env_set DB_PASSWORD "$(random_secret)"
+    echo "Generated a database password"
+fi
+
+port="$(env_get NOONGUN_HTTP_PORT)"
+port="${port:-8080}"
+
+if [ -z "$(docker compose ps -q app 2> /dev/null)" ] && (exec 3<> "/dev/tcp/127.0.0.1/$port") 2> /dev/null; then
+    fail "Port $port is already in use. Set NOONGUN_HTTP_PORT and APP_URL in .env to a free port and run ./setup again."
+fi
+
+say "Building the application image"
+docker compose build app
+
+tool() {
+    docker compose run --rm --no-deps --entrypoint "" app "$@"
+}
+
+say "Installing PHP dependencies"
+tool composer install --no-interaction --prefer-dist
+
+if [ -z "$(env_get APP_KEY)" ]; then
+    say "Generating the application key"
+    tool php artisan key:generate --force --no-interaction
+fi
+
+say "Installing JavaScript dependencies and building assets"
+if [ ! -f node_modules/.package-lock.json ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
+    tool npm ci --no-audit --no-fund
+fi
+tool npm run build
+
+say "Starting containers and waiting for them to be healthy"
+docker compose up -d --wait app horizon scheduler postgres redis
+
+say "Running database migrations"
+docker compose exec -T app php artisan migrate --force --no-interaction
+
+cat << MSG
+
+Noon Gun is running at http://localhost:$port
+
+If this is the first run, open that address and complete the setup screen
+to create the owner account and the workspace.
+
+Day-to-day commands: ./dev help
+MSG

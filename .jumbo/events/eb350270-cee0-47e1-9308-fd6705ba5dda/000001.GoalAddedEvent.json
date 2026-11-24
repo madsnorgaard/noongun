@@ -1,0 +1,28 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "eb350270-cee0-47e1-9308-fd6705ba5dda",
+  "version": 1,
+  "timestamp": "2026-11-23T10:50:43.900Z",
+  "payload": {
+    "title": "M8 SaaS foundations (#8)",
+    "objective": "saas mode with registration, onboarding, entitlements, metering, bring-your-own-key and data rights, without changing self-hosted behaviour.",
+    "successCriteria": [
+      "saas mode with throttled registration",
+      "Onboarding flow",
+      "Entitlements service enforced; unlimited in self-hosted",
+      "Usage metering",
+      "Bring-your-own-key tier end to end",
+      "Data export and account deletion",
+      "Per-workspace rate limits",
+      "Transactional email",
+      "Same image still runs self-hosted unchanged"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined",
+    "prerequisiteGoals": [
+      "0e9912ec-c909-4961-a926-c60254a9feda"
+    ]
+  },
+  "seq": 1
+}

@@ -1,0 +1,26 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "f1496cab-4158-4957-bd98-a4d60018aadb",
+  "version": 1,
+  "timestamp": "2026-11-23T10:50:43.266Z",
+  "payload": {
+    "title": "M5 LinkedIn: adapter and second LLM provider (#5)",
+    "objective": "Personal LinkedIn posting with one variant per channel from one idea, and OpenAI selectable per workspace.",
+    "successCriteria": [
+      "linkedin.md confirms product for w_member_social, token lifetime, refresh behaviour",
+      "Community Management API application submitted",
+      "LinkedIn adapter for personal profile posting",
+      "One idea produces one variant per channel within capabilities",
+      "Editor shows variants side by side",
+      "OpenAI selectable per workspace",
+      "Recorded LinkedIn fixtures and isolation tests"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined",
+    "prerequisiteGoals": [
+      "304e5dfe-c8eb-428d-9f9b-a50f2bd1e5c0"
+    ]
+  },
+  "seq": 1
+}

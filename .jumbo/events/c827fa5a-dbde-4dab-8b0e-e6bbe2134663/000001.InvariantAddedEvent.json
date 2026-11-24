@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "c827fa5a-dbde-4dab-8b0e-e6bbe2134663",
+  "version": 1,
+  "timestamp": "2026-11-23T10:46:09.486Z",
+  "payload": {
+    "title": "No model names, API versions or prices in logic",
+    "description": "They live in config/noongun.php and environment variables.",
+    "rationale": "They change faster than releases."
+  },
+  "seq": 1
+}

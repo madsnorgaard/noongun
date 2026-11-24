@@ -1,0 +1,19 @@
+{
+  "type": "GoalUpdatedEvent",
+  "aggregateId": "ade9dca7-1e4e-4453-a593-ace066818f08",
+  "version": 2,
+  "timestamp": "2026-11-23T12:28:08.413Z",
+  "payload": {
+    "successCriteria": [
+      "Legal entity chosen (ADR 0005 closed)",
+      "BillingGateway with merchant of record, recorded as ADR",
+      "Plans as config, changes and cancellation via webhooks",
+      "Rand price list",
+      "Business verification completed",
+      "Meta App Review submitted with required materials",
+      "LinkedIn Community Management API applied for (single attempt) and company page posting and LinkedIn metrics enabled once approved",
+      "Webhook tests with fixtures"
+    ]
+  },
+  "seq": 2
+}

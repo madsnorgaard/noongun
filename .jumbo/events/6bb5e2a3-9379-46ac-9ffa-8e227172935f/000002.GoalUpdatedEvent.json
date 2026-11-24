@@ -1,0 +1,18 @@
+{
+  "type": "GoalUpdatedEvent",
+  "aggregateId": "6bb5e2a3-9379-46ac-9ffa-8e227172935f",
+  "version": 2,
+  "timestamp": "2026-11-23T12:28:07.805Z",
+  "payload": {
+    "objective": "Poll Facebook engagement metrics, summarise per post and pillar, and feed top posts into drafting. LinkedIn metrics wait for M9 (ADR 0007).",
+    "successCriteria": [
+      "FetchMetricsJob polls Facebook via ChannelAdapter within rate limits",
+      "metric_snapshots stored over time",
+      "Per-post and per-pillar summary in UI",
+      "Top posts included in DraftRequest",
+      "LinkedIn channels show that metrics are unavailable, without errors",
+      "Recorded fixtures and isolation tests"
+    ]
+  },
+  "seq": 2
+}

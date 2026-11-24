@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "be31df64-0809-4bd7-ad60-69ceae537cc0",
+  "version": 1,
+  "timestamp": "2026-11-23T10:46:08.649Z",
+  "payload": {
+    "title": "Nothing publishes without human approval",
+    "description": "A post reaches a platform only from the approved state, and only a human action sets that state. No auto-approve default.",
+    "rationale": "Publishing in the user's name without consent is the core trust failure of this product."
+  },
+  "seq": 1
+}

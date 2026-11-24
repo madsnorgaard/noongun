@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "e94a084b-89c4-4410-a552-864488b8dac3",
+  "version": 1,
+  "timestamp": "2026-11-23T10:46:08.866Z",
+  "payload": {
+    "title": "Every tenant row carries workspace_id",
+    "description": "Every tenant-owned table has workspace_id and every query is scoped by it, also in self-hosted mode. Each new model gets a test proving cross-workspace access fails.",
+    "rationale": "Retrofitting tenancy before Phase 3 SaaS is expensive and error prone."
+  },
+  "seq": 1
+}

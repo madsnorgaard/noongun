@@ -1,0 +1,17 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "78ed4393-bc7d-4ec8-aebb-983e695f6b16",
+  "version": 1,
+  "timestamp": "2026-11-23T10:55:07.631Z",
+  "payload": {
+    "title": "Licence AGPL-3.0",
+    "context": "Self-hosted plus hosted SaaS; brief 13.2 weighed AGPL vs MIT; repo started as Apache-2.0",
+    "rationale": "Hosted forks must share changes; allows learning from Postiz",
+    "alternatives": [
+      "MIT",
+      "Apache-2.0"
+    ],
+    "consequences": "See docs/adr/0002"
+  },
+  "seq": 1
+}

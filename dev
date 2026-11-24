@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+#
+# Short commands for working on Noon Gun. Run ./setup once first.
+#
+#   ./dev help
+
+set -euo pipefail
+
+cd "$(dirname "$0")"
+
+usage() {
+    cat << 'HELP'
+Usage: ./dev <command> [arguments]
+
+  up          Start the stack in the background
+  down        Stop the stack (data volumes are kept)
+  restart     Restart the app, horizon and scheduler containers
+  ps          Show container status
+  logs [svc]  Follow logs, for all services or one (app, horizon, scheduler, postgres, redis)
+  shell       Open a shell in the app container
+
+  test [args] Run the Pest test suite
+  lint        Check code style with Pint (no changes)
+  fix         Fix code style with Pint
+  stan        Run Larastan static analysis
+  check       Run lint, stan and test in that order
+
+  artisan ... Run an artisan command
+  composer .. Run a composer command
+  npm ...     Run an npm command
+  build       Build frontend assets once
+  vite        Run the Vite dev server with hot reload
+  migrate     Run database migrations
+  migrations  Check that all migrations run forwards and backwards (test database)
+HELP
+}
+
+in_app() {
+    if [ -n "$(docker compose ps -q --status running app 2> /dev/null)" ]; then
+        docker compose exec app "$@"
+    else
+        docker compose run --rm --no-deps --entrypoint "" app "$@"
+    fi
+}
+
+command="${1:-help}"
+shift || true
+
+case "$command" in
+    up) docker compose up -d --wait app horizon scheduler postgres redis ;;
+    down) docker compose down ;;
+    restart) docker compose restart app horizon scheduler ;;
+    ps) docker compose ps ;;
+    logs) docker compose logs -f --tail=100 "$@" ;;
+    shell) in_app sh ;;
+
+    test) in_app vendor/bin/pest "$@" ;;
+    lint) in_app vendor/bin/pint --test ;;
+    fix) in_app vendor/bin/pint ;;
+    stan) in_app vendor/bin/phpstan analyse --memory-limit=1G ;;
+    check)
+        in_app vendor/bin/pint --test
+        in_app vendor/bin/phpstan analyse --memory-limit=1G
+        in_app vendor/bin/pest
+        ;;
+
+    artisan) in_app php artisan "$@" ;;
+    composer) in_app composer "$@" ;;
+    npm) in_app npm "$@" ;;
+    build) in_app npm run build ;;
+    vite) docker compose --profile vite up vite ;;
+    migrate) in_app php artisan migrate "$@" ;;
+    migrations)
+        for step in "migrate:fresh" "migrate:reset" "migrate"; do
+            docker compose exec -e DB_DATABASE=noongun_testing app php artisan "$step" --force --no-interaction
+        done
+        ;;
+
+    help | -h | --help) usage ;;
+    *)
+        echo "Unknown command: $command" >&2
+        usage
+        exit 1
+        ;;
+esac
