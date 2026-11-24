@@ -102,25 +102,41 @@ Both can be run by hand, for example `./dev artisan noongun:dispatch-due-posts`.
 
 `PublishPostJob` runs in the `horizon` container. It sends each variant of
 the post once, under a lock for that variant, and never sends a variant that
-already has an id from its platform. It tries again only when the platform
-answers with an error that can pass (rate limit, outage), after the wait set
-in `NOONGUN_PUBLISH_BACKOFF`. Any other error fails the post at once. A failed
-post is only sent again when a person chooses to retry it, and then only the
-variants that are still missing are sent.
+already has an id from its platform. It tries again by itself only when the
+platform certainly made no post: it refused the call because of a rate limit,
+or the connection to it was never made. It then waits as set in
+`NOONGUN_PUBLISH_BACKOFF`. Every other error fails the post at once,
+including a timeout or a server error after the request was sent, because
+the post may be public by then. A failed post is only sent again when a
+person chooses to retry it, and then only the variants that are still missing
+are sent.
 
-Two things to know when operating it:
+Four things to know when operating it:
 
+- **Never retry a `PublishPostJob` by hand** with `queue:retry` or the retry
+  button in Horizon. A job that failed may have reached the platform, and the
+  way to send a post again is the retry button on the post, which a person
+  presses after looking at the channel. If someone does retry the job, nothing
+  happens: every run of the job takes a numbered step on the post row in the
+  database, each step is given out once, and a job whose step is taken does
+  nothing. Failed publishing jobs can be removed with `queue:flush` or
+  `queue:forget`.
 - The cache store holds the publishing locks, so it must be shared by all
-  workers. Keep `CACHE_STORE=redis` (or `database`); `array` and `file` are
-  not safe with more than one worker.
-- A publishing job is never run twice by the queue. Keep
-  `REDIS_QUEUE_RETRY_AFTER` (90 seconds by default) above the time limit of a
-  job, or the queue reports long jobs as failed while they are still running.
-  The post itself is not affected.
-- If a worker dies in the middle of a platform call, the post may be on the
-  platform without the app knowing. Such a post is marked as failed with the
-  text "Publishing was interrupted before a result was recorded". Look at the
-  channel before you retry it, or the post can appear twice.
+  workers. Keep `CACHE_STORE=redis` (or `database`). With `array`, `file` or
+  `null` the scheduler commands and the job refuse to run and say why, and
+  nothing is published until the store is changed.
+- `REDIS_QUEUE_RETRY_AFTER` (and `DB_QUEUE_RETRY_AFTER` for the database
+  queue) must be greater than the longest time limit of a publishing job,
+  which is `NOONGUN_PUBLISH_TIMEOUT` x `NOONGUN_PUBLISH_CALLS_PER_JOB` + 15
+  seconds. The defaults are 180 against 105. If it is lower, the queue hands
+  a job that is still running to a second worker; that copy does nothing, but
+  it is listed as a failed job.
+- If a worker dies in the middle of a platform call, or the platform does
+  not answer, the post may be public without the app knowing. The variant is
+  marked for that before the call is made, and the post ends as failed with
+  a text that says to check the channel. Look at the channel before you retry
+  the post, or it can appear twice. Such a post cannot be deleted, and the
+  channel in doubt cannot be removed from it.
 
 ### Queue, calendar and editor
 
@@ -250,7 +266,9 @@ Do not change `APP_KEY` on an instance that has data.
 | `NOONGUN_PUBLISH_MAX_ATTEMPTS` | `5` | How many times one variant is sent before the post is marked as failed. Only retryable errors are tried again. |
 | `NOONGUN_PUBLISH_BACKOFF` | `60,300,900,3600` | Seconds to wait before each retry, comma separated. The last value repeats. The largest value is also the longest wait a platform may ask for; a longer one fails the post. |
 | `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
-| `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Shortest lifetime of the lock on one variant. Must be longer than the timeout. The lock always outlives the time limit of the job that holds it. |
+| `NOONGUN_PUBLISH_CALLS_PER_JOB` | `3` | How many variants one run of the publishing job sends before it hands the rest to a successor. Bounds the time limit of a job; see "Publishing" for what the queue needs. |
+| `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Shortest lifetime of the lock on one variant. The lock always lives at least 30 seconds longer than the longest job. |
+| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `180` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of a publishing job. |
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
 
