@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Head } from '@inertiajs/vue3';
-import PlaceholderPattern from '@/components/PlaceholderPattern.vue';
+import { Head, usePage } from '@inertiajs/vue3';
+import { computed } from 'vue';
 import { dashboard } from '@/routes';
 
 defineOptions({
@@ -13,35 +13,42 @@ defineOptions({
         ],
     },
 });
+
+type Workspace = { id: number; name: string; timezone: string; locale: string };
+
+const page = usePage();
+const workspace = computed(() => page.props.workspace as Workspace | null);
+
+const localTime = computed(() => {
+    if (!workspace.value) {
+        return null;
+    }
+
+    return new Intl.DateTimeFormat(undefined, {
+        dateStyle: 'full',
+        timeStyle: 'short',
+        timeZone: workspace.value.timezone,
+    }).format(new Date());
+});
 </script>
 
 <template>
     <Head title="Dashboard" />
 
-    <div
-        class="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4"
-    >
-        <div class="grid auto-rows-min gap-4 md:grid-cols-3">
-            <div
-                class="relative aspect-video overflow-hidden rounded-xl border border-sidebar-border/70 dark:border-sidebar-border"
-            >
-                <PlaceholderPattern />
-            </div>
-            <div
-                class="relative aspect-video overflow-hidden rounded-xl border border-sidebar-border/70 dark:border-sidebar-border"
-            >
-                <PlaceholderPattern />
-            </div>
-            <div
-                class="relative aspect-video overflow-hidden rounded-xl border border-sidebar-border/70 dark:border-sidebar-border"
-            >
-                <PlaceholderPattern />
-            </div>
-        </div>
-        <div
-            class="relative min-h-[100vh] flex-1 rounded-xl border border-sidebar-border/70 md:min-h-min dark:border-sidebar-border"
-        >
-            <PlaceholderPattern />
-        </div>
+    <div class="flex flex-1 flex-col gap-6 p-4">
+        <section v-if="workspace" class="grid gap-1 text-sm">
+            <h1 class="text-lg font-medium">{{ workspace.name }}</h1>
+            <p class="text-muted-foreground">
+                {{ workspace.timezone }} - {{ localTime }}
+            </p>
+        </section>
+
+        <section class="rounded-md border p-4 text-sm">
+            <h2 class="font-medium">Queue</h2>
+            <p class="mt-1 text-muted-foreground">
+                Nothing is scheduled yet. Channels and posts arrive in a later
+                milestone.
+            </p>
+        </section>
     </div>
 </template>
