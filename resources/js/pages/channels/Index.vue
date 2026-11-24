@@ -210,7 +210,9 @@ function access(channel: Channel): string {
                         <th class="px-3 py-2 font-normal">Platform</th>
                         <th class="px-3 py-2 font-normal">Status</th>
                         <th class="px-3 py-2 font-normal">Access</th>
-                        <th class="px-3 py-2"></th>
+                        <th class="px-3 py-2">
+                            <span class="sr-only">Actions</span>
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
