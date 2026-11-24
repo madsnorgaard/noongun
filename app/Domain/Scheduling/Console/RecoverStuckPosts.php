@@ -4,8 +4,10 @@ namespace App\Domain\Scheduling\Console;
 
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\PostState;
+use App\Domain\Scheduling\Exceptions\LockStoreNotShared;
 use App\Domain\Scheduling\PublishingConfig;
 use App\Domain\Scheduling\SettleInterruptedPost;
+use App\Domain\Scheduling\VariantLock;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
 use Illuminate\Console\Command;
@@ -14,7 +16,7 @@ use Throwable;
 /**
  * Finds posts that have been in the publishing state for too long without a
  * sign of life from their job (posts.updated_at, set by the claim and by
- * each attempt) and settles them. See SettleInterruptedPost: nothing is sent
+ * each run of the job when it takes its step) and settles them. See SettleInterruptedPost: nothing is sent
  * again, a post with every variant out becomes published, any other becomes
  * failed and waits for a human.
  */
@@ -26,6 +28,14 @@ class RecoverStuckPosts extends Command
 
     public function handle(CurrentWorkspace $currentWorkspace, SettleInterruptedPost $settle): int
     {
+        try {
+            VariantLock::assertStoreIsShared();
+        } catch (LockStoreNotShared $e) {
+            $this->error($e->getMessage());
+
+            return self::FAILURE;
+        }
+
         $silentSince = now()->subSeconds(PublishingConfig::stuckAfterSeconds());
         $settled = 0;
         $errors = 0;

@@ -8,6 +8,9 @@ namespace App\Domain\Scheduling;
  */
 final class PublishingConfig
 {
+    /** Seconds on top of the platform calls for a job's own work. */
+    public const JOB_SLACK_SECONDS = 15;
+
     public static function queue(): string
     {
         $queue = config('noongun.publishing.queue');
@@ -50,9 +53,41 @@ final class PublishingConfig
         return self::int('timeout', 30, 1);
     }
 
+    /**
+     * How many variants one run of the job sends before it hands the rest
+     * to a successor.
+     */
+    public static function callsPerJob(): int
+    {
+        return self::int('calls_per_job', 3, 1);
+    }
+
+    /**
+     * The time limit of a job that may send $calls variants: the platform
+     * calls plus a margin for the job's own work.
+     */
+    public static function jobSeconds(int $calls): int
+    {
+        return self::timeout() * min(max($calls, 1), self::callsPerJob()) + self::JOB_SLACK_SECONDS;
+    }
+
+    /**
+     * The longest time limit any publishing job can have. The retry_after
+     * of the queue connection must be above this, or the queue hands a job
+     * that is still running to a second worker.
+     */
+    public static function longestJobSeconds(): int
+    {
+        return self::jobSeconds(self::callsPerJob());
+    }
+
+    /**
+     * How long the lock on a variant lives at least. Never shorter than the
+     * longest job, so a lock cannot expire while its holder is alive.
+     */
     public static function lockSeconds(): int
     {
-        return max(self::int('lock_seconds', 120, 1), self::timeout() + 1);
+        return max(self::int('lock_seconds', 120, 1), self::longestJobSeconds() + 30);
     }
 
     /**

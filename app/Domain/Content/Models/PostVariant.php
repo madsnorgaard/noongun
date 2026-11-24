@@ -25,8 +25,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * failed when error is set, and waiting otherwise. Content (body, link, utm,
  * channel) can only change while the post is a draft and the variant is not
  * published. The outcome columns (external_id, permalink, published_at,
- * error) are not fillable and are written only by markPublished() and
- * markFailed().
+ * error, outcome_unknown_since) are not fillable and are written only by
+ * beginAttempt(), markPublished(), markRefused() and markFailed().
+ *
+ * outcome_unknown_since is the durable record of "this may be public without
+ * the app knowing". It is set before a platform is called and cleared only
+ * when the platform certainly made no post or the result is recorded. A
+ * variant that carries it cannot be deleted or moved to another channel.
  *
  * @property int $id
  * @property int $workspace_id
@@ -39,6 +44,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property string|null $permalink
  * @property CarbonImmutable|null $published_at
  * @property string|null $error
+ * @property CarbonImmutable|null $outcome_unknown_since
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  * @property-read Post|null $post
@@ -55,7 +61,7 @@ class PostVariant extends Model
 
     private const CONTENT = ['channel_id', 'body', 'link', 'utm'];
 
-    private const OUTCOME = ['external_id', 'permalink', 'published_at', 'error'];
+    private const OUTCOME = ['external_id', 'permalink', 'published_at', 'error', 'outcome_unknown_since'];
 
     protected static function booted(): void
     {
@@ -68,12 +74,20 @@ class PostVariant extends Model
                 throw PostNotEditable::movedToAnotherPost($variant);
             }
 
+            if ($variant->exists && $variant->isDirty('channel_id') && $variant->getOriginal('outcome_unknown_since') !== null) {
+                throw PostNotEditable::outcomeUnknown($variant);
+            }
+
             if (! $variant->exists || $variant->isDirty(self::CONTENT)) {
                 $variant->guardEditable();
             }
         });
 
         static::deleting(function (PostVariant $variant): void {
+            if ($variant->getOriginal('outcome_unknown_since') !== null) {
+                throw PostNotEditable::outcomeUnknown($variant);
+            }
+
             $variant->guardEditable();
         });
     }
@@ -86,6 +100,7 @@ class PostVariant extends Model
         return [
             'utm' => 'array',
             'published_at' => 'datetime',
+            'outcome_unknown_since' => 'datetime',
         ];
     }
 
@@ -125,6 +140,63 @@ class PostVariant extends Model
     }
 
     /**
+     * True when a platform was called for this variant and nothing says how
+     * that ended: the post may be public. Such a variant is kept, with its
+     * error text, until a publish succeeds.
+     */
+    public function hasUnknownOutcome(): bool
+    {
+        return ! $this->isPublished() && $this->outcome_unknown_since !== null;
+    }
+
+    /**
+     * Call this, inside the variant's lock, immediately before the platform
+     * is called. From here until markPublished() or markRefused() the
+     * outcome counts as unknown, also if the process dies.
+     *
+     * Returns true when this call set the mark, false when an earlier
+     * attempt had already left it. Only the caller that set it may clear it
+     * with markRefused().
+     *
+     * @throws VariantAlreadyPublished
+     */
+    public function beginAttempt(): bool
+    {
+        static::guardWorkspace($this);
+
+        $marked = static::query()
+            ->whereKey($this->getKey())
+            ->whereNull('external_id')
+            ->whereNull('outcome_unknown_since')
+            ->update(['outcome_unknown_since' => now()]) === 1;
+
+        $this->refresh();
+
+        if ($this->isPublished()) {
+            throw VariantAlreadyPublished::for($this);
+        }
+
+        return $marked;
+    }
+
+    /**
+     * Records a failure after which the platform certainly holds no post
+     * from this attempt (it answered with a refusal), and clears the mark
+     * that beginAttempt() set. Does nothing to a variant that is published.
+     */
+    public function markRefused(string $error): static
+    {
+        static::guardWorkspace($this);
+
+        static::query()
+            ->whereKey($this->getKey())
+            ->whereNull('external_id')
+            ->update(['error' => ChannelException::redact($error), 'outcome_unknown_since' => null]);
+
+        return $this->refresh();
+    }
+
+    /**
      * Records a successful publish and clears any earlier error. One UPDATE
      * that only matches while external_id is still empty, so a second result
      * for the same variant can never overwrite the first.
@@ -143,6 +215,7 @@ class PostVariant extends Model
                 'permalink' => $result->permalink,
                 'published_at' => $result->publishedAt,
                 'error' => null,
+                'outcome_unknown_since' => null,
             ]);
 
         $this->refresh();
@@ -156,7 +229,8 @@ class PostVariant extends Model
 
     /**
      * Records why the last publish attempt failed. The text is redacted
-     * before it is stored. Does nothing to a variant that is published.
+     * before it is stored. Does nothing to a variant that is published, and
+     * leaves the mark of an unknown outcome as it is.
      */
     public function markFailed(string $error): static
     {

@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Facades\DB;
 
 /**
  * The cross-channel unit: one post, one variant per channel.
@@ -37,6 +38,8 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property CarbonImmutable|null $scheduled_at
  * @property int|null $approved_by
  * @property CarbonImmutable|null $approved_at
+ * @property int $publish_round
+ * @property int $publish_step
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  * @property-read Workspace|null $workspace
@@ -52,7 +55,7 @@ class Post extends Model
     use HasFactory;
 
     /** Attributes that only the transition methods may change. */
-    private const GUARDED_BY_TRANSITIONS = ['state', 'approved_by', 'approved_at'];
+    private const GUARDED_BY_TRANSITIONS = ['state', 'approved_by', 'approved_at', 'publish_round', 'publish_step'];
 
     /** @var array<string, mixed> */
     protected $attributes = [
@@ -215,21 +218,60 @@ class Post extends Model
 
     /**
      * scheduled -> publishing, for the scheduler. Returns false, without
-     * throwing, when the post is not scheduled or another process claimed it
-     * first: exactly one caller ever gets true for one scheduling.
+     * throwing, when the post is not scheduled, another process claimed it
+     * first, or its time has not come: exactly one caller ever gets true for
+     * one scheduling.
+     *
+     * The time is checked again in the same UPDATE, so a post that a human
+     * moved to a later time after the scheduler read it is not sent now.
+     * Pass the time the due posts were queried with.
+     *
+     * Every claim starts a new round of publishing: publish_round goes up by
+     * one and publish_step starts again at zero.
      */
-    public function claimForPublishing(): bool
+    public function claimForPublishing(?DateTimeInterface $now = null): bool
     {
         static::guardWorkspace($this);
 
         $claimed = static::query()
             ->whereKey($this->getKey())
             ->where('state', PostState::Scheduled)
-            ->update(['state' => PostState::Publishing]) === 1;
+            ->where('scheduled_at', '<=', $now ?? now())
+            ->update([
+                'state' => PostState::Publishing,
+                'publish_round' => DB::raw('publish_round + 1'),
+                'publish_step' => 0,
+            ]) === 1;
 
         $this->refresh();
 
         return $claimed;
+    }
+
+    /**
+     * Takes step number $step of round $round for one run of the publishing
+     * job. Returns true exactly once for each round and step, however often
+     * and from however many processes it is called, and only while the post
+     * is publishing with an approval. A job that gets false must do nothing:
+     * it has run before, it belongs to another round, or it skipped a step.
+     *
+     * Also the sign of life the recovery of stuck posts looks at.
+     */
+    public function beginPublishingStep(int $round, int $step): bool
+    {
+        static::guardWorkspace($this);
+
+        $taken = static::query()
+            ->whereKey($this->getKey())
+            ->where('state', PostState::Publishing)
+            ->whereNotNull('approved_at')
+            ->where('publish_round', $round)
+            ->where('publish_step', $step - 1)
+            ->update(['publish_step' => $step]) === 1;
+
+        $this->refresh();
+
+        return $taken;
     }
 
     /**

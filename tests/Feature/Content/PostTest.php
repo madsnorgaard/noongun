@@ -309,6 +309,7 @@ describe('transitions', function () {
 describe('claiming for publishing', function () {
     it('gives the claim to exactly one of two processes', function () {
         $post = postIn(PostState::Scheduled);
+        $this->travel(2)->hours();
         $sameRowElsewhere = inWorkspace($this->workspace, fn () => Post::findOrFail($post->id));
 
         inWorkspace($this->workspace, function () use ($post, $sameRowElsewhere) {
@@ -327,8 +328,85 @@ describe('claiming for publishing', function () {
             ->and($post->state)->toBe($state);
     })->with([PostState::Draft, PostState::Approved, PostState::Publishing, PostState::Published, PostState::Failed, PostState::Rejected]);
 
+    it('does not claim a post before its time, and checks the time in the claim itself', function () {
+        $post = postIn(PostState::Scheduled);
+        $scheduledAt = $post->scheduled_at;
+
+        inWorkspace($this->workspace, function () use ($post, $scheduledAt) {
+            expect($post->claimForPublishing())->toBeFalse()
+                ->and($post->claimForPublishing($scheduledAt->subSecond()))->toBeFalse()
+                ->and($post->state)->toBe(PostState::Scheduled)
+                ->and($post->claimForPublishing($scheduledAt))->toBeTrue()
+                ->and($post->state)->toBe(PostState::Publishing);
+        });
+    });
+
+    it('does not claim a post that was moved to a later time after it was read', function () {
+        $post = postIn(PostState::Scheduled);
+        $this->travel(2)->hours();
+        $now = now();
+
+        inWorkspace($this->workspace, function () use ($post, $now) {
+            $stale = Post::findOrFail($post->id);
+            $post->schedule($now->addWeek());
+
+            expect($stale->claimForPublishing($now))->toBeFalse()
+                ->and($stale->state)->toBe(PostState::Scheduled)
+                ->and($stale->scheduled_at->toDateTimeString())->toBe($now->addWeek()->toDateTimeString());
+        });
+    });
+
+    it('starts a new round with every claim and gives each step of a round out once', function () {
+        $post = postIn(PostState::Scheduled);
+        $this->travel(2)->hours();
+
+        inWorkspace($this->workspace, function () use ($post) {
+            expect($post->publish_round)->toBe(0)
+                ->and($post->beginPublishingStep(0, 1))->toBeFalse();
+
+            $post->claimForPublishing();
+            $elsewhere = Post::findOrFail($post->id);
+
+            expect($post->publish_round)->toBe(1)
+                ->and($post->publish_step)->toBe(0)
+                ->and($post->beginPublishingStep(1, 2))->toBeFalse()
+                ->and($post->beginPublishingStep(2, 1))->toBeFalse()
+                ->and($post->beginPublishingStep(1, 1))->toBeTrue()
+                ->and($elsewhere->beginPublishingStep(1, 1))->toBeFalse()
+                ->and($post->beginPublishingStep(1, 1))->toBeFalse()
+                ->and($post->beginPublishingStep(1, 2))->toBeTrue()
+                ->and($post->publish_step)->toBe(2);
+
+            $post->finishPublishing();
+
+            expect($post->beginPublishingStep(1, 3))->toBeFalse();
+
+            // A retry at the very same time is still a new round.
+            $post->retry($post->scheduled_at);
+            $post->claimForPublishing();
+
+            expect($post->publish_round)->toBe(2)
+                ->and($post->publish_step)->toBe(0)
+                ->and($post->beginPublishingStep(1, 1))->toBeFalse()
+                ->and($post->beginPublishingStep(2, 1))->toBeTrue();
+        });
+    });
+
+    it('does not let the round or the step be written directly', function () {
+        $post = postIn(PostState::Scheduled);
+
+        inWorkspace($this->workspace, function () use ($post) {
+            $post->publish_round = 7;
+            expect(fn () => $post->save())->toThrow(IllegalPostTransition::class);
+
+            $post->refresh()->publish_step = 3;
+            expect(fn () => $post->save())->toThrow(IllegalPostTransition::class);
+        });
+    });
+
     it('fails a transition when another process moved the post first', function () {
         $post = postIn(PostState::Scheduled);
+        $this->travel(2)->hours();
         $stale = inWorkspace($this->workspace, fn () => Post::findOrFail($post->id));
 
         inWorkspace($this->workspace, function () use ($post, $stale) {
