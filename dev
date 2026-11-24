@@ -31,6 +31,7 @@ Usage: ./dev <command> [arguments]
   build       Build frontend assets once
   vite        Run the Vite dev server with hot reload
   migrate     Run database migrations
+  migrations  Check that all migrations run forwards and backwards (test database)
 HELP
 }
 
@@ -69,6 +70,11 @@ case "$command" in
     build) in_app npm run build ;;
     vite) docker compose --profile vite up vite ;;
     migrate) in_app php artisan migrate "$@" ;;
+    migrations)
+        for step in "migrate:fresh" "migrate:reset" "migrate"; do
+            docker compose exec -e DB_DATABASE=noongun_testing app php artisan "$step" --force --no-interaction
+        done
+        ;;
 
     help | -h | --help) usage ;;
     *)
