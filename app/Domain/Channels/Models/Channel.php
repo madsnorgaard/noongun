@@ -3,6 +3,7 @@
 namespace App\Domain\Channels\Models;
 
 use App\Domain\Channels\ChannelStatus;
+use App\Domain\Channels\Policies\ChannelPolicy;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\Concerns\BelongsToWorkspace;
 use Carbon\CarbonImmutable;
@@ -10,6 +11,7 @@ use Database\Factories\ChannelFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
+use Illuminate\Database\Eloquent\Attributes\UsePolicy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -36,6 +38,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable(['platform', 'external_id', 'display_name', 'access_token', 'refresh_token', 'token_expires_at', 'scopes', 'status'])]
 #[Hidden(['access_token', 'refresh_token'])]
 #[UseFactory(ChannelFactory::class)]
+#[UsePolicy(ChannelPolicy::class)]
 class Channel extends Model
 {
     use BelongsToWorkspace;
