@@ -194,6 +194,45 @@ is not an environment setting.
 Other settings (timezone list, locales, plan limits, feature flags, the list
 of platforms and their adapters) live in `config/noongun.php`.
 
+## Connecting a Facebook Page
+
+Each instance connects through a Meta app that its owner creates. The app
+needs no review as long as only people with a role on it use it.
+`docs/platform-notes/meta.md` has the full checklist for creating the app; the
+short version:
+
+1. Create the app at developers.facebook.com with the use case **Manage
+   everything on your Page** and add the permissions listed in
+   `FACEBOOK_SCOPES`.
+2. In the app, under **Facebook Login for Business > Settings** (or **Facebook
+   Login > Settings**), add this address to **Valid OAuth Redirect URIs**:
+
+   ```
+   <APP_URL>/auth/facebook/callback
+   ```
+
+   Meta compares the address character by character, so it must match
+   `APP_URL` exactly, including `https` and any port. The Channels page shows
+   the address this instance uses. If `APP_URL` changes, change it in the app
+   as well. Meta requires HTTPS; plain `http://localhost` is accepted only
+   while the app is in Development mode.
+3. Put the App ID and App secret in `.env` as `FACEBOOK_APP_ID` and
+   `FACEBOOK_APP_SECRET`, then restart with `docker compose up -d`.
+4. Open **Channels** in Noon Gun and choose **Connect Facebook**. Sign in,
+   pick the Pages and allow every permission that is asked for. If you grant
+   more than one Page, Noon Gun asks which ones to keep and erases the access
+   to the others.
+
+Noon Gun stores one access token for each connected Page, encrypted with
+`APP_KEY`. It does not store your own Facebook token. A Page token has no
+expiry date, but Facebook withdraws it when you change your password, lose
+your role on the Page or remove the app. The channel then shows **Needs
+reconnecting**; choose **Connect again**. **Disconnect** erases the token and
+keeps the history of what was published.
+
+Owners and editors of a workspace can connect and disconnect channels. Viewers
+can only see them.
+
 ## Tests
 
 The Pest suite runs against the `noongun_testing` database, which the

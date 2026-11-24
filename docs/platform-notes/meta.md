@@ -262,3 +262,121 @@ pages cited above; the spike must check them against the live dashboard.
 4. **`config_id` versus `scope`.** Not in the brief. Meta recommends `config_id` for
    Facebook Login for Business. We plan to use `scope` unless the spike shows it is
    refused.
+
+## 2026-11-24 - Facebook adapter for M3
+
+What was checked again in Meta's documentation while building
+`App\Domain\Channels\Adapters\Facebook\FacebookAdapter`, and what was decided.
+The spike has still not been run: nothing below is confirmed against the real API.
+`tests/Fixtures/facebook/README.md` lists every response shape the tests assume.
+
+### Verified in the documentation
+
+**Read-after-write.** `POST /{page-id}/feed` "supports read-after-write and can
+immediately return any fields returned by read operations": adding
+`fields=id,permalink_url` to the POST would return the permalink in the same call. "If
+the read fails for any reason ... the Graph API will respond with a standard error
+response."
+Sources: developers.facebook.com/docs/graph-api/reference/page/feed,
+developers.facebook.com/docs/graph-api/overview
+
+**`permalink_url` exists.** The Page Post reference lists it: "The permanent static URL
+to the post on www.facebook.com." The posts guide still gives
+`https://www.facebook.com/{page_post_id}` as the permalink. This answers half of the
+earlier open point; whether the two addresses differ is for the spike.
+Source: developers.facebook.com/docs/graph-api/reference/page-post
+
+**Permissions for publishing.** The feed reference lists exactly the three scopes in the
+brief: `pages_manage_posts`, `pages_read_engagement`, `pages_show_list`, with a Page
+token from someone who can perform the `CREATE_CONTENT` task. The posts guide lists a
+longer set (difference 1 above). The adapter requests the three, from
+`FACEBOOK_SCOPES`.
+
+**No body length in the API documentation.** Neither the posts guide nor the feed
+reference gives a limit for `message`. "Either link or message must be supplied."
+
+**Errors.** The envelope is `error.message`, `type`, `code`, `error_subcode`,
+`error_user_title`, `error_user_msg`, `fbtrace_id`. Codes: 1 unknown (retry), 2 service
+(retry), 4 and 17 throttling, 10 and 200 to 299 permission, 102 session, 190 token
+expired, 341 application limit, 368 temporarily blocked for policy violations, 506
+duplicate post, 1609005 link could not be read. Subcodes 458, 459, 460, 463, 464, 467
+and 492 all mean the token or the user's access is no longer good. The guide does not
+give HTTP status codes and does not mention `is_transient`.
+Source: developers.facebook.com/docs/graph-api/guides/error-handling
+
+**Rate limits.** Calls with a Page token fall under business use case limits: "Calls
+within 24 hours = 4800 * Number of Engaged Users", where engaged users are those who
+engaged with the Page in 24 hours. Codes 4, 17, 32, 613 and 80000 to 80014 (80001 for
+Pages). The `X-Business-Use-Case-Usage` header carries
+`estimated_time_to_regain_access` in minutes.
+Source: developers.facebook.com/docs/graph-api/overview/rate-limiting
+
+**Page tokens.** "Long-lived Page access token do not have an expiration date and only
+expire or are invalidated under certain conditions." There is no call that renews one.
+Source: developers.facebook.com/docs/facebook-login/guides/access-tokens/get-long-lived
+
+**Denied consent.** The browser comes back with `error=access_denied`,
+`error_reason=user_denied` and `error_description`. `state` is returned unchanged.
+Source: developers.facebook.com/docs/facebook-login/guides/advanced/manual-flow
+
+### Decisions
+
+1. **Publishing does not use read-after-write yet.** `publish()` sends `message` and
+   `link` only, reads `id` from the answer and builds the permalink as
+   `{FACEBOOK_DIALOG_URL}/{id}`, which is the form the posts guide documents. Reason:
+   the documentation does not say whether a post stays published when the read part
+   fails. If it does, the adapter would see an error for a post that is public, and a
+   retry would publish it twice, which is the one failure this system must not have.
+   The spike should make one POST with `fields=id,permalink_url` and one with a field
+   that does not exist, and record what happens to the post. If a failed read never
+   leaves a post behind, switch to read-after-write.
+2. **Only Page tokens are stored.** The short-lived and long-lived user tokens are
+   used during `connect()` and dropped. `refresh_token` stays empty for Facebook.
+3. **Expiry and scopes come from `debug_token`.** `connect()` inspects each Page token
+   with the app token and stores `expires_at` (`0` becomes no expiry) and `scopes`. If
+   a scope from `FACEBOOK_SCOPES` is missing, nothing is saved and the user is told
+   which permission to allow. This depends on `scopes` being filled for a Page token,
+   which the spike prints in step 02.
+4. **`refreshToken()` checks, it does not renew.** It calls `debug_token`, updates
+   expiry and scopes, and marks the channel as needing a reconnect when the token is
+   invalid, expired or has lost a scope. A failed check (rate limit, outage) changes
+   nothing. A channel that needs a reconnect becomes active again only by connecting.
+5. **Pages the user cannot publish to are not connected.** A Page whose `tasks` lacks
+   `CREATE_CONTENT` is skipped. If `tasks` is absent the Page is kept.
+6. **`/me/accounts` paging.** The adapter asks for 100 Pages at a time and continues
+   with `paging.cursors.after` while `paging.next` is present. It never requests
+   `paging.next` itself, because that URL holds the user token.
+7. **`scope`, not `config_id`,** as recommended above, plus `auth_type=rerequest` so
+   that a permission declined earlier is asked for again.
+8. **Redirect address.** `{APP_URL}/auth/facebook/callback`, built from `APP_URL` and
+   not from the request, because Meta compares it exactly. The Channels page shows it.
+9. **`appsecret_proof`** is sent on every call that carries a user or Page token. It
+   is not sent with the app token on `debug_token`, as in the spike scripts.
+10. **Error mapping** (`GraphClient`). Reconnect: codes 102, 190, 10, 200 to 299 and
+    the subcodes listed above. Retry: codes 1, 2, 4, 17, 32, 341, 613, 80000 to 80014,
+    HTTP 429, any 5xx and network failures, with the wait from
+    `X-Business-Use-Case-Usage` or `Retry-After` when given. Everything else is
+    permanent, including 368: Meta says to wait and retry, but a policy block should
+    be looked at by a person and not retried by a job. A 2xx answer that cannot be read,
+    or that has no post id, is permanent as well, because the post may be public.
+11. **Capabilities.** Body: 63,206 characters. This is not in the Graph API
+    documentation; it is the limit Facebook announced for posts in 2011 and is still
+    widely reported. Setting `max_body_length` in the `facebook` entry of
+    `config/noongun.php` replaces it. Media: none, because photo posts are not part of
+    M3. Link previews: yes. Rate limit: 4800 calls in 24 hours, which is the documented
+    formula at one engaged user; the real limit is higher for a Page with an audience.
+12. **UTM values** on a variant are added to the link by the adapter when it
+    publishes. A value already on the link is kept.
+
+### Open questions for the spike
+
+- Does a failed read-after-write leave the post published (decision 1)?
+- Does `debug_token` return the granted permissions in `scopes` for a Page token, and
+  `expires_at` `0` (decision 3)?
+- Does a network timeout on `POST /{page-id}/feed` ever follow a post that was
+  created? The adapter reports timeouts as retryable, as the brief asks. Meta
+  documents no idempotency key for this call. ADR 0009 leaves this case to M7.
+- Which HTTP status do Graph errors carry? The mapping uses the error code first, so
+  only 429 and 5xx without a readable body depend on it.
+- Does `data_access_expires_at` (about 90 days on the token) stop a Page token from
+  publishing when it passes? If so it must be stored and shown as the expiry.
