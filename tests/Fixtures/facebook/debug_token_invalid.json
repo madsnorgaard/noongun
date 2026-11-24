@@ -1,0 +1,16 @@
+{
+    "data": {
+        "app_id": "test-app-id",
+        "type": "PAGE",
+        "application": "Noon Gun test",
+        "error": {
+            "code": 190,
+            "message": "Error validating access token: The session has been invalidated because the user changed their password or Facebook has changed the session for security reasons.",
+            "subcode": 460
+        },
+        "expires_at": 0,
+        "is_valid": false,
+        "scopes": [],
+        "user_id": "200000000000001"
+    }
+}

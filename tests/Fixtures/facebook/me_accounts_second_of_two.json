@@ -1,0 +1,18 @@
+{
+    "data": [
+        {
+            "access_token": "test-page-token-harbour-books",
+            "category": "Bookshop",
+            "category_list": [{"id": "197048876974331", "name": "Bookshop"}],
+            "name": "Harbour Books",
+            "id": "100000000000002",
+            "tasks": ["ANALYZE", "CREATE_CONTENT", "MODERATE"]
+        }
+    ],
+    "paging": {
+        "cursors": {
+            "before": "QVFIUtestSecondPage",
+            "after": "QVFIUtestEnd"
+        }
+    }
+}
