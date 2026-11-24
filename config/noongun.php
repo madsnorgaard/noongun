@@ -85,7 +85,8 @@ return [
     | "lock_seconds" is how long the lock on one variant is held at most, and
     | must be longer than "timeout", the limit for one platform call.
     | "stuck_after_minutes" is how long a post may stay in the publishing
-    | state before it is treated as failed.
+    | state without a sign of life from its job before it is treated as
+    | failed. The largest backoff is added to it.
     */
 
     'publishing' => [
