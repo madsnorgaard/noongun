@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "e94e6cb9-af56-4642-83a9-962efa58048c",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:37.611Z",
+  "payload": {
+    "name": "ChannelManager",
+    "type": "lib",
+    "description": "Resolves adapters by platform name from config noongun.channels; extend() registers fakes in tests",
+    "responsibility": "Map a platform name to its adapter",
+    "path": "app/Domain/Channels/ChannelManager.php",
+    "status": "active"
+  },
+  "seq": 1
+}

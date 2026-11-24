@@ -1,0 +1,18 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "91b0978f-6e17-43ca-821f-8daece7d558b",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:35.953Z",
+  "payload": {
+    "title": "Post state machine and publishing rounds (ADR 0009)",
+    "context": "M3 needs a single definition of post states, of who may approve, and of how publishing stays idempotent. See docs/adr/0009-post-state-machine.md.",
+    "rationale": "The post is the unit of state and approval; variants only record outcomes. Transitions are conditional updates on the model; only ApprovePost calls approve(). Each claim starts a publish round and each job step runs once, so queue retries cannot re-send. A variant keeps an outcome-unknown mark from before the platform call until a recorded publish or a definite refusal. fetchMetrics is deferred to M6.",
+    "alternatives": [
+      "State per variant",
+      "One job per variant",
+      "Round derived from scheduled_at"
+    ],
+    "consequences": "Partial success leaves the post failed with published variants kept. A human retry after an unknown outcome can still duplicate a post; closing that needs a platform lookup in M7. The lock store must be shared (redis or database)."
+  },
+  "seq": 1
+}

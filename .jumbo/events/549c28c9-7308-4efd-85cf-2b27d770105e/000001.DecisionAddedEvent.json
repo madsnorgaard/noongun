@@ -1,0 +1,17 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "549c28c9-7308-4efd-85cf-2b27d770105e",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:36.630Z",
+  "payload": {
+    "title": "A channel publishes only after the user confirmed it",
+    "context": "Connecting returns every Page the user granted. Storing them all as active re-activated Pages the user had disconnected. Recorded in docs/platform-notes/meta.md, entry 2026-11-24.",
+    "rationale": "New or previously disconnected accounts are saved as pending, cannot publish, and are discarded after 15 minutes unless confirmed. Active or needs-reconnect accounts are renewed at once.",
+    "alternatives": [
+      "Hold unconfirmed tokens in the session",
+      "Activate everything and let the user disconnect"
+    ],
+    "consequences": "A pending token is stored encrypted for at most about 20 minutes. Every future adapter saves through Channel::recordConnection()."
+  },
+  "seq": 1
+}

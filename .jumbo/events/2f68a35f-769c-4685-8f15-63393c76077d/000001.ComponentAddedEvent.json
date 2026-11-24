@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "2f68a35f-769c-4685-8f15-63393c76077d",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:39.589Z",
+  "payload": {
+    "name": "PostPages",
+    "type": "ui",
+    "description": "Queue, calendar and post editor pages with their controllers, PostPolicy and PostPresenter",
+    "responsibility": "Let a person write, review, approve and schedule posts",
+    "path": "resources/js/pages/queue/Index.vue",
+    "status": "active"
+  },
+  "seq": 1
+}

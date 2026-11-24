@@ -1,0 +1,17 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "f3111177-fb0d-47ff-9b8c-45333bbffb09",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:36.289Z",
+  "payload": {
+    "title": "Post editing and deletion rules (ADR 0010)",
+    "context": "The editor needs rules for when a post can change or be removed without weakening the approval rule or losing the record of something public. See docs/adr/0010-post-editing-and-deletion.md.",
+    "rationale": "Content changes only in draft; returning to draft removes the approval. Approval requires a fingerprint of what the user saw. Only drafts and rejected posts with no published or outcome-unknown variant can be deleted.",
+    "alternatives": [
+      "Allow edits after approval",
+      "Allow deleting any post"
+    ],
+    "consequences": "Editing an approved post needs a new approval. Published posts stay as a local record; deleting from the platform is not offered in M3."
+  },
+  "seq": 1
+}
