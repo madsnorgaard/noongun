@@ -124,8 +124,11 @@ describe('connect', function () {
             ->and($channel->refresh_token)->toBeNull()
             ->and($channel->token_expires_at)->toBeNull()
             ->and($channel->scopes)->toBe(['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'])
-            ->and($channel->status)->toBe(ChannelStatus::Active)
-            ->and($channel->canPublish())->toBeTrue();
+            // New to this workspace: saved, but not able to publish until
+            // the user has confirmed it.
+            ->and($channel->status)->toBe(ChannelStatus::Pending)
+            ->and($channel->wasRecentlyCreated)->toBeTrue()
+            ->and($channel->canPublish())->toBeFalse();
 
         $stored = DB::table('channels')->where('id', $channel->id)->value('access_token');
 
@@ -218,7 +221,7 @@ describe('connect', function () {
             ->and(facebookQuery($accountCalls[1])['appsecret_proof'])->toBe(facebookProof('test-long-lived-user-token'));
     });
 
-    it('renews an existing channel instead of adding a second row', function (string $state) {
+    it('renews an existing channel instead of adding a second row', function (string $state, ChannelStatus $expected) {
         $existing = inWorkspace($this->workspace, fn () => Channel::factory()->{$state}()->create([
             'external_id' => '100000000000001',
             'display_name' => 'Old name',
@@ -232,10 +235,31 @@ describe('connect', function () {
         expect($channel->id)->toBe($existing->id)
             ->and($channel->display_name)->toBe('Table Bay Coffee')
             ->and($channel->access_token)->toBe('test-page-token-table-bay-coffee')
-            ->and($channel->status)->toBe(ChannelStatus::Active)
+            ->and($channel->wasRecentlyCreated)->toBeFalse()
+            ->and($channel->status)->toBe($expected)
+            ->and($channel->canPublish())->toBe($expected === ChannelStatus::Active)
             ->and($channel->scopes)->toContain('pages_manage_posts')
             ->and(DB::table('channels')->count())->toBe(1);
-    })->with(['needsReconnect', 'disconnected', 'expired']);
+    })->with([
+        // Chosen by the user and never disconnected: renewed, active at once.
+        'one that needs a reconnect' => ['needsReconnect', ChannelStatus::Active],
+        'an active one whose token expired' => ['expired', ChannelStatus::Active],
+        // Not connected by the user's last word on it: waits for a confirmation.
+        'one the user disconnected' => ['disconnected', ChannelStatus::Pending],
+        'one that is still pending' => ['pending', ChannelStatus::Pending],
+    ]);
+
+    it('keeps an active channel able to publish while it is renewed next to a new Page', function () {
+        $active = inWorkspace($this->workspace, fn () => Channel::factory()->create(['external_id' => '100000000000001', 'access_token' => 'old-page-token']));
+
+        fakeGraph();
+
+        $channels = inWorkspace($this->workspace, fn () => facebookAdapter()->connect($this->workspace, 'test-auth-code'));
+
+        expect($channels->firstWhere('id', $active->id)->canPublish())->toBeTrue()
+            ->and($channels->firstWhere('id', $active->id)->access_token)->toBe('test-page-token-table-bay-coffee')
+            ->and($channels->firstWhere('external_id', '100000000000002')->status)->toBe(ChannelStatus::Pending);
+    });
 
     it('uses the current workspace of this moment, not one kept from when the adapter was built', function () {
         fakeGraph(['accounts' => 'me_accounts_one_page']);

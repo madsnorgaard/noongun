@@ -286,9 +286,22 @@ short version:
 3. Put the App ID and App secret in `.env` as `FACEBOOK_APP_ID` and
    `FACEBOOK_APP_SECRET`, then restart with `docker compose up -d`.
 4. Open **Channels** in Noon Gun and choose **Connect Facebook**. Sign in,
-   pick the Pages and allow every permission that is asked for. If you grant
-   more than one Page, Noon Gun asks which ones to keep and erases the access
-   to the others.
+   pick the Pages and allow every permission that is asked for.
+
+What happens when Facebook sends you back:
+
+- A single Page that is new to the workspace is connected at once.
+- A Page that is already connected gets a fresh token and keeps publishing
+  without a pause. Nothing is asked.
+- Every other Page is shown for you to tick: several new Pages, or a Page you
+  disconnected earlier, which Facebook can return again because it still
+  remembers the grant. Nothing is ticked for you. Until you choose, such a
+  Page is listed as **Not confirmed** and nothing is published to it.
+- If you choose **Connect none of them**, leave the page or wait longer than
+  15 minutes, the Pages you did not confirm are removed again and their access
+  is erased. A Page you had disconnected stays disconnected. The scheduled
+  command `noongun:discard-pending-channels` does this every five minutes, so
+  it also happens when nobody opens Noon Gun.
 
 Noon Gun stores one access token for each connected Page, encrypted with
 `APP_KEY`. It does not store your own Facebook token. A Page token has no

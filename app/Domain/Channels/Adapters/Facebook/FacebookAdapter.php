@@ -184,16 +184,18 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             );
         }
 
+        // Channel::recordConnection() decides the status: only a channel the
+        // user already has connected is active straight away.
         return $this->container->make(CurrentWorkspace::class)->run($workspace, fn (): Collection => DB::transaction(
-            fn (): Collection => (new Collection($pages))->map(fn (array $page): Channel => Channel::query()->updateOrCreate(
-                ['platform' => self::PLATFORM, 'external_id' => $page['id']],
+            fn (): Collection => (new Collection($pages))->map(fn (array $page): Channel => Channel::recordConnection(
+                self::PLATFORM,
+                $page['id'],
                 [
                     'display_name' => $page['name'],
                     'access_token' => $page['token'],
                     'refresh_token' => null,
                     'token_expires_at' => $page['expires_at'],
                     'scopes' => $page['scopes'],
-                    'status' => ChannelStatus::Active,
                 ],
             ))->values(),
         ));
@@ -266,7 +268,9 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
      */
     public function refreshToken(Channel $channel): Channel
     {
-        if ($channel->status === ChannelStatus::Disconnected) {
+        // Neither is connected: a disconnected channel holds no token, and a
+        // pending one is waiting for the user, not for a check.
+        if ($channel->status === ChannelStatus::Disconnected || $channel->status === ChannelStatus::Pending) {
             return $channel;
         }
 

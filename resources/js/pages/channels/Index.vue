@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, router, usePage } from '@inertiajs/vue3';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dialog';
 import { Spinner } from '@/components/ui/spinner';
 import { connect, destroy, index } from '@/routes/channels';
+import { edit as chooseChannels } from '@/routes/channels/selection';
 import type { Channel, ChannelPlatform } from '@/types/channels';
 
 defineOptions({
@@ -29,6 +30,7 @@ defineOptions({
 const props = defineProps<{
     channels: Channel[];
     platforms: ChannelPlatform[];
+    selection_open: boolean;
     can: { manage: boolean };
 }>();
 
@@ -54,6 +56,7 @@ const disconnecting = ref(false);
 
 const statusLabels: Record<Channel['status'], string> = {
     active: 'Connected',
+    pending: 'Not confirmed',
     needs_reconnect: 'Needs reconnecting',
     disconnected: 'Disconnected',
 };
@@ -96,6 +99,10 @@ function disconnect(): void {
 function access(channel: Channel): string {
     if (channel.status === 'disconnected') {
         return 'Access removed';
+    }
+
+    if (channel.status === 'pending') {
+        return 'Not in use';
     }
 
     if (!channel.token_expires_at) {
@@ -238,7 +245,15 @@ function access(channel: Channel): string {
                                 {{ channel.external_id }}
                             </div>
                             <p
-                                v-if="channel.status === 'needs_reconnect'"
+                                v-if="channel.status === 'pending'"
+                                class="mt-1 max-w-prose text-muted-foreground"
+                            >
+                                Access was granted but you have not confirmed
+                                it. Nothing is published here, and the access is
+                                erased shortly unless you keep it.
+                            </p>
+                            <p
+                                v-else-if="channel.status === 'needs_reconnect'"
                                 class="mt-1 max-w-prose text-destructive"
                             >
                                 {{ channel.platform_label }} no longer accepts
@@ -289,6 +304,17 @@ function access(channel: Channel): string {
                             >
                                 <Button
                                     v-if="
+                                        channel.status === 'pending' &&
+                                        selection_open
+                                    "
+                                    size="sm"
+                                    as-child
+                                >
+                                    <Link :href="chooseChannels()">Choose</Link>
+                                </Button>
+                                <Button
+                                    v-if="
+                                        channel.status !== 'pending' &&
                                         canConnect(channel.platform) &&
                                         (channel.status !== 'active' ||
                                             channel.token_expired ||
@@ -306,7 +332,10 @@ function access(channel: Channel): string {
                                     Connect again
                                 </Button>
                                 <Button
-                                    v-if="channel.status !== 'disconnected'"
+                                    v-if="
+                                        channel.status !== 'disconnected' &&
+                                        channel.status !== 'pending'
+                                    "
                                     size="sm"
                                     variant="outline"
                                     @click="toDisconnect = channel"

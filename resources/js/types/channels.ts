@@ -1,4 +1,8 @@
-export type ChannelStatus = 'active' | 'needs_reconnect' | 'disconnected';
+export type ChannelStatus =
+    | 'active'
+    | 'pending'
+    | 'needs_reconnect'
+    | 'disconnected';
 
 export type Channel = {
     id: number;

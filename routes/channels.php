@@ -10,6 +10,7 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
     Route::get('channels/selection', [ChannelSelectionController::class, 'edit'])->name('channels.selection.edit');
     Route::put('channels/selection', [ChannelSelectionController::class, 'update'])->name('channels.selection.update');
+    Route::delete('channels/selection', [ChannelSelectionController::class, 'destroy'])->name('channels.selection.destroy');
 
     Route::post('channels/{platform}/connect', [ConnectChannelController::class, 'store'])
         ->middleware('throttle:20,1')

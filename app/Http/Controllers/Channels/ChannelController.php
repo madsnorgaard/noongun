@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Channels;
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\Contracts\DescribesSetup;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Workspaces\CurrentWorkspace;
 use App\Http\Controllers\Channels\Concerns\PresentsChannels;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\RedirectResponse;
@@ -17,14 +18,21 @@ class ChannelController extends Controller
 {
     use PresentsChannels;
 
-    public function index(Request $request, ChannelManager $manager): Response
+    public function index(Request $request, ChannelManager $manager, CurrentWorkspace $current): Response
     {
         Gate::authorize('viewAny', Channel::class);
 
+        // Housekeeping that the scheduler also does: accounts that waited too
+        // long for a confirmation are removed before the list is shown.
+        Channel::discardExpiredPending();
+
         $channels = Channel::query()->orderBy('platform')->orderBy('display_name')->get();
+        $selection = new ConnectSelection($request->session(), $current);
+        $canManage = $request->user()?->can('create', Channel::class) ?? false;
 
         return Inertia::render('channels/Index', [
             'channels' => $channels->map($this->present(...))->all(),
+            'selection_open' => $canManage && ! $selection->expired() && $selection->waiting()->isNotEmpty(),
             'platforms' => array_map(function (string $platform) use ($manager): array {
                 $adapter = $manager->adapter($platform);
                 $setup = $adapter instanceof DescribesSetup ? $adapter : null;
@@ -37,7 +45,7 @@ class ChannelController extends Controller
                 ];
             }, $manager->available()),
             'can' => [
-                'manage' => $request->user()?->can('create', Channel::class) ?? false,
+                'manage' => $canManage,
             ],
         ]);
     }
@@ -54,7 +62,9 @@ class ChannelController extends Controller
 
         Gate::authorize('delete', $channel);
 
-        $channel->disconnect();
+        // A pending channel was never connected: it is discarded, not kept
+        // as a disconnected row, unless posts already point at it.
+        $channel->isPending() ? $channel->discardPending() : $channel->disconnect();
 
         $this->toast('success', __(':name is disconnected.', ['name' => $channel->display_name]));
 

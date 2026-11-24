@@ -13,3 +13,6 @@ Artisan::command('inspire', function () {
 // killed does not hold the next ones back for long.
 Schedule::command('noongun:dispatch-due-posts')->everyMinute()->withoutOverlapping(5);
 Schedule::command('noongun:recover-stuck-posts')->everyFiveMinutes()->withoutOverlapping(10);
+
+// Channels. Removes accounts that a connect returned and nobody confirmed.
+Schedule::command('noongun:discard-pending-channels')->everyFiveMinutes()->withoutOverlapping(10);
