@@ -56,4 +56,45 @@ return [
         'billing' => false,
     ],
 
+    /*
+    | Platforms that can be connected. The key is the platform name stored on
+    | each channel. "adapter" is the ChannelAdapter class; every other key is
+    | passed to that adapter as its settings. Adding a platform means one
+    | adapter folder and one entry here. API versions and scopes are set here
+    | and nowhere else.
+    */
+
+    'channels' => [
+        'facebook' => [
+            'adapter' => 'App\\Domain\\Channels\\Adapters\\Facebook\\FacebookAdapter',
+            'app_id' => env('FACEBOOK_APP_ID'),
+            'app_secret' => env('FACEBOOK_APP_SECRET'),
+            'api_version' => env('FACEBOOK_GRAPH_VERSION', 'v27.0'),
+            'graph_url' => env('FACEBOOK_GRAPH_URL', 'https://graph.facebook.com'),
+            'dialog_url' => env('FACEBOOK_DIALOG_URL', 'https://www.facebook.com'),
+            'scopes' => array_values(array_filter(array_map(
+                trim(...),
+                explode(',', (string) env('FACEBOOK_SCOPES', 'pages_show_list,pages_read_engagement,pages_manage_posts')),
+            ))),
+        ],
+    ],
+
+    /*
+    | How PublishPostJob behaves. "backoff" is the wait in seconds before each
+    | retry of a retryable failure, comma separated; the last value repeats.
+    | "lock_seconds" is how long the lock on one variant is held at most, and
+    | must be longer than "timeout", the limit for one platform call.
+    | "stuck_after_minutes" is how long a post may stay in the publishing
+    | state before it is treated as failed.
+    */
+
+    'publishing' => [
+        'queue' => env('NOONGUN_PUBLISH_QUEUE', 'default'),
+        'max_attempts' => (int) env('NOONGUN_PUBLISH_MAX_ATTEMPTS', 5),
+        'backoff' => array_map(intval(...), explode(',', (string) env('NOONGUN_PUBLISH_BACKOFF', '60,300,900,3600'))),
+        'timeout' => (int) env('NOONGUN_PUBLISH_TIMEOUT', 30),
+        'lock_seconds' => (int) env('NOONGUN_PUBLISH_LOCK_SECONDS', 120),
+        'stuck_after_minutes' => (int) env('NOONGUN_PUBLISH_STUCK_AFTER_MINUTES', 30),
+    ],
+
 ];

@@ -176,13 +176,23 @@ Do not change `APP_KEY` on an instance that has data.
 | `APP_URL` | `http://localhost:8080` | Public address of the app. |
 | `DB_*` | `pgsql`, host `postgres` | Database connection. The compose file uses the same values to create the database. |
 | `REDIS_HOST` | `redis` | Redis host. |
+| `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` | empty | Credentials of the Meta app this instance connects Pages with. |
+| `FACEBOOK_GRAPH_VERSION` | `v27.0` | Graph API version used for every Facebook call. |
+| `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
+| `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
+| `NOONGUN_PUBLISH_MAX_ATTEMPTS` | `5` | How many times one variant is sent before the post is marked as failed. Only retryable errors are tried again. |
+| `NOONGUN_PUBLISH_BACKOFF` | `60,300,900,3600` | Seconds to wait before each retry, comma separated. The last value repeats. |
+| `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. |
+| `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Longest time the lock on one variant is held. Must be longer than the timeout. |
+| `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state before it is treated as failed. |
+| `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. |
 
 Times are stored in UTC. Each workspace has its own timezone for display and
 scheduling. The application timezone is fixed to UTC in `config/app.php` and
 is not an environment setting.
 
-Other settings (timezone list, locales, plan limits, feature flags) live in
-`config/noongun.php`.
+Other settings (timezone list, locales, plan limits, feature flags, the list
+of platforms and their adapters) live in `config/noongun.php`.
 
 ## Tests
 
