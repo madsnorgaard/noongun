@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Plus } from '@lucide/vue';
 import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
 import { formatDate, stateLabels, useWorkspaceTimezone } from '@/lib/posts';
+import { stateDots } from '@/lib/postStates';
 import { index } from '@/routes/calendar';
 import { create, show } from '@/routes/posts';
 import type { CalendarDay, CalendarEntry } from '@/types/posts';
@@ -83,25 +84,26 @@ function isPlan(entry: CalendarEntry): boolean {
 <template>
     <Head title="Calendar" />
 
-    <div class="flex flex-1 flex-col gap-4 p-4">
-        <header class="flex flex-wrap items-center justify-between gap-3">
+    <div class="flex flex-1 flex-col gap-5.5 px-4 pt-2 pb-12 md:px-8 lg:px-11">
+        <header class="flex flex-wrap items-end justify-between gap-4">
             <div class="grid gap-1">
-                <h1 class="text-lg font-medium" data-test="calendar-title">
+                <h1
+                    class="text-title md:text-display"
+                    data-test="calendar-title"
+                >
                     {{ title }}
                 </h1>
-                <p class="text-sm text-muted-foreground">
-                    Times are in {{ timezone }}.
-                </p>
+                <p class="text-muted-foreground">Times in {{ timezone }}.</p>
             </div>
 
-            <div class="flex flex-wrap items-center gap-2">
-                <div class="flex rounded-md border text-sm">
+            <div class="flex flex-wrap items-center gap-2.5">
+                <div class="flex gap-1.5 rounded-lg bg-accent p-1">
                     <Link
                         :href="at(period, 'week')"
-                        class="rounded-l-md px-3 py-1"
+                        class="flex min-h-11 items-center rounded-[10px] px-4 text-base font-semibold"
                         :class="
                             view === 'week'
-                                ? 'bg-accent font-medium'
+                                ? 'bg-card shadow-xs'
                                 : 'text-muted-foreground hover:text-foreground'
                         "
                         :aria-current="view === 'week' ? 'page' : undefined"
@@ -110,10 +112,10 @@ function isPlan(entry: CalendarEntry): boolean {
                     </Link>
                     <Link
                         :href="at(period, 'month')"
-                        class="rounded-r-md border-l px-3 py-1"
+                        class="flex min-h-11 items-center rounded-[10px] px-4 text-base font-semibold"
                         :class="
                             view === 'month'
-                                ? 'bg-accent font-medium'
+                                ? 'bg-card shadow-xs'
                                 : 'text-muted-foreground hover:text-foreground'
                         "
                         :aria-current="view === 'month' ? 'page' : undefined"
@@ -123,27 +125,29 @@ function isPlan(entry: CalendarEntry): boolean {
                     </Link>
                 </div>
 
-                <Button size="icon-sm" variant="outline" as-child>
-                    <Link
-                        :href="at(previous)"
-                        :aria-label="`Previous ${view}`"
-                        data-test="calendar-previous"
-                    >
-                        <ChevronLeft />
-                    </Link>
-                </Button>
-                <Button size="sm" variant="outline" as-child>
-                    <Link :href="at(today)">Today</Link>
-                </Button>
-                <Button size="icon-sm" variant="outline" as-child>
-                    <Link
-                        :href="at(next)"
-                        :aria-label="`Next ${view}`"
-                        data-test="calendar-next"
-                    >
-                        <ChevronRight />
-                    </Link>
-                </Button>
+                <div class="flex items-center gap-1.5">
+                    <Button size="icon-sm" variant="outline" as-child>
+                        <Link
+                            :href="at(previous)"
+                            :aria-label="`Previous ${view}`"
+                            data-test="calendar-previous"
+                        >
+                            <ChevronLeft />
+                        </Link>
+                    </Button>
+                    <Button size="sm" variant="outline" as-child>
+                        <Link :href="at(today)">Today</Link>
+                    </Button>
+                    <Button size="icon-sm" variant="outline" as-child>
+                        <Link
+                            :href="at(next)"
+                            :aria-label="`Next ${view}`"
+                            data-test="calendar-next"
+                        >
+                            <ChevronRight />
+                        </Link>
+                    </Button>
+                </div>
 
                 <Button v-if="can.manage" size="sm" as-child>
                     <Link :href="create()">New post</Link>
@@ -153,24 +157,24 @@ function isPlan(entry: CalendarEntry): boolean {
 
         <p
             v-if="emptyMonth"
-            class="text-sm text-muted-foreground md:hidden"
+            class="text-muted-foreground md:hidden"
             data-test="calendar-empty"
         >
             No posts this month.
         </p>
 
         <div
-            class="overflow-hidden rounded-md border text-sm"
+            class="overflow-hidden rounded-xl bg-card text-sm shadow-xs"
             :class="emptyMonth ? 'hidden md:block' : ''"
         >
             <div
                 v-if="view === 'month'"
-                class="hidden grid-cols-7 border-b text-xs text-muted-foreground md:grid"
+                class="hidden grid-cols-7 border-b text-muted-foreground md:grid"
             >
                 <div
                     v-for="weekday in weekdays"
                     :key="weekday"
-                    class="border-l px-2 py-1 first:border-l-0"
+                    class="border-l px-3 py-2 first:border-l-0"
                 >
                     {{ weekday }}
                 </div>
@@ -182,23 +186,22 @@ function isPlan(entry: CalendarEntry): boolean {
                     :key="day.date"
                     class="border-b md:border-l md:[&:nth-child(7n+1)]:border-l-0"
                     :class="[
-                        view === 'week' ? 'md:min-h-96' : 'md:min-h-28',
+                        view === 'week' ? 'md:min-h-96' : 'md:min-h-32',
                         view === 'month' && day.posts.length === 0
                             ? 'hidden md:block'
                             : '',
-                        day.in_period ? '' : 'bg-muted/40',
+                        day.in_period ? '' : 'bg-muted/60',
                     ]"
                     :aria-label="fullDate(day)"
                     :data-test="`day-${day.date}`"
                 >
-                    <div
-                        class="flex items-center justify-between gap-1 px-2 pt-1.5"
-                    >
+                    <div class="flex items-center justify-between gap-1 pl-3">
+                        <!-- Today carries the gunmetal pill. Brass alone
+                             would not be seen on Paper. -->
                         <h2
-                            class="text-xs"
                             :class="
                                 day.today
-                                    ? 'rounded bg-foreground px-1.5 py-0.5 font-medium text-background'
+                                    ? 'rounded-sm bg-primary px-2 py-0.5 font-semibold text-primary-foreground'
                                     : day.in_period
                                       ? 'text-foreground'
                                       : 'text-muted-foreground'
@@ -212,33 +215,47 @@ function isPlan(entry: CalendarEntry): boolean {
                         <Link
                             v-if="can.manage"
                             :href="create({ query: { date: day.date } })"
-                            class="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                            class="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                             :aria-label="`New post on ${fullDate(day)}`"
                         >
-                            <Plus class="size-3.5" />
+                            <Plus class="size-4" />
                         </Link>
+                        <span v-else class="h-11"></span>
                     </div>
 
-                    <ul class="grid gap-1 p-1.5">
+                    <ul class="grid gap-1.5 px-2 pb-2">
                         <li v-for="entry in day.posts" :key="entry.id">
                             <Link
                                 :href="show({ post: entry.id })"
-                                class="block rounded border px-1.5 py-1 hover:bg-accent/60"
-                                :class="isPlan(entry) ? 'border-dashed' : ''"
+                                class="block min-h-11 rounded-sm border px-2 py-1.5 hover:bg-accent/60"
+                                :class="
+                                    isPlan(entry)
+                                        ? 'border-dashed border-input'
+                                        : entry.state === 'failed'
+                                          ? 'border-destructive'
+                                          : 'border-transparent bg-secondary'
+                                "
                                 :data-test="`entry-${entry.id}`"
                             >
-                                <span class="flex items-baseline gap-1.5">
-                                    <span class="font-medium tabular-nums">
+                                <span
+                                    class="flex flex-wrap items-center gap-x-2"
+                                >
+                                    <span class="font-mono font-medium">
                                         {{ entry.time }}
                                     </span>
                                     <span
-                                        class="text-xs"
+                                        class="flex items-center gap-1.5 text-xs"
                                         :class="
                                             entry.state === 'failed'
-                                                ? 'text-destructive'
+                                                ? 'font-semibold text-destructive'
                                                 : 'text-muted-foreground'
                                         "
                                     >
+                                        <span
+                                            class="size-2 shrink-0"
+                                            :class="stateDots[entry.state]"
+                                            aria-hidden="true"
+                                        ></span>
                                         {{
                                             isPlan(entry)
                                                 ? `${stateLabels[entry.state]}, planned`
