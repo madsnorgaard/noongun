@@ -6,15 +6,13 @@ import PostTexts from '@/components/posts/PostTexts.vue';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { usePostActions } from '@/composables/usePostActions';
-import { formatDateTime, problemList, useWorkspaceTimezone } from '@/lib/posts';
 import {
-    approve,
-    create,
-    reject,
-    retry,
-    show,
-    unschedule,
-} from '@/routes/posts';
+    formatDateTime,
+    problemList,
+    shortText,
+    useWorkspaceTimezone,
+} from '@/lib/posts';
+import { approve, create, reject, show, unschedule } from '@/routes/posts';
 import { approve as approveSelection, index } from '@/routes/queue';
 import type { Post } from '@/types/posts';
 
@@ -32,6 +30,8 @@ defineOptions({
 const props = defineProps<{
     view: 'working' | 'history';
     sections: { drafts: Post[]; upcoming: Post[]; failed: Post[] } | null;
+    /** How many posts each section has in all. A section may show fewer. */
+    totals: { drafts: number; upcoming: number; failed: number } | null;
     history: {
         posts: Post[];
         previous: string | null;
@@ -43,7 +43,55 @@ const props = defineProps<{
 const timezone = useWorkspaceTimezone();
 const { busy, errors, run } = usePostActions();
 
-const refused = computed(() => Object.values(errors.value));
+// Where a refusal is shown. The server keys what it refused for one post of
+// a selection as "posts.{id}"; everything else belongs to the request. The
+// reasons go to the row of the post they are about when that row is on the
+// page, and to the list above the sections otherwise, so none is lost.
+const actedOn = ref<number | null>(null);
+
+const visibleIds = computed(() =>
+    props.sections
+        ? [
+              ...props.sections.drafts,
+              ...props.sections.upcoming,
+              ...props.sections.failed,
+          ].map((post) => post.id)
+        : [],
+);
+
+function postOf(key: string): number | null {
+    const match = /^posts\.(\d+)$/.exec(key);
+
+    return match ? Number(match[1]) : actedOn.value;
+}
+
+function refusedAt(post: Post): string[] {
+    return Object.entries(errors.value)
+        .filter(([key]) => postOf(key) === post.id)
+        .map(([, message]) => message);
+}
+
+const refused = computed(() =>
+    Object.entries(errors.value)
+        .filter(([key]) => {
+            const id = postOf(key);
+
+            return id === null || !visibleIds.value.includes(id);
+        })
+        .map(([, message]) => message),
+);
+
+function act(post: Post, name: string, url: string): void {
+    actedOn.value = post.id;
+    run(`${name}-${post.id}`, 'post', url);
+}
+
+function sectionCount(name: 'drafts' | 'upcoming' | 'failed'): string {
+    const shown = props.sections?.[name].length ?? 0;
+    const total = props.totals?.[name] ?? shown;
+
+    return total > shown ? `first ${shown} of ${total}` : `${shown}`;
+}
 
 const isEmpty = computed(
     () =>
@@ -90,12 +138,14 @@ function toggle(post: Post, ticked: boolean): void {
 }
 
 function approveOne(post: Post): void {
+    actedOn.value = post.id;
     run(`approve-${post.id}`, 'post', approve.url({ post: post.id }), {
         version: post.version,
     });
 }
 
 function approveTicked(): void {
+    actedOn.value = null;
     run('approve-selected', 'post', approveSelection.url(), {
         posts: Object.entries(selected.value).map(([id, version]) => ({
             id: Number(id),
@@ -192,7 +242,7 @@ function time(post: Post): string | null {
                     <h2 id="queue-drafts" class="text-sm font-medium">
                         Waiting for approval
                         <span class="font-normal text-muted-foreground">
-                            {{ sections.drafts.length }}
+                            {{ sectionCount('drafts') }}
                         </span>
                     </h2>
                     <Button
@@ -220,7 +270,7 @@ function time(post: Post): string | null {
                             class="mt-1 size-4 shrink-0 accent-primary disabled:opacity-40"
                             :checked="post.id in selected"
                             :disabled="!isReady(post) || busy !== null"
-                            :aria-label="`Select draft ${post.id} for approval`"
+                            :aria-label="`Select for approval: ${shortText(post)}`"
                             :data-test="`select-${post.id}`"
                             @change="
                                 toggle(
@@ -246,6 +296,20 @@ function time(post: Post): string | null {
                                 </li>
                             </ul>
 
+                            <ul
+                                v-if="refusedAt(post).length"
+                                class="grid gap-0.5 text-destructive"
+                                role="alert"
+                                :data-test="`refused-${post.id}`"
+                            >
+                                <li
+                                    v-for="message in refusedAt(post)"
+                                    :key="message"
+                                >
+                                    {{ message }}
+                                </li>
+                            </ul>
+
                             <p class="text-xs text-muted-foreground">
                                 <template v-if="time(post)">
                                     Planned for {{ time(post) }}. Approving it
@@ -258,43 +322,46 @@ function time(post: Post): string | null {
                             </p>
                         </div>
 
+                        <!-- Approve leads and is the only filled button.
+                             Reject is plain text at the far end, with the
+                             link to the post between the two, so that one
+                             is not pressed for the other. -->
                         <div class="flex shrink-0 items-start gap-2">
-                            <template v-if="can.manage">
-                                <Button
-                                    size="sm"
-                                    :disabled="!isReady(post) || busy !== null"
-                                    :data-test="`approve-${post.id}`"
-                                    @click="approveOne(post)"
-                                >
-                                    <Spinner
-                                        v-if="busy === `approve-${post.id}`"
-                                    />
-                                    {{
-                                        post.scheduled_at
-                                            ? 'Approve and schedule'
-                                            : 'Approve'
-                                    }}
-                                </Button>
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    :disabled="busy !== null"
-                                    :data-test="`reject-${post.id}`"
-                                    @click="
-                                        run(
-                                            `reject-${post.id}`,
-                                            'post',
-                                            reject.url({ post: post.id }),
-                                        )
-                                    "
-                                >
-                                    Reject
-                                </Button>
-                            </template>
-                            <Button size="sm" variant="ghost" as-child>
+                            <Button
+                                v-if="can.manage"
+                                size="sm"
+                                :disabled="!isReady(post) || busy !== null"
+                                :data-test="`approve-${post.id}`"
+                                @click="approveOne(post)"
+                            >
+                                <Spinner v-if="busy === `approve-${post.id}`" />
+                                {{
+                                    post.scheduled_at
+                                        ? 'Approve and schedule'
+                                        : 'Approve'
+                                }}
+                            </Button>
+                            <Button size="sm" variant="outline" as-child>
                                 <Link :href="show({ post: post.id })">
                                     {{ can.manage ? 'Edit' : 'Open' }}
                                 </Link>
+                            </Button>
+                            <Button
+                                v-if="can.manage"
+                                size="sm"
+                                variant="ghost"
+                                class="ml-4 text-muted-foreground"
+                                :disabled="busy !== null"
+                                :data-test="`reject-${post.id}`"
+                                @click="
+                                    act(
+                                        post,
+                                        'reject',
+                                        reject.url({ post: post.id }),
+                                    )
+                                "
+                            >
+                                Reject
                             </Button>
                         </div>
                     </li>
@@ -308,7 +375,7 @@ function time(post: Post): string | null {
                 <h2 id="queue-upcoming" class="text-sm font-medium">
                     Approved and scheduled
                     <span class="font-normal text-muted-foreground">
-                        {{ sections.upcoming.length }}
+                        {{ sectionCount('upcoming') }}
                     </span>
                 </h2>
 
@@ -341,6 +408,20 @@ function time(post: Post): string | null {
                                 </li>
                             </ul>
 
+                            <ul
+                                v-if="refusedAt(post).length"
+                                class="grid gap-0.5 text-destructive"
+                                role="alert"
+                                :data-test="`refused-${post.id}`"
+                            >
+                                <li
+                                    v-for="message in refusedAt(post)"
+                                    :key="message"
+                                >
+                                    {{ message }}
+                                </li>
+                            </ul>
+
                             <p
                                 v-if="post.approval"
                                 class="text-xs text-muted-foreground"
@@ -362,9 +443,9 @@ function time(post: Post): string | null {
                                 :disabled="busy !== null"
                                 :data-test="`unschedule-${post.id}`"
                                 @click="
-                                    run(
-                                        `unschedule-${post.id}`,
-                                        'post',
+                                    act(
+                                        post,
+                                        'unschedule',
                                         unschedule.url({ post: post.id }),
                                     )
                                 "
@@ -400,7 +481,7 @@ function time(post: Post): string | null {
                 <h2 id="queue-failed" class="text-sm font-medium">
                     Needs attention
                     <span class="font-normal text-muted-foreground">
-                        {{ sections.failed.length }}
+                        {{ sectionCount('failed') }}
                     </span>
                 </h2>
 
@@ -433,26 +514,25 @@ function time(post: Post): string | null {
                         </div>
 
                         <div class="flex shrink-0 items-start gap-2">
+                            <!-- Sending again can put a second copy
+                                 on a channel, so it is not done from a
+                                 list: the post page shows the error and
+                                 the warning first. -->
                             <Button
-                                v-if="post.can.retry"
                                 size="sm"
-                                :disabled="!isReady(post) || busy !== null"
-                                :data-test="`retry-${post.id}`"
-                                @click="
-                                    run(
-                                        `retry-${post.id}`,
-                                        'post',
-                                        retry.url({ post: post.id }),
-                                    )
-                                "
+                                :variant="post.can.retry ? 'outline' : 'ghost'"
+                                as-child
                             >
-                                <Spinner v-if="busy === `retry-${post.id}`" />
-                                Send again
-                            </Button>
-                            <Button size="sm" variant="ghost" as-child>
-                                <Link :href="show({ post: post.id })"
-                                    >Open</Link
+                                <Link
+                                    :href="show({ post: post.id })"
+                                    :data-test="`open-failed-${post.id}`"
                                 >
+                                    {{
+                                        post.can.retry
+                                            ? 'Open to send again'
+                                            : 'Open'
+                                    }}
+                                </Link>
                             </Button>
                         </div>
                     </li>

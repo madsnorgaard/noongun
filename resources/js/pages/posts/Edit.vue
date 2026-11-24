@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Head, Link, useForm } from '@inertiajs/vue3';
-import { computed, ref, watch } from 'vue';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import InputError from '@/components/InputError.vue';
 import PostStateBadge from '@/components/posts/PostStateBadge.vue';
 import PostTexts from '@/components/posts/PostTexts.vue';
@@ -192,13 +192,50 @@ function save(): void {
 }
 
 const problems = computed(() => (props.post ? problemList(props.post) : []));
+
+// A refusal about the time is shown at the time field. Every other refusal,
+// and the one about the time when the page has no time field, goes in the
+// list under the status, so that no refusal is ever silent.
+const hasTimeField = computed(
+    () => editable.value || (props.post?.can.schedule ?? false),
+);
 const refusedMessages = computed(() =>
     Object.entries(refused.value)
-        .filter(([key]) => key !== 'scheduled_at')
+        .filter(([key]) => !(key === 'scheduled_at' && hasTimeField.value))
         .map(([, message]) => message),
 );
 
-const confirming = ref<'delete' | 'reopen' | null>(null);
+type Confirmation = 'delete' | 'reopen' | 'publish-now' | 'retry';
+
+const confirming = ref<Confirmation | null>(null);
+// What the dialog shows. Kept while it closes, so its text does not change
+// on the way out.
+const dialog = ref<Confirmation>('reopen');
+// Sending again needs this ticked: the user has looked at the channel.
+const checkedChannel = ref(false);
+
+watch(confirming, (kind) => {
+    if (kind !== null) {
+        dialog.value = kind;
+        checkedChannel.value = false;
+    }
+});
+
+// A refusal is shown on the page, so the dialog must not stay in front of it.
+watch(refused, (messages) => {
+    if (Object.keys(messages).length > 0) {
+        confirming.value = null;
+    }
+});
+
+// The channels a publish or a retry would send to: every one that does not
+// have the post yet.
+const pending = computed(() =>
+    (props.post?.variants ?? []).filter((variant) => !variant.published),
+);
+const pendingNames = computed(() =>
+    pending.value.map((variant) => variant.channel_name).join(', '),
+);
 
 function act(
     key: string,
@@ -237,8 +274,41 @@ function confirm(): void {
         run('delete', 'delete', destroy.url({ post: props.post.id }));
     } else if (confirming.value === 'reopen') {
         act('reopen', reopen.url({ post: props.post.id }));
+    } else if (confirming.value === 'publish-now') {
+        act('publish-now', schedule.url({ post: props.post.id }), {
+            now: true,
+        });
+    } else if (confirming.value === 'retry' && checkedChannel.value) {
+        act('retry', retry.url({ post: props.post.id }));
     }
 }
+
+// Leaving with text that is not saved asks first. Saving and the state
+// changes are not GET requests and pass.
+const unsaved = computed(() => editable.value && form.isDirty);
+
+const stopGuard = router.on('before', (event) => {
+    if (!unsaved.value || event.detail.visit.method !== 'get') {
+        return;
+    }
+
+    return window.confirm(
+        'This post has changes that are not saved. Leave without saving them?',
+    );
+});
+
+function warnOnUnload(event: BeforeUnloadEvent): void {
+    if (unsaved.value) {
+        event.preventDefault();
+    }
+}
+
+onMounted(() => window.addEventListener('beforeunload', warnOnUnload));
+
+onBeforeUnmount(() => {
+    stopGuard();
+    window.removeEventListener('beforeunload', warnOnUnload);
+});
 
 const status = computed(() => {
     const current = props.post;
@@ -539,7 +609,12 @@ const locked = computed(() => {
                         after approval. A post with a planned time is scheduled
                         the moment it is approved.
                     </p>
-                    <InputError :message="fieldError('scheduled_at')" />
+                    <InputError
+                        :message="
+                            fieldError('scheduled_at') ?? refused.scheduled_at
+                        "
+                        data-test="planned-time-error"
+                    />
                 </section>
 
                 <section
@@ -587,13 +662,7 @@ const locked = computed(() => {
                             variant="outline"
                             :disabled="busy !== null"
                             data-test="publish-now"
-                            @click="
-                                act(
-                                    'publish-now',
-                                    schedule.url({ post: post.id }),
-                                    { now: true },
-                                )
-                            "
+                            @click="confirming = 'publish-now'"
                         >
                             Publish at the next minute
                         </Button>
@@ -701,7 +770,7 @@ const locked = computed(() => {
                             size="sm"
                             :disabled="problems.length > 0 || busy !== null"
                             data-test="retry"
-                            @click="act('retry', retry.url({ post: post.id }))"
+                            @click="confirming = 'retry'"
                         >
                             <Spinner v-if="busy === 'retry'" />
                             Send again
@@ -778,16 +847,31 @@ const locked = computed(() => {
         <DialogContent>
             <DialogHeader class="space-y-3">
                 <DialogTitle>
-                    {{
-                        confirming === 'delete'
-                            ? 'Delete this post?'
-                            : 'Return this post to draft?'
-                    }}
+                    <template v-if="dialog === 'delete'">
+                        Delete this post?
+                    </template>
+                    <template v-else-if="dialog === 'publish-now'">
+                        Publish this post within a minute?
+                    </template>
+                    <template v-else-if="dialog === 'retry'">
+                        Send this post again?
+                    </template>
+                    <template v-else>Return this post to draft?</template>
                 </DialogTitle>
                 <DialogDescription>
-                    <template v-if="confirming === 'delete'">
+                    <template v-if="dialog === 'delete'">
                         The post and its texts are removed for good. It was
                         never published, so nothing changes on any channel.
+                    </template>
+                    <template v-else-if="dialog === 'publish-now'">
+                        It becomes public on {{ pendingNames }} at the next run
+                        of the scheduler, which is within a minute. Once it is
+                        out, it cannot be taken back from here.
+                    </template>
+                    <template v-else-if="dialog === 'retry'">
+                        Look at {{ pendingNames }} first. If the post is there
+                        after all, sending it again puts a second copy in
+                        public, and Noon Gun cannot see or undo that.
                     </template>
                     <template v-else-if="post?.state === 'failed'">
                         The approval is removed and the post must be approved
@@ -801,6 +885,30 @@ const locked = computed(() => {
                     </template>
                 </DialogDescription>
             </DialogHeader>
+
+            <div v-if="dialog === 'retry'" class="grid gap-3 text-sm">
+                <ul class="grid gap-1" data-test="retry-errors">
+                    <li v-for="variant in pending" :key="variant.id">
+                        {{ variant.channel_name }}:
+                        <span class="text-destructive">
+                            {{ variant.error ?? 'No result was recorded.' }}
+                        </span>
+                    </li>
+                </ul>
+                <label class="flex items-start gap-2">
+                    <input
+                        v-model="checkedChannel"
+                        type="checkbox"
+                        class="mt-0.5 size-4 shrink-0 accent-primary"
+                        data-test="checked-channel"
+                    />
+                    <span>
+                        I have looked at {{ pendingNames }} and the post is not
+                        there.
+                    </span>
+                </label>
+            </div>
+
             <DialogFooter class="gap-2">
                 <Button
                     type="button"
@@ -811,15 +919,22 @@ const locked = computed(() => {
                 </Button>
                 <Button
                     type="button"
-                    :variant="
-                        confirming === 'delete' ? 'destructive' : 'default'
+                    :variant="dialog === 'delete' ? 'destructive' : 'default'"
+                    :disabled="
+                        busy !== null || (dialog === 'retry' && !checkedChannel)
                     "
-                    :disabled="busy !== null"
                     data-test="confirm"
                     @click="confirm"
                 >
                     <Spinner v-if="busy !== null" />
-                    {{ confirming === 'delete' ? 'Delete' : 'Return to draft' }}
+                    <template v-if="dialog === 'delete'">Delete</template>
+                    <template v-else-if="dialog === 'publish-now'">
+                        Publish now
+                    </template>
+                    <template v-else-if="dialog === 'retry'">
+                        Send again
+                    </template>
+                    <template v-else>Return to draft</template>
                 </Button>
             </DialogFooter>
         </DialogContent>
