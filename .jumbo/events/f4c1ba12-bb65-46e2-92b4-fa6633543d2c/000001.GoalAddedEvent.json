@@ -1,0 +1,31 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "f4c1ba12-bb65-46e2-92b4-fa6633543d2c",
+  "version": 1,
+  "timestamp": "2026-11-23T10:50:42.629Z",
+  "payload": {
+    "title": "M2 Skeleton: Laravel app, workspaces, CI (#2)",
+    "objective": "Laravel app in Docker with auth, workspace scoping, self-hosted first run, health endpoint and CI. Blocked until the section 13 decisions are confirmed.",
+    "successCriteria": [
+      "Section 13 decisions confirmed and recorded as ADRs",
+      "Current stable versions checked and pinned",
+      "docker compose up from clean checkout gives working app, horizon, scheduler, postgres, redis",
+      "Auth works",
+      "Workspaces and memberships with roles and policies",
+      "Global workspace scope with cross-workspace isolation test",
+      "Self-hosted first run creates one workspace and owner, registration closed",
+      "config/noongun.php exists",
+      "/up health endpoint",
+      "CI runs Pest, Pint, Larastan and passes",
+      "Migrations run forwards and backwards",
+      "UTC storage tested with Europe/Copenhagen and Africa/Johannesburg"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined",
+    "prerequisiteGoals": [
+      "6a649184-de59-40e9-83bb-9ff92c370c78"
+    ]
+  },
+  "seq": 1
+}

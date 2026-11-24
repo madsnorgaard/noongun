@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "459788a4-a8a6-43e3-bbbe-a79669f4527c",
+  "version": 1,
+  "timestamp": "2026-11-23T10:46:09.898Z",
+  "payload": {
+    "title": "All times stored in UTC",
+    "description": "Each workspace has its own timezone for display and scheduling. Test with Europe/Copenhagen and Africa/Johannesburg.",
+    "rationale": "Scheduled publishing across timezones and DST must be exact."
+  },
+  "seq": 1
+}

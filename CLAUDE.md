@@ -80,9 +80,19 @@ you found in `docs/platform-notes/`. If the documentation contradicts the brief,
 stop and raise it instead of guessing. Record significant choices as short ADRs in
 `docs/adr/`.
 
-# CLAUDE.md
+## Jumbo
 
-## Instructions for Agents on how to collaborate with Jumbo
+Goals, invariants and decisions are tracked with Jumbo (`jumbo-cli`). See `JUMBO.md`
+and follow its instructions. If the file does not exist, ignore this section.
 
-See JUMBO.md and follow all instructions. If the file does not exist, then ignore this instruction.
+- `.jumbo/events/` and `.jumbo/settings.jsonc` are committed. `jumbo.db` and `logs/`
+  are not; the database is rebuilt from the events.
+- Run `jumbo heal` after cloning, pulling or switching branches.
+- Commit Jumbo changes on the feature branch you are working on, so they reach
+  `main` with that pull request.
+- Only the main session writes to Jumbo. Parallel agents report goals, decisions
+  and findings back to the main session instead of recording them, to avoid
+  conflicting event files.
+- Every ADR in `docs/adr/` also has a Jumbo decision, and every milestone issue a
+  Jumbo goal. Keep them in step.
 

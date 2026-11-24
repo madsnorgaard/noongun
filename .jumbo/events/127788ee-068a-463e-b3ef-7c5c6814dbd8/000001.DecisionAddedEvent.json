@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "127788ee-068a-463e-b3ef-7c5c6814dbd8",
+  "version": 1,
+  "timestamp": "2026-11-23T10:55:08.252Z",
+  "payload": {
+    "title": "SaaS legal entity deferred until before M9",
+    "context": "Entity decides payment providers and platform business verification",
+    "rationale": "Nothing before M9 depends on it",
+    "alternatives": [],
+    "consequences": "M2-M8 must not assume country, currency or payment provider; see docs/adr/0005"
+  },
+  "seq": 1
+}

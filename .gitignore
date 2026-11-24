@@ -4,8 +4,9 @@
 !.env.example
 scripts/spike/.state/
 
-# Jumbo local memory
-.jumbo/
+# Jumbo database and logs (rebuilt from .jumbo/events with `jumbo heal`)
+.jumbo/jumbo.db*
+.jumbo/logs/
 
 # Internal drafts and correspondence belong in ~/Notes/noongun/
 *-email-*.md

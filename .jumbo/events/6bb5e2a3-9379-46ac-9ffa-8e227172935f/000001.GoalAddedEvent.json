@@ -1,0 +1,24 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "6bb5e2a3-9379-46ac-9ffa-8e227172935f",
+  "version": 1,
+  "timestamp": "2026-11-23T10:50:43.467Z",
+  "payload": {
+    "title": "M6 Insights: metrics feed drafting (#6)",
+    "objective": "Poll engagement metrics, summarise per post and pillar, and feed top posts into drafting.",
+    "successCriteria": [
+      "FetchMetricsJob polls via ChannelAdapter within rate limits",
+      "metric_snapshots stored over time",
+      "Per-post and per-pillar summary in UI",
+      "Top posts included in DraftRequest",
+      "Recorded fixtures and isolation tests"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined",
+    "prerequisiteGoals": [
+      "f1496cab-4158-4957-bd98-a4d60018aadb"
+    ]
+  },
+  "seq": 1
+}

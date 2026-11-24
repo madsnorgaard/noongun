@@ -1,0 +1,27 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "0e9912ec-c909-4961-a926-c60254a9feda",
+  "version": 1,
+  "timestamp": "2026-11-23T10:50:43.698Z",
+  "payload": {
+    "title": "M7 Hardening: alerts, backups, tokens, audit (#7)",
+    "objective": "Operational hardening on the home server. End of Phase 2.",
+    "successCriteria": [
+      "Alerts: publish failed, token expiring within 7 days, queue stalled, scheduler down",
+      "Token refresh and reconnect prompt",
+      "/metrics with queue depth, publishes, failures, token expiry, LLM spend",
+      "JSON logs to stdout",
+      "Nightly pg_dump and media backup",
+      "Restore documented and run once",
+      "Audit trail UI",
+      "Running behind tailscale serve with no public ports"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined",
+    "prerequisiteGoals": [
+      "6bb5e2a3-9379-46ac-9ffa-8e227172935f"
+    ]
+  },
+  "seq": 1
+}

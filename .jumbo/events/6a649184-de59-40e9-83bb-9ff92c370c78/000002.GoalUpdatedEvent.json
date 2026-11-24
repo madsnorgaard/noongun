@@ -1,0 +1,19 @@
+{
+  "type": "GoalUpdatedEvent",
+  "aggregateId": "6a649184-de59-40e9-83bb-9ff92c370c78",
+  "version": 2,
+  "timestamp": "2026-11-23T12:28:07.225Z",
+  "payload": {
+    "successCriteria": [
+      "Meta app exists with Page publishing permissions; app type and use case recorded",
+      "Short-lived user token exchanged for long-lived; Page token derived",
+      "debug_token output for the Page token recorded (type, scopes, expiry)",
+      "Run A in Development mode: text and photo posts published, logged-out visibility recorded (expected hidden)",
+      "Run B in Live mode: Live mode requirements recorded; text post published or exact error recorded; logged-out visibility recorded",
+      "All spike posts deleted via the API",
+      "No token or secret committed, printed or logged",
+      "meta.md states whether Phase 1 works without App Review, and raises it if not"
+    ]
+  },
+  "seq": 2
+}

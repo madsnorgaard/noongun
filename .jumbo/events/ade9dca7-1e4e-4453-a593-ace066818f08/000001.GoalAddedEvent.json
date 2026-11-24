@@ -1,0 +1,26 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "ade9dca7-1e4e-4453-a593-ace066818f08",
+  "version": 1,
+  "timestamp": "2026-11-23T10:50:44.114Z",
+  "payload": {
+    "title": "M9 Billing and platform approvals (#9)",
+    "objective": "Merchant-of-record billing with rand pricing, and Meta and LinkedIn platform approvals for serving other businesses.",
+    "successCriteria": [
+      "BillingGateway with merchant of record, recorded as ADR",
+      "Plans as config, changes and cancellation via webhooks",
+      "Rand price list",
+      "Business verification completed",
+      "Meta App Review submitted with required materials",
+      "LinkedIn Community Management access at launch tier",
+      "Webhook tests with fixtures"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined",
+    "prerequisiteGoals": [
+      "eb350270-cee0-47e1-9308-fd6705ba5dda"
+    ]
+  },
+  "seq": 1
+}

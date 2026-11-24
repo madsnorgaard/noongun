@@ -1,0 +1,13 @@
+{
+  "type": "ValuePropositionAddedEvent",
+  "aggregateId": "623254cd-7017-4084-b568-e9e931c10376",
+  "version": 1,
+  "timestamp": "2026-11-23T10:45:23.560Z",
+  "payload": {
+    "title": "A week of posts from one brief",
+    "description": "Drafts in the user's own voice from a content brief, approved in one sitting, published on time",
+    "benefit": "Consistent visibility with minutes of effort per week",
+    "measurableOutcome": "A week of posts reviewed and approved in under 15 minutes"
+  },
+  "seq": 1
+}

@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "5d206b99-9d31-4e9e-aaad-f499a962fcf1",
+  "version": 1,
+  "timestamp": "2026-11-23T10:46:09.073Z",
+  "payload": {
+    "title": "Tokens and API keys encrypted at rest, never logged",
+    "description": "Platform tokens and LLM keys use Laravel encrypted casts and never appear in logs, exceptions, fixtures or commits.",
+    "rationale": "Leaked Page tokens allow posting as the customer."
+  },
+  "seq": 1
+}

@@ -1,0 +1,12 @@
+{
+  "type": "AudienceAddedEvent",
+  "aggregateId": "ed926032-aa6e-4048-a348-a1fd4d568d3b",
+  "version": 1,
+  "timestamp": "2026-11-23T10:45:23.557Z",
+  "payload": {
+    "name": "Solo operators and small organisations",
+    "description": "Freelancers, small businesses and NGOs, first in South Africa, who need a steady social presence without a marketing team or expensive tools",
+    "priority": "primary"
+  },
+  "seq": 1
+}

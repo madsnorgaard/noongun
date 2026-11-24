@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "5d8212e6-4823-44a5-8f4b-218c6fb41854",
+  "version": 1,
+  "timestamp": "2026-11-23T10:55:07.831Z",
+  "payload": {
+    "title": "Media on local disk first, S3-compatible later",
+    "context": "Brief 13.4",
+    "rationale": "Simple Phase 1; switch by config only; store disk and path, never URLs",
+    "alternatives": [],
+    "consequences": "Backups include media volume; see docs/adr/0003"
+  },
+  "seq": 1
+}

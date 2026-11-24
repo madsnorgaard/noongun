@@ -1,0 +1,19 @@
+{
+  "type": "GoalUpdatedEvent",
+  "aggregateId": "0e9912ec-c909-4961-a926-c60254a9feda",
+  "version": 2,
+  "timestamp": "2026-11-23T12:28:08.107Z",
+  "payload": {
+    "successCriteria": [
+      "Alerts: publish failed, token expiring within 7 days, queue stalled, scheduler down",
+      "Facebook token handling and LinkedIn 60-day expiry with one-click reconnect (no refresh tokens)",
+      "/metrics with queue depth, publishes, failures, token expiry, LLM spend",
+      "JSON logs to stdout",
+      "Nightly pg_dump and media backup",
+      "Restore documented and run once",
+      "Audit trail UI",
+      "Running behind tailscale serve with no public ports"
+    ]
+  },
+  "seq": 2
+}
