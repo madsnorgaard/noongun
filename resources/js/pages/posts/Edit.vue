@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
+import { ChevronLeft } from '@lucide/vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import InputError from '@/components/InputError.vue';
 import PostStateBadge from '@/components/posts/PostStateBadge.vue';
@@ -325,15 +326,15 @@ const status = computed(() => {
         case 'draft':
             return 'A draft. Nothing is published until it is approved.';
         case 'approved':
-            return 'Approved, but not on the schedule. It is not sent until it has a time.';
+            return 'Approved, but not on the schedule. It is not sent until it has a firing time.';
         case 'scheduled':
-            return `Approved and scheduled. It goes out ${when}.`;
+            return `Approved and scheduled. It fires ${when}.`;
         case 'publishing':
             return 'It is being published now.';
         case 'published':
             return 'Published on every channel.';
         case 'failed':
-            return 'Publishing did not succeed on every channel. See what each channel reports.';
+            return 'It was not published on every channel. Each channel says why.';
         case 'rejected':
             return 'Rejected. It is kept for reference and can be returned to draft.';
         default:
@@ -359,48 +360,60 @@ const locked = computed(() => {
 <template>
     <Head :title="isNew ? 'New post' : 'Post'" />
 
-    <form class="flex flex-1 flex-col gap-6 p-4" @submit.prevent="save">
-        <header class="flex flex-wrap items-center justify-between gap-3">
-            <div class="flex items-center gap-3">
-                <h1 class="text-lg font-medium">
+    <form
+        class="flex flex-1 flex-col gap-5.5 px-4 pt-2 pb-12 md:px-8 lg:px-11"
+        @submit.prevent="save"
+    >
+        <header class="flex flex-wrap items-center justify-between gap-3.5">
+            <div class="flex flex-wrap items-center gap-3.5">
+                <Button size="sm" variant="outline" as-child>
+                    <Link :href="queue()" aria-label="Back to the queue">
+                        <ChevronLeft />
+                        Queue
+                    </Link>
+                </Button>
+                <h1 class="text-title">
                     {{ isNew ? 'New post' : 'Post' }}
                 </h1>
-                <PostStateBadge v-if="post" :state="post.state" />
             </div>
-            <Button size="sm" variant="ghost" as-child>
-                <Link :href="queue()">Back to the queue</Link>
-            </Button>
+            <PostStateBadge v-if="post" :state="post.state" size="large" />
         </header>
 
-        <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem]">
-            <div class="grid content-start gap-6 text-sm">
+        <div
+            class="grid items-start gap-5.5 lg:grid-cols-[minmax(0,1fr)_22rem]"
+        >
+            <div class="grid content-start gap-4">
                 <template v-if="editable">
                     <section
                         v-if="channels.length === 0"
-                        class="rounded-md border p-4"
+                        class="rounded-2xl bg-card p-5.5 shadow-xs"
                         data-test="no-channels"
                     >
-                        <h2 class="font-medium">No channel is connected</h2>
+                        <h2 class="text-heading">No channel is connected</h2>
                         <p class="mt-1 text-muted-foreground">
                             A post is written for a channel. Connect one first.
                         </p>
-                        <Button
-                            class="mt-3"
-                            size="sm"
-                            variant="outline"
-                            as-child
-                        >
+                        <Button class="mt-4" variant="outline" as-child>
                             <Link :href="channelsIndex()">Go to Channels</Link>
                         </Button>
                     </section>
 
-                    <fieldset v-else class="grid gap-2">
-                        <legend class="font-medium">Channels</legend>
-                        <div class="mt-2 rounded-md border">
+                    <fieldset
+                        v-else
+                        class="grid min-w-0 gap-2 rounded-2xl bg-card p-5.5 shadow-xs"
+                    >
+                        <legend class="sr-only">Channels</legend>
+                        <p
+                            class="text-sm text-muted-foreground"
+                            aria-hidden="true"
+                        >
+                            Channels
+                        </p>
+                        <div class="grid divide-y divide-border">
                             <label
                                 v-for="option in offered"
                                 :key="option.id"
-                                class="flex items-start gap-3 border-b px-3 py-2 last:border-b-0"
+                                class="-mx-2 flex min-h-11 items-start gap-3 rounded-md px-2 py-2.5"
                                 :class="
                                     selectable(option)
                                         ? 'cursor-pointer hover:bg-accent/50'
@@ -409,7 +422,7 @@ const locked = computed(() => {
                             >
                                 <input
                                     type="checkbox"
-                                    class="mt-0.5 size-4 accent-primary"
+                                    class="mt-0.5 size-5 shrink-0 accent-primary"
                                     :checked="isChosen(option.id)"
                                     :disabled="!selectable(option)"
                                     :data-test="`channel-${option.id}`"
@@ -421,7 +434,7 @@ const locked = computed(() => {
                                         )
                                     "
                                 />
-                                <span class="grid">
+                                <span class="grid gap-0.5">
                                     <span>
                                         {{ option.display_name }}
                                         <span class="text-muted-foreground">
@@ -430,7 +443,7 @@ const locked = computed(() => {
                                     </span>
                                     <span
                                         v-if="option.problem"
-                                        class="text-xs"
+                                        class="text-sm"
                                         :class="
                                             isChosen(option.id)
                                                 ? 'text-destructive'
@@ -448,23 +461,42 @@ const locked = computed(() => {
                     <section
                         v-for="(variant, position) in form.variants"
                         :key="variant.channel_id"
-                        class="grid gap-3"
+                        class="grid gap-4 rounded-2xl bg-card p-5.5 shadow-xs"
                         :data-test="`text-${variant.channel_id}`"
                     >
                         <div class="grid gap-2">
+                            <Label :for="`body-${variant.channel_id}`">
+                                Post text for
+                                {{ channel(variant.channel_id)?.display_name }}
+                            </Label>
+                            <textarea
+                                :id="`body-${variant.channel_id}`"
+                                v-model="variant.body"
+                                rows="9"
+                                class="min-h-[220px] w-full resize-y rounded-lg border border-input bg-card p-4 text-lg leading-normal outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                            ></textarea>
                             <div
-                                class="flex items-baseline justify-between gap-3"
+                                class="flex flex-wrap items-start justify-between gap-x-4 gap-y-1"
                             >
-                                <Label :for="`body-${variant.channel_id}`">
-                                    Text for
-                                    {{
-                                        channel(variant.channel_id)
-                                            ?.display_name
-                                    }}
-                                </Label>
+                                <div class="grid gap-1">
+                                    <InputError
+                                        :message="
+                                            fieldError(
+                                                `variants.${position}.body`,
+                                            )
+                                        "
+                                    />
+                                    <InputError
+                                        :message="
+                                            fieldError(
+                                                `variants.${position}.channel_id`,
+                                            )
+                                        "
+                                    />
+                                </div>
                                 <span
                                     v-if="remaining(variant) !== null"
-                                    class="text-xs tabular-nums"
+                                    class="ml-auto font-mono text-sm"
                                     :class="
                                         (remaining(variant) ?? 0) < 0
                                             ? 'text-destructive'
@@ -483,36 +515,23 @@ const locked = computed(() => {
                                         }}
                                     </template>
                                     <template v-else>
-                                        {{ remaining(variant) }} characters left
+                                        <span class="sr-only">
+                                            {{ remaining(variant) }} characters
+                                            left:
+                                        </span>
+                                        {{ textLength(variant.body) }} /
+                                        {{
+                                            channel(variant.channel_id)
+                                                ?.max_body_length
+                                        }}
                                     </template>
                                 </span>
                             </div>
-                            <textarea
-                                :id="`body-${variant.channel_id}`"
-                                v-model="variant.body"
-                                rows="9"
-                                class="w-full rounded-md border border-input bg-transparent px-3 py-2 text-base leading-relaxed shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
-                            ></textarea>
-                            <InputError
-                                :message="
-                                    fieldError(`variants.${position}.body`)
-                                "
-                            />
-                            <InputError
-                                :message="
-                                    fieldError(
-                                        `variants.${position}.channel_id`,
-                                    )
-                                "
-                            />
                         </div>
 
-                        <div class="grid gap-2">
+                        <div class="grid gap-1.5">
                             <Label :for="`link-${variant.channel_id}`">
-                                Link
-                                <span class="font-normal text-muted-foreground">
-                                    - optional
-                                </span>
+                                Link (optional)
                             </Label>
                             <Input
                                 :id="`link-${variant.channel_id}`"
@@ -530,12 +549,14 @@ const locked = computed(() => {
 
                     <section
                         v-if="post && lockedVariants.length"
-                        class="grid gap-2 rounded-md border p-3"
+                        class="grid gap-3 rounded-2xl bg-card p-5.5 shadow-xs"
                     >
-                        <h2 class="font-medium">Already published</h2>
-                        <p class="text-muted-foreground">
-                            These stay as they are and are not sent again.
-                        </p>
+                        <div>
+                            <h2 class="text-heading">Already published</h2>
+                            <p class="mt-1 text-muted-foreground">
+                                These stay as they are and are not sent again.
+                            </p>
+                        </div>
                         <PostTexts
                             :post="{ ...post, variants: lockedVariants }"
                         />
@@ -545,10 +566,10 @@ const locked = computed(() => {
                 <template v-else-if="post">
                     <section
                         v-if="locked && post.can.return_to_draft"
-                        class="flex flex-wrap items-start justify-between gap-3 rounded-md border p-3"
+                        class="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-xl bg-card px-5.5 py-4 shadow-xs"
                         data-test="locked-notice"
                     >
-                        <p class="max-w-prose text-muted-foreground">
+                        <p class="max-w-[72ch] flex-[1_1_20rem] text-base">
                             {{ locked }}
                         </p>
                         <Button
@@ -563,32 +584,64 @@ const locked = computed(() => {
                         </Button>
                     </section>
 
-                    <PostTexts :post="post" />
+                    <section class="rounded-2xl bg-card p-5.5 shadow-xs">
+                        <PostTexts :post="post" />
+                    </section>
                 </template>
             </div>
 
-            <aside class="grid content-start gap-5 text-sm">
-                <section class="grid gap-1.5">
-                    <h2 class="font-medium">Status</h2>
-                    <p class="text-muted-foreground" data-test="post-status">
+            <aside class="grid content-start gap-4">
+                <section
+                    class="grid gap-2 rounded-xl p-5.5"
+                    :class="
+                        post?.state === 'scheduled'
+                            ? 'bg-panel text-panel-foreground'
+                            : 'bg-card shadow-xs'
+                    "
+                >
+                    <h2
+                        class="text-sm"
+                        :class="
+                            post?.state === 'scheduled'
+                                ? 'text-panel-muted'
+                                : 'text-muted-foreground'
+                        "
+                    >
+                        Status
+                    </h2>
+                    <p
+                        :class="
+                            post?.state === 'scheduled' ? 'font-semibold' : ''
+                        "
+                        data-test="post-status"
+                    >
                         {{ status }}
                     </p>
                     <p
                         v-if="post?.approval"
-                        class="text-muted-foreground"
+                        class="text-sm"
+                        :class="
+                            post.state === 'scheduled'
+                                ? 'text-panel-muted'
+                                : 'text-muted-foreground'
+                        "
                         data-test="post-approval"
                     >
                         Approved
                         <template v-if="post.approval.by">
                             by {{ post.approval.by }}
                         </template>
-                        on {{ formatDateTime(post.approval.at, timezone) }}.
+                        on
+                        <span class="font-mono">{{
+                            formatDateTime(post.approval.at, timezone)
+                        }}</span
+                        >.
                     </p>
                 </section>
 
                 <ul
                     v-if="refusedMessages.length"
-                    class="grid gap-1 text-destructive"
+                    class="grid gap-1 rounded-lg border-2 border-destructive bg-card px-4 py-3 text-base text-destructive"
                     role="alert"
                     data-test="post-errors"
                 >
@@ -597,17 +650,22 @@ const locked = computed(() => {
                     </li>
                 </ul>
 
-                <section v-if="editable" class="grid gap-2 border-t pt-4">
-                    <Label for="scheduled_at">Planned time</Label>
+                <section
+                    v-if="editable"
+                    class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
+                >
+                    <Label for="scheduled_at">
+                        Firing time, {{ timezone }}
+                    </Label>
                     <Input
                         id="scheduled_at"
                         v-model="form.scheduled_at"
                         type="datetime-local"
+                        class="font-mono"
                     />
-                    <p class="text-xs text-muted-foreground">
-                        On the clock of {{ timezone }}. Leave it empty to decide
-                        after approval. A post with a planned time is scheduled
-                        the moment it is approved.
+                    <p class="text-sm text-muted-foreground">
+                        Leave it empty to decide after approval. A post with a
+                        firing time is scheduled the moment it is approved.
                     </p>
                     <InputError
                         :message="
@@ -619,28 +677,36 @@ const locked = computed(() => {
 
                 <section
                     v-else-if="post?.can.schedule"
-                    class="grid gap-2 border-t pt-4"
+                    class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
                 >
                     <Label for="schedule_at">
                         {{
                             post.state === 'scheduled'
                                 ? 'Move to another time'
-                                : 'Publish at'
-                        }}
+                                : 'Firing time'
+                        }}, {{ timezone }}
                     </Label>
                     <Input
                         id="schedule_at"
                         v-model="scheduleAt"
                         type="datetime-local"
+                        class="font-mono"
                     />
-                    <p class="text-xs text-muted-foreground">
-                        On the clock of {{ timezone }}.
-                    </p>
                     <InputError :message="refused.scheduled_at" />
-                    <div class="flex flex-wrap gap-2">
+                    <div class="mt-1 grid gap-2">
+                        <!-- Giving an approved post its time is what moves
+                             the week forward, so it is the red action here.
+                             Moving a post that already has a time is not. -->
                         <Button
                             type="button"
-                            size="sm"
+                            :variant="
+                                post.state === 'scheduled'
+                                    ? 'default'
+                                    : 'signal'
+                            "
+                            :size="
+                                post.state === 'scheduled' ? 'default' : 'lg'
+                            "
                             :disabled="busy !== null || scheduleAt === ''"
                             data-test="schedule"
                             @click="
@@ -658,7 +724,6 @@ const locked = computed(() => {
                         </Button>
                         <Button
                             type="button"
-                            size="sm"
                             variant="outline"
                             :disabled="busy !== null"
                             data-test="publish-now"
@@ -669,8 +734,8 @@ const locked = computed(() => {
                         <Button
                             v-if="post.can.unschedule"
                             type="button"
-                            size="sm"
                             variant="ghost"
+                            class="text-muted-foreground"
                             :disabled="busy !== null"
                             data-test="unschedule"
                             @click="
@@ -687,37 +752,51 @@ const locked = computed(() => {
 
                 <section
                     v-if="post && post.state === 'draft'"
-                    class="grid gap-1.5 border-t pt-4"
+                    class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
                     data-test="readiness"
                 >
-                    <h2 class="font-medium">Before it can be approved</h2>
-                    <p v-if="form.isDirty" class="text-muted-foreground">
+                    <h2 class="text-sm text-muted-foreground">
+                        Before it can be approved
+                    </h2>
+                    <p v-if="form.isDirty" class="text-base">
                         Save the draft to check it again.
                     </p>
-                    <ul v-else-if="problems.length" class="grid gap-1">
+                    <ul v-else-if="problems.length" class="grid gap-1.5">
                         <li
                             v-for="problem in problems"
                             :key="problem"
-                            class="text-destructive"
+                            class="text-base text-destructive"
                         >
                             {{ problem }}
                         </li>
                     </ul>
-                    <p v-else class="text-muted-foreground">
-                        Nothing is missing. It is ready for approval.
+                    <p
+                        v-else
+                        class="flex items-baseline gap-2.5 rounded-md bg-secondary px-3.5 py-2.5 text-sm"
+                    >
+                        <span
+                            class="rounded-sm bg-success-fill px-2 py-0.5 text-xs font-bold text-white"
+                        >
+                            OK
+                        </span>
+                        <span>
+                            Nothing is missing. It is ready for approval.
+                        </span>
                     </p>
                 </section>
 
                 <section
                     v-else-if="post && problems.length"
-                    class="grid gap-1.5 border-t pt-4"
+                    class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
                 >
-                    <h2 class="font-medium">Cannot go out as it stands</h2>
-                    <ul class="grid gap-1">
+                    <h2 class="text-sm text-muted-foreground">
+                        Cannot go out as it stands
+                    </h2>
+                    <ul class="grid gap-1.5">
                         <li
                             v-for="problem in problems"
                             :key="problem"
-                            class="text-destructive"
+                            class="text-base text-destructive"
                         >
                             {{ problem }}
                         </li>
@@ -728,12 +807,31 @@ const locked = computed(() => {
                     v-if="
                         isNew || (post && Object.values(post.can).some(Boolean))
                     "
-                    class="flex flex-wrap gap-2 border-t pt-4"
+                    class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
                 >
+                    <!-- Approving is the one red action of this page. -->
+                    <Button
+                        v-if="post?.can.approve"
+                        type="button"
+                        variant="signal"
+                        size="lg"
+                        :disabled="
+                            form.isDirty || problems.length > 0 || busy !== null
+                        "
+                        data-test="approve"
+                        @click="approveNow"
+                    >
+                        <Spinner v-if="busy === 'approve'" />
+                        {{
+                            post.scheduled_at
+                                ? 'Approve and schedule'
+                                : 'Approve'
+                        }}
+                    </Button>
+
                     <Button
                         v-if="editable"
                         type="submit"
-                        size="sm"
                         :variant="post && !form.isDirty ? 'outline' : 'default'"
                         :disabled="
                             form.processing || form.variants.length === 0
@@ -746,28 +844,8 @@ const locked = computed(() => {
 
                     <template v-if="post">
                         <Button
-                            v-if="post.can.approve"
-                            type="button"
-                            size="sm"
-                            :disabled="
-                                form.isDirty ||
-                                problems.length > 0 ||
-                                busy !== null
-                            "
-                            data-test="approve"
-                            @click="approveNow"
-                        >
-                            <Spinner v-if="busy === 'approve'" />
-                            {{
-                                post.scheduled_at
-                                    ? 'Approve and schedule'
-                                    : 'Approve'
-                            }}
-                        </Button>
-                        <Button
                             v-if="post.can.retry"
                             type="button"
-                            size="sm"
                             :disabled="problems.length > 0 || busy !== null"
                             data-test="retry"
                             @click="confirming = 'retry'"
@@ -775,49 +853,56 @@ const locked = computed(() => {
                             <Spinner v-if="busy === 'retry'" />
                             Send again
                         </Button>
-                        <Button
-                            v-if="post.can.reject"
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            :disabled="busy !== null"
-                            data-test="reject"
-                            @click="
-                                act('reject', reject.url({ post: post.id }))
-                            "
+                        <div
+                            v-if="post.can.reject || post.can.delete"
+                            class="flex flex-wrap gap-2"
                         >
-                            Reject
-                        </Button>
-                        <Button
-                            v-if="post.can.delete"
-                            type="button"
-                            size="sm"
-                            variant="ghost"
-                            class="text-destructive hover:text-destructive"
-                            :disabled="busy !== null"
-                            data-test="delete"
-                            @click="confirming = 'delete'"
-                        >
-                            Delete
-                        </Button>
+                            <Button
+                                v-if="post.can.reject"
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                class="text-muted-foreground"
+                                :disabled="busy !== null"
+                                data-test="reject"
+                                @click="
+                                    act('reject', reject.url({ post: post.id }))
+                                "
+                            >
+                                Reject
+                            </Button>
+                            <Button
+                                v-if="post.can.delete"
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                class="ml-auto text-destructive hover:text-destructive"
+                                :disabled="busy !== null"
+                                data-test="delete"
+                                @click="confirming = 'delete'"
+                            >
+                                Delete
+                            </Button>
+                        </div>
                     </template>
+
+                    <p
+                        v-if="post?.can.approve && form.isDirty"
+                        class="text-sm text-muted-foreground"
+                    >
+                        Save the draft before you approve it, so that you
+                        approve what is saved.
+                    </p>
+
+                    <p
+                        v-if="post && post.state === 'failed' && post.can.retry"
+                        class="text-sm text-muted-foreground"
+                    >
+                        Before you send it again, check the channel itself. If
+                        the post is there after all, sending it again makes a
+                        duplicate.
+                    </p>
                 </section>
-
-                <p
-                    v-if="post?.can.approve && form.isDirty"
-                    class="text-xs text-muted-foreground"
-                >
-                    Save the draft before you approve it, so that you approve
-                    what is saved.
-                </p>
-
-                <p
-                    v-if="post && post.state === 'failed' && post.can.retry"
-                    class="text-xs text-muted-foreground"
-                >
-                    Before you send it again, check the channel itself. If the
-                    post is there after all, sending it again makes a duplicate.
-                </p>
 
                 <p
                     v-if="
@@ -826,13 +911,16 @@ const locked = computed(() => {
                         post.state !== 'published' &&
                         post.state !== 'publishing'
                     "
-                    class="text-xs text-muted-foreground"
+                    class="px-1 text-sm text-muted-foreground"
                 >
                     Owners and editors of this workspace can change posts.
                 </p>
 
-                <p v-if="post" class="text-xs text-muted-foreground">
-                    <Link :href="create()" class="underline underline-offset-4">
+                <p v-if="post" class="px-1 text-base">
+                    <Link
+                        :href="create()"
+                        class="inline-flex min-h-11 items-center font-semibold underline underline-offset-4"
+                    >
                         Write another post
                     </Link>
                 </p>
@@ -858,7 +946,7 @@ const locked = computed(() => {
                     </template>
                     <template v-else>Return this post to draft?</template>
                 </DialogTitle>
-                <DialogDescription>
+                <DialogDescription class="text-base">
                     <template v-if="dialog === 'delete'">
                         The post and its texts are removed for good. It was
                         never published, so nothing changes on any channel.
@@ -886,7 +974,7 @@ const locked = computed(() => {
                 </DialogDescription>
             </DialogHeader>
 
-            <div v-if="dialog === 'retry'" class="grid gap-3 text-sm">
+            <div v-if="dialog === 'retry'" class="grid gap-3 text-base">
                 <ul class="grid gap-1" data-test="retry-errors">
                     <li v-for="variant in pending" :key="variant.id">
                         {{ variant.channel_name }}:
@@ -895,11 +983,11 @@ const locked = computed(() => {
                         </span>
                     </li>
                 </ul>
-                <label class="flex items-start gap-2">
+                <label class="flex min-h-11 cursor-pointer items-start gap-3">
                     <input
                         v-model="checkedChannel"
                         type="checkbox"
-                        class="mt-0.5 size-4 shrink-0 accent-primary"
+                        class="mt-0.5 size-5 shrink-0 accent-primary"
                         data-test="checked-channel"
                     />
                     <span>

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -59,6 +58,22 @@ const statusLabels: Record<Channel['status'], string> = {
     pending: 'Not confirmed',
     needs_reconnect: 'Needs reconnecting',
     disconnected: 'Disconnected',
+};
+
+// The chip of a channel: a dot and a word, as for a post. A connection that
+// needs a person has a square dot, so it does not rest on colour alone.
+const statusChips: Record<Channel['status'], string> = {
+    active: 'bg-secondary text-secondary-foreground',
+    pending: 'bg-secondary text-secondary-foreground',
+    needs_reconnect: 'bg-destructive-fill text-white',
+    disconnected: 'bg-secondary text-muted-foreground',
+};
+
+const statusDots: Record<Channel['status'], string> = {
+    active: 'rounded-full bg-success',
+    pending: 'rounded-full ring-2 ring-foreground ring-inset',
+    needs_reconnect: 'rounded-[2px] bg-white',
+    disconnected: 'rounded-full ring-2 ring-idle ring-inset',
 };
 
 function canConnect(platform: string): boolean {
@@ -121,20 +136,22 @@ function access(channel: Channel): string {
 <template>
     <Head title="Channels" />
 
-    <div class="flex flex-1 flex-col gap-6 p-4">
-        <header class="flex flex-wrap items-start justify-between gap-3">
+    <div class="flex flex-1 flex-col gap-5.5 px-4 pt-2 pb-12 md:px-8 lg:px-11">
+        <header class="flex flex-wrap items-end justify-between gap-4">
             <div class="grid gap-1">
-                <h1 class="text-lg font-medium">Channels</h1>
-                <p class="text-sm text-muted-foreground">
+                <h1 class="text-title md:text-display">Channels</h1>
+                <p class="text-muted-foreground">
                     The Pages and profiles this workspace publishes to.
                 </p>
             </div>
 
-            <div v-if="can.manage && ready.length" class="flex gap-2">
+            <div
+                v-if="can.manage && ready.length"
+                class="flex flex-wrap gap-2.5"
+            >
                 <Button
                     v-for="platform in ready"
                     :key="platform.name"
-                    size="sm"
                     :disabled="connecting !== null"
                     :data-test="`connect-${platform.name}`"
                     @click="startConnect(platform.name)"
@@ -148,24 +165,24 @@ function access(channel: Channel): string {
         <section
             v-for="platform in notReady"
             :key="platform.name"
-            class="rounded-md border p-4 text-sm"
+            class="rounded-xl bg-card p-5.5 shadow-xs"
             :data-test="`setup-${platform.name}`"
         >
-            <h2 class="font-medium">
+            <h2 class="text-heading">
                 {{ platform.label }} is not set up on this instance
             </h2>
-            <p class="mt-1 text-muted-foreground">
+            <p class="mt-1 max-w-[72ch] text-muted-foreground">
                 Noon Gun connects through an app that you create with
                 {{ platform.label }} yourself. Until its credentials are in
                 place, nothing can be connected.
             </p>
-            <ul class="mt-3 grid list-disc gap-1.5 pl-5">
+            <ul class="mt-3 grid max-w-[72ch] list-disc gap-1.5 pl-5 text-base">
                 <li>
                     Create the app, and register this address in it as the
                     redirect address:
                     <code
                         v-if="platform.redirect_uri"
-                        class="rounded bg-muted px-1 py-0.5 font-mono text-xs break-all"
+                        class="rounded-sm bg-secondary px-1.5 py-0.5 font-mono text-xs break-all"
                         >{{ platform.redirect_uri }}</code
                     >
                 </li>
@@ -177,7 +194,7 @@ function access(channel: Channel): string {
                     >
                         <span v-if="position > 0"> and </span>
                         <code
-                            class="rounded bg-muted px-1 py-0.5 font-mono text-xs"
+                            class="rounded-sm bg-secondary px-1.5 py-0.5 font-mono text-xs"
                             >{{ name }}</code
                         >
                     </template>
@@ -186,18 +203,18 @@ function access(channel: Channel): string {
                 </li>
                 <li>Restart the containers, then come back to this page.</li>
             </ul>
-            <p class="mt-3 text-muted-foreground">
+            <p class="mt-3 text-sm text-muted-foreground">
                 The README describes each step.
             </p>
         </section>
 
         <section
             v-if="channels.length === 0 && ready.length"
-            class="rounded-md border p-4 text-sm"
+            class="rounded-xl bg-card p-5.5 shadow-xs"
             data-test="channels-empty"
         >
-            <h2 class="font-medium">No channels are connected yet</h2>
-            <p class="mt-1 text-muted-foreground">
+            <h2 class="text-heading">No channels are connected yet</h2>
+            <p class="mt-1 max-w-[72ch] text-muted-foreground">
                 <template v-if="can.manage">
                     Connect a Page to start publishing. You are sent to the
                     platform to sign in and choose what Noon Gun may post to,
@@ -209,145 +226,140 @@ function access(channel: Channel): string {
             </p>
         </section>
 
-        <div v-if="channels.length" class="overflow-x-auto rounded-md border">
-            <table class="w-full text-left text-sm">
-                <thead class="border-b text-muted-foreground">
-                    <tr>
-                        <th class="px-3 py-2 font-normal">Name</th>
-                        <th class="px-3 py-2 font-normal">Platform</th>
-                        <th class="px-3 py-2 font-normal">Status</th>
-                        <th class="px-3 py-2 font-normal">Access</th>
-                        <th class="px-3 py-2">
-                            <span class="sr-only">Actions</span>
-                        </th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr
-                        v-for="channel in channels"
-                        :key="channel.id"
-                        class="border-b align-top last:border-b-0"
-                        :data-test="`channel-${channel.id}`"
+        <ul v-if="channels.length" class="grid gap-3">
+            <li
+                v-for="channel in channels"
+                :key="channel.id"
+                class="flex flex-wrap items-start gap-x-6 gap-y-3 rounded-xl bg-card px-4 py-4 shadow-xs sm:px-6"
+                :class="
+                    channel.status === 'needs_reconnect' ||
+                    (channel.status === 'active' && channel.token_expired)
+                        ? 'border-2 border-destructive'
+                        : ''
+                "
+                :data-test="`channel-${channel.id}`"
+            >
+                <div class="grid min-w-0 flex-[1_1_18rem] gap-1.5">
+                    <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                        <h2
+                            class="text-lg"
+                            :class="
+                                channel.status === 'disconnected'
+                                    ? 'text-muted-foreground'
+                                    : 'font-semibold'
+                            "
+                        >
+                            {{ channel.display_name }}
+                        </h2>
+                        <span
+                            class="inline-flex w-fit items-center gap-2 rounded-full px-[11px] py-[3px] text-[0.875rem] leading-snug font-semibold whitespace-nowrap"
+                            :class="statusChips[channel.status]"
+                        >
+                            <span
+                                class="size-[9px] shrink-0"
+                                :class="statusDots[channel.status]"
+                                aria-hidden="true"
+                            ></span>
+                            {{ statusLabels[channel.status] }}
+                        </span>
+                    </div>
+                    <p
+                        class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground"
                     >
-                        <td class="px-3 py-2">
-                            <div
-                                :class="
-                                    channel.status === 'disconnected'
-                                        ? 'text-muted-foreground'
-                                        : 'font-medium'
-                                "
-                            >
-                                {{ channel.display_name }}
-                            </div>
-                            <div
-                                class="font-mono text-xs text-muted-foreground"
-                            >
-                                {{ channel.external_id }}
-                            </div>
-                            <p
-                                v-if="channel.status === 'pending'"
-                                class="mt-1 max-w-prose text-muted-foreground"
-                            >
-                                Access was granted but you have not confirmed
-                                it. Nothing is published here, and the access is
-                                erased shortly unless you keep it.
-                            </p>
-                            <p
-                                v-else-if="channel.status === 'needs_reconnect'"
-                                class="mt-1 max-w-prose text-destructive"
-                            >
-                                {{ channel.platform_label }} no longer accepts
-                                this connection. Nothing is published here until
-                                it is connected again.
-                            </p>
-                            <p
-                                v-else-if="
-                                    channel.status === 'active' &&
-                                    channel.token_expired
-                                "
-                                class="mt-1 max-w-prose text-destructive"
-                            >
-                                The access has expired. Nothing is published
-                                here until it is connected again.
-                            </p>
-                            <p
-                                v-else-if="
-                                    channel.status === 'active' &&
-                                    channel.token_expires_soon
-                                "
-                                class="mt-1 max-w-prose text-muted-foreground"
-                            >
-                                The access ends soon. Connect again to renew it.
-                            </p>
-                        </td>
-                        <td class="px-3 py-2">{{ channel.platform_label }}</td>
-                        <td class="px-3 py-2">
-                            <Badge
-                                :variant="
-                                    channel.status === 'needs_reconnect'
-                                        ? 'destructive'
-                                        : channel.status === 'active'
-                                          ? 'secondary'
-                                          : 'outline'
-                                "
-                            >
-                                {{ statusLabels[channel.status] }}
-                            </Badge>
-                        </td>
-                        <td class="px-3 py-2 whitespace-nowrap">
-                            {{ access(channel) }}
-                        </td>
-                        <td class="px-3 py-2">
-                            <div
-                                v-if="can.manage"
-                                class="flex justify-end gap-2"
-                            >
-                                <Button
-                                    v-if="
-                                        channel.status === 'pending' &&
-                                        selection_open
-                                    "
-                                    size="sm"
-                                    as-child
-                                >
-                                    <Link :href="chooseChannels()">Choose</Link>
-                                </Button>
-                                <Button
-                                    v-if="
-                                        channel.status !== 'pending' &&
-                                        canConnect(channel.platform) &&
-                                        (channel.status !== 'active' ||
-                                            channel.token_expired ||
-                                            channel.token_expires_soon)
-                                    "
-                                    size="sm"
-                                    :variant="
-                                        channel.status === 'disconnected'
-                                            ? 'outline'
-                                            : 'default'
-                                    "
-                                    :disabled="connecting !== null"
-                                    @click="startConnect(channel.platform)"
-                                >
-                                    Connect again
-                                </Button>
-                                <Button
-                                    v-if="
-                                        channel.status !== 'disconnected' &&
-                                        channel.status !== 'pending'
-                                    "
-                                    size="sm"
-                                    variant="outline"
-                                    @click="toDisconnect = channel"
-                                >
-                                    Disconnect
-                                </Button>
-                            </div>
-                        </td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+                        <span
+                            class="rounded-sm bg-secondary px-2.5 py-1 text-foreground"
+                        >
+                            {{ channel.platform_label }}
+                        </span>
+                        <span class="font-mono text-xs break-all">
+                            {{ channel.external_id }}
+                        </span>
+                    </p>
+                    <p
+                        v-if="channel.status === 'pending'"
+                        class="max-w-[72ch] text-base"
+                    >
+                        Access was granted but you have not confirmed it.
+                        Nothing is published here, and the access is erased
+                        shortly unless you keep it.
+                    </p>
+                    <p
+                        v-else-if="channel.status === 'needs_reconnect'"
+                        class="max-w-[72ch] text-base text-destructive"
+                    >
+                        {{ channel.platform_label }} no longer accepts this
+                        connection. Nothing is published here until it is
+                        connected again.
+                    </p>
+                    <p
+                        v-else-if="
+                            channel.status === 'active' && channel.token_expired
+                        "
+                        class="max-w-[72ch] text-base text-destructive"
+                    >
+                        The access has expired. Nothing is published here until
+                        it is connected again.
+                    </p>
+                    <p
+                        v-else-if="
+                            channel.status === 'active' &&
+                            channel.token_expires_soon
+                        "
+                        class="max-w-[72ch] text-base text-warning"
+                    >
+                        The access ends soon. Connect again to renew it.
+                    </p>
+                </div>
+
+                <dl class="grid shrink-0 gap-0.5 text-sm sm:w-44">
+                    <dt class="text-muted-foreground">Access</dt>
+                    <dd class="text-base">{{ access(channel) }}</dd>
+                </dl>
+
+                <div
+                    v-if="can.manage"
+                    class="flex shrink-0 flex-wrap justify-end gap-2 max-sm:w-full"
+                >
+                    <Button
+                        v-if="channel.status === 'pending' && selection_open"
+                        size="sm"
+                        as-child
+                    >
+                        <Link :href="chooseChannels()">Choose</Link>
+                    </Button>
+                    <Button
+                        v-if="
+                            channel.status !== 'pending' &&
+                            canConnect(channel.platform) &&
+                            (channel.status !== 'active' ||
+                                channel.token_expired ||
+                                channel.token_expires_soon)
+                        "
+                        size="sm"
+                        :variant="
+                            channel.status === 'disconnected'
+                                ? 'outline'
+                                : 'default'
+                        "
+                        :disabled="connecting !== null"
+                        @click="startConnect(channel.platform)"
+                    >
+                        Connect again
+                    </Button>
+                    <Button
+                        v-if="
+                            channel.status !== 'disconnected' &&
+                            channel.status !== 'pending'
+                        "
+                        size="sm"
+                        variant="outline"
+                        @click="toDisconnect = channel"
+                    >
+                        Disconnect
+                    </Button>
+                </div>
+            </li>
+        </ul>
 
         <p
             v-if="!can.manage && channels.length"
@@ -361,7 +373,9 @@ function access(channel: Channel): string {
             v-if="can.manage && ready.some((platform) => platform.redirect_uri)"
             class="grid gap-1 text-sm text-muted-foreground"
         >
-            <h2 class="text-foreground">Redirect addresses</h2>
+            <h2 class="text-base font-semibold text-foreground">
+                Redirect addresses
+            </h2>
             <p>
                 Each platform app must list the address below exactly as it is
                 written. It follows APP_URL.
@@ -370,7 +384,7 @@ function access(channel: Channel): string {
                 <div
                     v-for="platform in ready"
                     :key="platform.name"
-                    class="flex flex-wrap gap-x-2"
+                    class="flex flex-wrap items-baseline gap-x-2"
                 >
                     <dt>{{ platform.label }}</dt>
                     <dd class="font-mono text-xs leading-5 break-all">
@@ -390,7 +404,7 @@ function access(channel: Channel): string {
                 <DialogTitle>
                     Disconnect {{ toDisconnect?.display_name }}?
                 </DialogTitle>
-                <DialogDescription>
+                <DialogDescription class="text-base">
                     Noon Gun erases the access it holds for this channel. Posts
                     that are already published stay where they are and keep
                     their links. Posts that are scheduled for this channel fail

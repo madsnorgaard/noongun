@@ -29,7 +29,7 @@ const { isCurrentOrParentUrl } = useCurrentUrl();
 </script>
 
 <template>
-    <div class="px-4 py-6">
+    <div class="px-4 pt-4 pb-12 md:px-8 lg:px-11">
         <Heading
             title="Settings"
             description="Manage your profile and account settings"
@@ -47,7 +47,11 @@ const { isCurrentOrParentUrl } = useCurrentUrl();
                         variant="ghost"
                         :class="[
                             'w-full justify-start',
-                            { 'bg-muted': isCurrentOrParentUrl(item.href) },
+                            {
+                                'bg-card shadow-xs': isCurrentOrParentUrl(
+                                    item.href,
+                                ),
+                            },
                         ]"
                         as-child
                     >

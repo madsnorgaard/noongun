@@ -29,7 +29,8 @@ void createInertiaApp({
         });
     },
     progress: {
-        color: '#4B5563',
+        // Brass, the fuse.
+        color: '#E0B43C',
     },
 });
 

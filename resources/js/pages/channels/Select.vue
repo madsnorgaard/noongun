@@ -52,38 +52,44 @@ function keepNone(): void {
     <Head title="Choose channels" />
 
     <form
-        class="flex max-w-2xl flex-1 flex-col gap-6 p-4"
+        class="flex max-w-3xl flex-1 flex-col gap-5.5 px-4 pt-2 pb-12 md:px-8 lg:px-11"
         @submit.prevent="submit"
     >
         <header class="grid gap-1">
-            <h1 class="text-lg font-medium">Choose what to connect</h1>
-            <p class="text-sm text-muted-foreground">
+            <h1 class="text-title">Choose what to connect</h1>
+            <p class="max-w-[72ch] text-muted-foreground">
                 Access was granted to the channels below, and none of them is
                 connected yet. Tick the ones this workspace publishes to. For
                 the others, Noon Gun erases the access it received.
             </p>
         </header>
 
-        <fieldset class="rounded-md border text-sm">
+        <fieldset
+            class="grid min-w-0 divide-y divide-border rounded-xl bg-card px-2 py-1 shadow-xs"
+        >
             <legend class="sr-only">Channels to connect</legend>
             <label
                 v-for="channel in channels"
                 :key="channel.id"
-                class="flex cursor-pointer items-center gap-3 border-b px-3 py-2 last:border-b-0 hover:bg-accent/50"
+                class="flex min-h-14 cursor-pointer items-center gap-3.5 rounded-md px-3 py-3 hover:bg-accent/50"
             >
                 <input
                     v-model="form.keep"
                     type="checkbox"
                     name="keep[]"
                     :value="channel.id"
-                    class="size-4 accent-primary"
+                    class="size-5 shrink-0 accent-primary"
                     :data-test="`keep-${channel.id}`"
                 />
-                <span class="grid">
-                    <span class="font-medium">{{ channel.display_name }}</span>
-                    <span class="text-xs text-muted-foreground">
+                <span class="grid min-w-0 gap-0.5">
+                    <span class="font-semibold">{{
+                        channel.display_name
+                    }}</span>
+                    <span class="text-sm text-muted-foreground">
                         {{ channel.platform_label }} -
-                        <span class="font-mono">{{ channel.external_id }}</span>
+                        <span class="font-mono text-xs break-all">{{
+                            channel.external_id
+                        }}</span>
                     </span>
                 </span>
             </label>
@@ -91,9 +97,10 @@ function keepNone(): void {
 
         <InputError :message="form.errors.keep" />
 
-        <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center gap-2.5">
             <Button
                 type="submit"
+                class="max-sm:w-full"
                 :disabled="
                     form.processing || cancelling || form.keep.length === 0
                 "
@@ -105,6 +112,7 @@ function keepNone(): void {
             <Button
                 type="button"
                 variant="ghost"
+                class="text-muted-foreground max-sm:w-full"
                 :disabled="form.processing || cancelling"
                 data-test="keep-none"
                 @click="keepNone"
@@ -114,21 +122,25 @@ function keepNone(): void {
             </Button>
         </div>
 
-        <p class="text-sm text-muted-foreground">
+        <p class="max-w-[72ch] text-sm text-muted-foreground">
             If you leave this page without choosing, none of them is connected
-            and the access is erased after {{ minutes }} minutes.
+            and the access is erased after
+            <span class="font-mono">{{ minutes }}</span> minutes.
         </p>
 
-        <section v-if="renewed.length" class="grid gap-1 text-sm">
-            <h2 class="font-medium">Already connected</h2>
-            <p class="text-muted-foreground">
+        <section
+            v-if="renewed.length"
+            class="grid gap-1 rounded-xl bg-card p-5.5 shadow-xs"
+        >
+            <h2 class="text-heading">Already connected</h2>
+            <p class="max-w-[72ch] text-muted-foreground">
                 These were connected before. Their access was renewed and they
                 are not affected by your choice.
             </p>
-            <ul class="mt-1 grid gap-0.5">
+            <ul class="mt-2 grid gap-1">
                 <li v-for="channel in renewed" :key="channel.id">
                     {{ channel.display_name }}
-                    <span class="text-xs text-muted-foreground">
+                    <span class="text-sm text-muted-foreground">
                         - {{ channel.platform_label }}
                     </span>
                 </li>

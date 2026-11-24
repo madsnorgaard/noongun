@@ -16,7 +16,7 @@ const timezone = useWorkspaceTimezone();
 </script>
 
 <template>
-    <div class="grid gap-3">
+    <div class="grid divide-y divide-border">
         <p v-if="post.variants.length === 0" class="text-muted-foreground">
             No channel and no text yet.
         </p>
@@ -24,69 +24,86 @@ const timezone = useWorkspaceTimezone();
         <div
             v-for="variant in post.variants"
             :key="variant.id"
-            class="grid gap-1"
+            class="grid gap-x-6 gap-y-2 py-4 first:pt-0 last:pb-0 sm:grid-cols-[11rem_minmax(0,1fr)]"
             :data-test="`variant-${variant.id}`"
         >
-            <div class="text-xs text-muted-foreground">
-                {{ variant.channel_name }} - {{ variant.platform_label }}
+            <div
+                class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:flex-col sm:items-start"
+            >
+                <span
+                    class="max-w-full truncate rounded-sm bg-secondary px-2.5 py-1 text-sm"
+                >
+                    {{ variant.channel_name }}
+                </span>
+                <span class="text-xs text-muted-foreground">
+                    {{ variant.platform_label }}
+                </span>
             </div>
 
-            <p
-                v-if="variant.body"
-                class="max-w-prose break-words whitespace-pre-line"
-                :class="clamp ? 'line-clamp-2' : ''"
-            >
-                {{ variant.body }}
-            </p>
-            <p v-else class="text-muted-foreground">No text yet.</p>
+            <div class="grid min-w-0 gap-2">
+                <p
+                    v-if="variant.body"
+                    class="max-w-[72ch] break-words whitespace-pre-line"
+                    :class="clamp ? 'line-clamp-2' : ''"
+                >
+                    {{ variant.body }}
+                </p>
+                <p v-else class="text-muted-foreground">No text yet.</p>
 
-            <a
-                v-if="webAddress(variant.link)"
-                :href="webAddress(variant.link) ?? undefined"
-                target="_blank"
-                rel="noopener noreferrer"
-                class="w-fit max-w-full truncate text-xs text-muted-foreground underline underline-offset-4"
-            >
-                {{ variant.link }}
-            </a>
+                <a
+                    v-if="webAddress(variant.link)"
+                    :href="webAddress(variant.link) ?? undefined"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="w-fit max-w-full truncate text-sm text-muted-foreground underline underline-offset-4"
+                >
+                    {{ variant.link }}
+                </a>
 
-            <p v-if="variant.published" class="text-xs text-muted-foreground">
-                Published
-                <template v-if="variant.published_at">
-                    {{ formatDateTime(variant.published_at, timezone) }}
-                </template>
-                <template v-if="webAddress(variant.permalink)">
-                    -
-                    <a
-                        :href="webAddress(variant.permalink) ?? undefined"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="text-foreground underline underline-offset-4"
-                        :data-test="`permalink-${variant.id}`"
-                    >
-                        View on {{ variant.platform_label }}
-                    </a>
-                </template>
-            </p>
-            <p
-                v-else-if="variant.error && post.state === 'failed'"
-                class="max-w-prose text-destructive"
-            >
-                Not published. {{ variant.error }}
-            </p>
-            <p
-                v-else-if="variant.error && post.state === 'publishing'"
-                class="max-w-prose text-xs text-muted-foreground"
-            >
-                The last attempt did not get through. It is tried again
-                automatically. {{ variant.error }}
-            </p>
-            <p
-                v-else-if="variant.error"
-                class="max-w-prose text-xs text-muted-foreground"
-            >
-                An earlier attempt did not get through. {{ variant.error }}
-            </p>
+                <p
+                    v-if="variant.published"
+                    class="text-sm text-muted-foreground"
+                >
+                    Published
+                    <span v-if="variant.published_at" class="font-mono">
+                        {{ formatDateTime(variant.published_at, timezone) }}
+                    </span>
+                    <template v-if="webAddress(variant.permalink)">
+                        -
+                        <a
+                            :href="webAddress(variant.permalink) ?? undefined"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            class="font-semibold text-foreground underline underline-offset-4"
+                            :data-test="`permalink-${variant.id}`"
+                        >
+                            View on {{ variant.platform_label }}
+                        </a>
+                    </template>
+                </p>
+                <p
+                    v-else-if="variant.error && post.state === 'failed'"
+                    class="max-w-[72ch] text-base"
+                >
+                    <span class="font-semibold text-destructive">
+                        Not published.
+                    </span>
+                    {{ variant.error }}
+                </p>
+                <p
+                    v-else-if="variant.error && post.state === 'publishing'"
+                    class="max-w-[72ch] text-sm text-muted-foreground"
+                >
+                    The last attempt did not get through. It is tried again
+                    automatically. {{ variant.error }}
+                </p>
+                <p
+                    v-else-if="variant.error"
+                    class="max-w-[72ch] text-sm text-muted-foreground"
+                >
+                    An earlier attempt did not get through. {{ variant.error }}
+                </p>
+            </div>
         </div>
     </div>
 </template>
