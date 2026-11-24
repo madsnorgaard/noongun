@@ -7,15 +7,49 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * The Noon Gun theme. docs/design.md explains every token below and where it
+ * comes from. Pages use these names and never a raw colour.
+ */
 @theme inline {
     --font-sans:
         'Instrument Sans', ui-sans-serif, system-ui, sans-serif,
         'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol',
         'Noto Color Emoji';
+    --font-mono:
+        'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas,
+        monospace;
 
-    --radius-lg: var(--radius);
-    --radius-md: calc(var(--radius) - 2px);
-    --radius-sm: calc(var(--radius) - 4px);
+    /* The guide sets labels and buttons at 600. Only 400, 600 and 700 are
+       shipped, so "medium" is the 600 cut. */
+    --font-weight-medium: 600;
+
+    /* Type scale. xs and sm replace the Tailwind sizes, the rest are added. */
+    --text-xs: 0.8125rem;
+    --text-xs--line-height: 1.4;
+    --text-sm: 0.9375rem;
+    --text-sm--line-height: 1.45;
+    --text-body: 1.0625rem;
+    --text-body--line-height: 1.5;
+    --text-heading: 1.375rem;
+    --text-heading--line-height: 1.2;
+    --text-heading--letter-spacing: -0.02em;
+    --text-heading--font-weight: 700;
+    --text-title: 1.75rem;
+    --text-title--line-height: 1.15;
+    --text-title--letter-spacing: -0.025em;
+    --text-title--font-weight: 700;
+    --text-display: 2.375rem;
+    --text-display--line-height: 1.1;
+    --text-display--letter-spacing: -0.03em;
+    --text-display--font-weight: 700;
+
+    /* Radii: tags 8, controls 12, banners 14, cards 20, large panels 24. */
+    --radius-sm: 0.5rem;
+    --radius-md: var(--radius);
+    --radius-lg: 0.875rem;
+    --radius-xl: 1.25rem;
+    --radius-2xl: 1.5rem;
 
     --color-background: var(--background);
     --color-foreground: var(--foreground);
@@ -29,6 +63,10 @@
     --color-primary: var(--primary);
     --color-primary-foreground: var(--primary-foreground);
 
+    --color-signal: var(--signal);
+    --color-signal-hover: var(--signal-hover);
+    --color-signal-foreground: var(--signal-foreground);
+
     --color-secondary: var(--secondary);
     --color-secondary-foreground: var(--secondary-foreground);
 
@@ -40,6 +78,22 @@
 
     --color-destructive: var(--destructive);
     --color-destructive-foreground: var(--destructive-foreground);
+    --color-destructive-fill: var(--destructive-fill);
+
+    --color-success: var(--success);
+    --color-success-fill: var(--success-fill);
+
+    --color-warning: var(--warning);
+    --color-warning-fill: var(--warning-fill);
+    --color-warning-surface: var(--warning-surface);
+
+    --color-brass: var(--brass);
+    --color-idle: var(--idle);
+
+    --color-panel: var(--panel);
+    --color-panel-foreground: var(--panel-foreground);
+    --color-panel-muted: var(--panel-muted);
+    --color-panel-track: var(--panel-track);
 
     --color-border: var(--border);
     --color-input: var(--input);
@@ -62,74 +116,123 @@
 }
 
 :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-    --destructive: oklch(0.577 0.245 27.325);
-    --destructive-foreground: oklch(0.577 0.245 27.325);
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.87 0 0);
-    --chart-1: oklch(0.646 0.222 41.116);
-    --chart-2: oklch(0.6 0.118 184.704);
-    --chart-3: oklch(0.398 0.07 227.392);
-    --chart-4: oklch(0.828 0.189 84.429);
-    --chart-5: oklch(0.769 0.188 70.08);
-    --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.87 0 0);
+    /* Powder ground, Paper cards. */
+    --background: #f5f5f7;
+    --foreground: #1d1d1f;
+    --card: #ffffff;
+    --card-foreground: #1d1d1f;
+    --popover: #ffffff;
+    --popover-foreground: #1d1d1f;
+
+    /* Gunmetal: chrome and the ordinary filled button. */
+    --primary: #15171a;
+    --primary-foreground: #ffffff;
+
+    /* Signal red: the one action per view that moves the week forward. */
+    --signal: #d4301f;
+    --signal-hover: #bc2a1b;
+    --signal-foreground: #ffffff;
+
+    --secondary: #f0f0f3;
+    --secondary-foreground: #1d1d1f;
+    --muted: #f0f0f3;
+    --muted-foreground: #55555a;
+    --accent: #e8e8ed;
+    --accent-foreground: #1d1d1f;
+
+    /* "destructive", "success" and "warning" are text and border colours.
+       The "-fill" tokens are backgrounds that carry white text. */
+    --destructive: #b3261e;
+    --destructive-foreground: #b3261e;
+    --destructive-fill: #b3261e;
+    --success: #1b7a45;
+    --success-fill: #1b7a45;
+    --warning: #8a5a00;
+    --warning-fill: #8a5a00;
+    --warning-surface: #fff4d6;
+
+    /* Brass, "the fuse": dots and progress, never text on a light surface. */
+    --brass: #e0b43c;
+    --idle: #8e8e93;
+
+    /* The gunmetal panel: next firing, a post that is loaded. */
+    --panel: #15171a;
+    --panel-foreground: #ffffff;
+    --panel-muted: #b9b9c0;
+    --panel-track: #2c2f34;
+
+    --border: #e8e8ed;
+    /* The guide draws control borders in #C7C7CC, which is 1.7:1 on Paper.
+       This shade reaches 3:1 on Paper and on Powder. */
+    --input: #8a8a90;
+    --ring: #15171a;
+
+    --chart-1: #d4301f;
+    --chart-2: #1b7a45;
+    --chart-3: #15171a;
+    --chart-4: #e0b43c;
+    --chart-5: #8e8e93;
+
+    --radius: 0.75rem;
+
+    --sidebar: #ebebef;
+    --sidebar-foreground: #1d1d1f;
+    --sidebar-primary: #d4301f;
+    --sidebar-primary-foreground: #ffffff;
+    --sidebar-accent: #e1e1e6;
+    --sidebar-accent-foreground: #1d1d1f;
+    --sidebar-border: #e1e1e6;
+    --sidebar-ring: #15171a;
 }
 
+/*
+ * The guide draws a light interface only. The dark theme keeps every role and
+ * swaps the surfaces: Gunmetal becomes the ground, the greys the guide uses
+ * on its gunmetal panels become cards, tracks and secondary text, and the
+ * ordinary filled button turns to Powder so it still reads as the chrome
+ * colour. Signal red, Brass and the fills that carry white text do not change.
+ */
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.145 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.145 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.985 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.396 0.141 25.723);
-    --destructive-foreground: oklch(0.637 0.237 25.331);
-    --border: oklch(0.269 0 0);
-    --input: oklch(0.269 0 0);
-    --ring: oklch(0.439 0 0);
-    --chart-1: oklch(0.488 0.243 264.376);
-    --chart-2: oklch(0.696 0.17 162.48);
-    --chart-3: oklch(0.769 0.188 70.08);
-    --chart-4: oklch(0.627 0.265 303.9);
-    --chart-5: oklch(0.645 0.246 16.439);
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.985 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(0.269 0 0);
-    --sidebar-ring: oklch(0.439 0 0);
+    --background: #15171a;
+    --foreground: #f5f5f7;
+    --card: #1f2226;
+    --card-foreground: #f5f5f7;
+    --popover: #1f2226;
+    --popover-foreground: #f5f5f7;
+
+    --primary: #f5f5f7;
+    --primary-foreground: #15171a;
+
+    --secondary: #2c2f34;
+    --secondary-foreground: #f5f5f7;
+    --muted: #2c2f34;
+    --muted-foreground: #b9b9c0;
+    --accent: #353940;
+    --accent-foreground: #f5f5f7;
+
+    --destructive: #ff8a7a;
+    --destructive-foreground: #ff8a7a;
+    --success: #6fcf97;
+    --warning: #e0b43c;
+    --warning-surface: #3a3115;
+
+    --panel: #2c2f34;
+    --panel-foreground: #ffffff;
+    --panel-muted: #b9b9c0;
+    --panel-track: #15171a;
+
+    --border: #2c2f34;
+    --input: #74787f;
+    --ring: #f5f5f7;
+
+    --chart-3: #f5f5f7;
+
+    --sidebar: #101214;
+    --sidebar-foreground: #f5f5f7;
+    --sidebar-accent: #24272c;
+    --sidebar-accent-foreground: #f5f5f7;
+    --sidebar-border: #24272c;
+    --sidebar-ring: #f5f5f7;
 }
 
 @layer base {
@@ -138,6 +241,35 @@
     }
 
     body {
-        @apply bg-background text-foreground;
+        @apply bg-background text-body text-foreground;
+    }
+
+    /* Anything that can take focus and does not draw its own ring. */
+    :where(
+        a,
+        button,
+        input,
+        select,
+        textarea,
+        summary,
+        [tabindex]
+    ):focus-visible {
+        outline: 3px solid var(--ring);
+        outline-offset: 2px;
+    }
+}
+
+/* The dot of a post that is being published right now. */
+@keyframes ng-pulse {
+    50% {
+        opacity: 0.35;
+    }
+}
+
+@utility animate-ng-pulse {
+    animation: ng-pulse 1.6s ease-in-out infinite;
+
+    @media (prefers-reduced-motion: reduce) {
+        animation: none;
     }
 }
