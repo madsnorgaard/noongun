@@ -6,13 +6,14 @@ use App\Domain\Content\Models\Post;
 use LogicException;
 
 /**
- * Only drafts and rejected posts with nothing on a platform can be deleted.
+ * Only drafts and rejected posts with nothing on a platform, and nothing
+ * that may be on a platform, can be deleted.
  * Everything else is, or is about to become, a record of something public.
  */
 class PostNotDeletable extends LogicException
 {
     public static function for(Post $post): self
     {
-        return new self("Post #{$post->getKey()} is {$post->state->value} or has a published variant and cannot be deleted.");
+        return new self("Post #{$post->getKey()} is {$post->state->value}, or has a variant that is or may be on its platform, and cannot be deleted.");
     }
 }

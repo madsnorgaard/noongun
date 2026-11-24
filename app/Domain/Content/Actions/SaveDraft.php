@@ -37,7 +37,9 @@ final class SaveDraft
     /**
      * One entry per channel. Variants of channels that are not listed are
      * removed. A variant that is already on its platform is never changed
-     * or removed, whatever is passed.
+     * or removed, whatever is passed. A variant whose outcome is unknown
+     * (the platform was called and may hold the post) can be reworded but
+     * is never removed: it and its error text are the only trace.
      *
      * @param  list<array{channel_id: int, body: string, link: string|null}>  $variants
      *
@@ -89,7 +91,7 @@ final class SaveDraft
         $existing = $post->variants()->get()->keyBy('channel_id');
 
         foreach ($existing as $channelId => $variant) {
-            if (! isset($wanted[$channelId]) && ! $variant->isPublished()) {
+            if (! isset($wanted[$channelId]) && ! $variant->isPublished() && ! $variant->hasUnknownOutcome()) {
                 $variant->delete();
             }
         }
