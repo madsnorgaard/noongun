@@ -237,6 +237,27 @@ describe('connect', function () {
             ->and(DB::table('channels')->count())->toBe(1);
     })->with(['needsReconnect', 'disconnected', 'expired']);
 
+    it('uses the current workspace of this moment, not one kept from when the adapter was built', function () {
+        fakeGraph(['accounts' => 'me_accounts_one_page']);
+
+        $adapter = facebookAdapter();
+        $adapter->connect($this->workspace, 'test-auth-code');
+
+        // What a queue worker or Octane does between two jobs or requests:
+        // the scoped CurrentWorkspace is thrown away, the manager and the
+        // adapter it caches live on.
+        app()->forgetScopedInstances();
+
+        expect(facebookAdapter())->toBe($adapter);
+
+        $other = Workspace::factory()->create();
+        $channel = facebookAdapter()->connect($other, 'test-auth-code')->sole();
+
+        expect($channel->workspace_id)->toBe($other->id)
+            ->and(DB::table('channels')->where('workspace_id', $other->id)->count())->toBe(1)
+            ->and(DB::table('channels')->where('workspace_id', $this->workspace->id)->count())->toBe(1);
+    });
+
     it('keeps the same Page apart in two workspaces', function () {
         $other = Workspace::factory()->create(['timezone' => 'Europe/Copenhagen']);
         $theirs = inWorkspace($other, fn () => Channel::factory()->create([
