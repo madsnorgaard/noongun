@@ -41,6 +41,14 @@ const title = computed(() => {
     return `${formatDate(props.period, { day: 'numeric', month: 'long' })} - ${formatDate(last, { day: 'numeric', month: 'long', year: 'numeric' })}`;
 });
 
+// Below the md width a month lists only the days that have posts, so a
+// month without any would be an empty box.
+const emptyMonth = computed(
+    () =>
+        props.view === 'month' &&
+        props.days.every((day) => day.posts.length === 0),
+);
+
 const weekdays = computed(() =>
     props.days
         .slice(0, 7)
@@ -143,7 +151,18 @@ function isPlan(entry: CalendarEntry): boolean {
             </div>
         </header>
 
-        <div class="overflow-hidden rounded-md border text-sm">
+        <p
+            v-if="emptyMonth"
+            class="text-sm text-muted-foreground md:hidden"
+            data-test="calendar-empty"
+        >
+            No posts this month.
+        </p>
+
+        <div
+            class="overflow-hidden rounded-md border text-sm"
+            :class="emptyMonth ? 'hidden md:block' : ''"
+        >
             <div
                 v-if="view === 'month'"
                 class="hidden grid-cols-7 border-b text-xs text-muted-foreground md:grid"

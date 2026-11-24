@@ -37,7 +37,8 @@ export function formatDateTime(instant: string, timezone: string): string {
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
-        hour12: false,
+        // Not hour12: false, which some browsers show as 24:05 after midnight.
+        hourCycle: 'h23',
         timeZone: timezone,
     }).format(new Date(instant));
 }
@@ -77,4 +78,22 @@ export function problemList(post: Post): string[] {
  */
 export function webAddress(url: string | null): string | null {
     return url !== null && /^https?:\/\//i.test(url) ? url : null;
+}
+
+/**
+ * The start of the first text of a post, to name it where there is no room
+ * for more, for example in the label of a checkbox.
+ */
+export function shortText(post: Post, length = 60): string {
+    const text = (post.variants[0]?.body ?? '').replace(/\s+/g, ' ').trim();
+
+    if (text === '') {
+        return 'a post without text';
+    }
+
+    const characters = Array.from(text);
+
+    return characters.length > length
+        ? `${characters.slice(0, length).join('')}...`
+        : text;
 }
