@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "a66b58d9-2b2f-48a3-8ad0-0b260e386cfa",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:47.109Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "dependency",
+    "toEntityId": "24b0de2b-58a4-4118-84c8-102a71f0ec10",
+    "relationType": "uses",
+    "strength": null,
+    "description": "M3 uses Laravel Horizon"
+  },
+  "seq": 1
+}

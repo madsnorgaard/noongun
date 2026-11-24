@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "b3281fa9-d3fb-498f-b0c8-2d14cd989cfa",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:47.410Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "dependency",
+    "toEntityId": "6046f02b-3f39-4df4-8351-670610de0d0c",
+    "relationType": "uses",
+    "strength": null,
+    "description": "M3 uses Laravel"
+  },
+  "seq": 1
+}

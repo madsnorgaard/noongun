@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "7406c16f-0a6d-48fc-9537-59762854b8b1",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:44.664Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "component",
+    "toEntityId": "f2ed89d6-f480-414d-b3a7-ff7d8aad4a5d",
+    "relationType": "involves",
+    "strength": null,
+    "description": "M3 builds on DockerStack"
+  },
+  "seq": 1
+}

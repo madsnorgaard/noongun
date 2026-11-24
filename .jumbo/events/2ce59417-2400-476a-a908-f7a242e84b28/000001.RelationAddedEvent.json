@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "2ce59417-2400-476a-a908-f7a242e84b28",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:43.723Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "decision",
+    "toEntityId": "5d8212e6-4823-44a5-8f4b-218c6fb41854",
+    "relationType": "follows",
+    "strength": null,
+    "description": "M3 follows: Media on local disk first, S3-compatible later"
+  },
+  "seq": 1
+}

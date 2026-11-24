@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "126ea110-63fc-475f-9cbe-cd60f132a79c",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:40.639Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "invariant",
+    "toEntityId": "5d206b99-9d31-4e9e-aaad-f499a962fcf1",
+    "relationType": "must-respect",
+    "strength": null,
+    "description": "M3 must respect: Tokens and API keys encrypted at rest, never logged"
+  },
+  "seq": 1
+}

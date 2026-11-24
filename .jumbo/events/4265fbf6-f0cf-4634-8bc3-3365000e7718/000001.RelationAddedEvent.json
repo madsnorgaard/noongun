@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "4265fbf6-f0cf-4634-8bc3-3365000e7718",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:44.991Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "component",
+    "toEntityId": "fe3bfef5-559a-4dd8-b385-bf61f84fd210",
+    "relationType": "involves",
+    "strength": null,
+    "description": "M3 builds on NoonGunConfig"
+  },
+  "seq": 1
+}

@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "d6986998-3324-41ed-9f8f-dc8034acde9c",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:41.889Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "invariant",
+    "toEntityId": "459788a4-a8a6-43e3-bbbe-a79669f4527c",
+    "relationType": "must-respect",
+    "strength": null,
+    "description": "M3 must respect: All times stored in UTC"
+  },
+  "seq": 1
+}

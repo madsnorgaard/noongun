@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "7e283548-203f-4616-bf8e-ef7c844cb0ef",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:40.964Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "invariant",
+    "toEntityId": "e460e88e-79ba-46e7-bb8f-f11a6c904fe0",
+    "relationType": "must-respect",
+    "strength": null,
+    "description": "M3 must respect: Vendor code stays behind our interfaces"
+  },
+  "seq": 1
+}

@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "ea7d9961-7cc9-4ed4-9cf3-9e2d639f2c42",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:46.502Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "dependency",
+    "toEntityId": "a73e36a7-bd89-4b85-84f1-85406bd49d80",
+    "relationType": "uses",
+    "strength": null,
+    "description": "M3 uses Inertia Vue"
+  },
+  "seq": 1
+}

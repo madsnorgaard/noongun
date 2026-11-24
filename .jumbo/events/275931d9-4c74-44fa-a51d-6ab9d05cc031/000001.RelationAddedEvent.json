@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "275931d9-4c74-44fa-a51d-6ab9d05cc031",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:42.775Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "decision",
+    "toEntityId": "09da8d34-3c98-4326-abea-912d2b6ec27f",
+    "relationType": "follows",
+    "strength": null,
+    "description": "M3 follows: Home server install behind a TLS proxy (ADR 0008)"
+  },
+  "seq": 1
+}
