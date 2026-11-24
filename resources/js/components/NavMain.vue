@@ -2,7 +2,6 @@
 import { Link } from '@inertiajs/vue3';
 import {
     SidebarGroup,
-    SidebarGroupLabel,
     SidebarMenu,
     SidebarMenuButton,
     SidebarMenuItem,
@@ -19,20 +18,25 @@ const { isCurrentUrl } = useCurrentUrl();
 
 <template>
     <SidebarGroup class="px-2 py-0">
-        <SidebarGroupLabel>Platform</SidebarGroupLabel>
-        <SidebarMenu>
-            <SidebarMenuItem v-for="item in items" :key="item.title">
-                <SidebarMenuButton
-                    as-child
-                    :is-active="isCurrentUrl(item.href)"
-                    :tooltip="item.title"
-                >
-                    <Link :href="item.href">
-                        <component :is="item.icon" />
-                        <span>{{ item.title }}</span>
-                    </Link>
-                </SidebarMenuButton>
-            </SidebarMenuItem>
-        </SidebarMenu>
+        <nav aria-label="Main">
+            <SidebarMenu class="gap-1.5">
+                <SidebarMenuItem v-for="item in items" :key="item.title">
+                    <SidebarMenuButton
+                        as-child
+                        :is-active="isCurrentUrl(item.href)"
+                        class="h-11 rounded-[10px] px-3 text-base data-[active=true]:bg-card data-[active=true]:font-semibold data-[active=true]:shadow-xs"
+                    >
+                        <Link
+                            :href="item.href"
+                            :aria-current="
+                                isCurrentUrl(item.href) ? 'page' : undefined
+                            "
+                        >
+                            <span>{{ item.title }}</span>
+                        </Link>
+                    </SidebarMenuButton>
+                </SidebarMenuItem>
+            </SidebarMenu>
+        </nav>
     </SidebarGroup>
 </template>

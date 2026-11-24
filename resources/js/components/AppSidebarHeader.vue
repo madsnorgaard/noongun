@@ -1,6 +1,9 @@
 <script setup lang="ts">
+import { Link, usePage } from '@inertiajs/vue3';
+import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
 import { SidebarTrigger } from '@/components/ui/sidebar';
+import { dashboard } from '@/routes';
 import type { BreadcrumbItem } from '@/types';
 
 withDefaults(
@@ -11,17 +14,34 @@ withDefaults(
         breadcrumbs: () => [],
     },
 );
+
+const name = usePage().props.name;
 </script>
 
 <template>
     <header
-        class="flex h-16 shrink-0 items-center gap-2 border-b border-sidebar-border/70 px-6 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12 md:px-4"
+        class="flex min-h-14 shrink-0 items-center gap-2 px-2 pt-2 md:px-6 lg:px-9"
     >
-        <div class="flex items-center gap-2">
-            <SidebarTrigger class="-ml-1" />
-            <template v-if="breadcrumbs && breadcrumbs.length > 0">
-                <Breadcrumbs :breadcrumbs="breadcrumbs" />
-            </template>
+        <SidebarTrigger />
+
+        <!-- On a phone the sidebar is closed, so the mark sits here. -->
+        <Link
+            :href="dashboard()"
+            class="flex min-h-11 items-center gap-2.5 md:hidden"
+        >
+            <span
+                class="flex size-9 items-center justify-center rounded-[10px] bg-signal text-signal-foreground"
+            >
+                <AppLogoIcon class="size-[25px]" />
+            </span>
+            <span class="text-xl font-bold tracking-[-0.02em]">{{ name }}</span>
+        </Link>
+
+        <div
+            v-if="breadcrumbs && breadcrumbs.length > 0"
+            class="hidden md:block"
+        >
+            <Breadcrumbs :breadcrumbs="breadcrumbs" />
         </div>
     </header>
 </template>
