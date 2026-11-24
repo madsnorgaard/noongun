@@ -11,6 +11,7 @@ use App\Http\Controllers\Channels\Concerns\PresentsChannels;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use Inertia\Inertia;
@@ -55,6 +56,9 @@ class ConnectChannelController extends Controller
 
             return to_route('channels.index');
         }
+
+        // A new connect replaces a choice that was left open by an earlier one.
+        (new ConnectSelection($request->session(), $this->current))->abandon();
 
         $request->session()->put(self::PENDING, [
             'platform' => $platform,
@@ -111,18 +115,37 @@ class ConnectChannelController extends Controller
             return to_route('channels.index');
         }
 
-        if ($channels->count() > 1) {
-            $request->session()->put(ChannelSelectionController::PENDING, [
-                'workspace_id' => $workspace->id,
-                'channel_ids' => $channels->map(fn (Channel $channel): int => $channel->id)->values()->all(),
-            ]);
+        // The adapter saved what the user already has connected as active
+        // (renewed) and everything else as pending, which cannot publish.
+        [$waiting, $renewed] = $channels->partition(fn (Channel $channel): bool => $channel->isPending());
+        $only = $channels->count() === 1 ? $channels->first() : null;
 
-            return to_route('channels.selection.edit');
+        // One account, never seen here before: the user granted exactly this
+        // in the platform's dialog a moment ago, so there is nothing to ask.
+        // A single account that was disconnected earlier is asked about,
+        // because a platform can return a grant it still holds without the
+        // user choosing it again, and the disconnect was deliberate.
+        if ($only !== null && $only->isPending() && $only->wasRecentlyCreated) {
+            $only->confirm();
+
+            $this->toast('success', __(':name is connected.', ['name' => $only->display_name]));
+
+            return to_route('channels.index');
         }
 
-        $this->toast('success', __(':name is connected.', ['name' => $channels->first()->display_name ?? $label]));
+        if ($waiting->isEmpty()) {
+            $this->toast('success', $only !== null
+                ? __(':name is connected.', ['name' => $only->display_name])
+                : trans_choice('{1} :count channel is connected.|[2,*] :count channels are connected.', $renewed->count(), ['count' => $renewed->count()]));
 
-        return to_route('channels.index');
+            return to_route('channels.index');
+        }
+
+        $ids = fn (Collection $some): array => $some->map(fn (Channel $channel): int => $channel->id)->values()->all();
+
+        (new ConnectSelection($request->session(), $this->current))->open($ids($waiting), $ids($renewed));
+
+        return to_route('channels.selection.edit');
     }
 
     private function adapter(string $platform): ChannelAdapter

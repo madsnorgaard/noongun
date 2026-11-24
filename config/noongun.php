@@ -76,6 +76,10 @@ return [
                 trim(...),
                 explode(',', (string) env('FACEBOOK_SCOPES', 'pages_show_list,pages_read_engagement,pages_manage_posts')),
             ))),
+            // Longest post body in characters. The Graph API documentation
+            // gives no limit; this is the one Facebook has stated for posts.
+            // See docs/platform-notes/meta.md.
+            'max_body_length' => 63206,
         ],
     ],
 

@@ -48,6 +48,13 @@ interface ChannelAdapter
      * updated, matched on platform and external_id, so that connecting again
      * renews tokens instead of creating duplicates.
      *
+     * Adapters save through Channel::recordConnection(), which decides the
+     * status. A channel the user already has connected is renewed and stays
+     * active. Every other account, new or disconnected earlier, is saved as
+     * pending: it holds a token but cannot publish until the caller has had
+     * the user confirm it (Channel::confirm()). What is not confirmed is
+     * discarded.
+     *
      * @return Collection<int, Channel> the saved channels
      *
      * @throws ChannelException

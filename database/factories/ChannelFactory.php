@@ -59,6 +59,14 @@ class ChannelFactory extends Factory
         return $this->state(fn () => ['status' => ChannelStatus::NeedsReconnect]);
     }
 
+    /**
+     * Returned by a connect and not confirmed by the user yet.
+     */
+    public function pending(): static
+    {
+        return $this->state(fn () => ['status' => ChannelStatus::Pending]);
+    }
+
     public function disconnected(): static
     {
         return $this->state(fn () => [

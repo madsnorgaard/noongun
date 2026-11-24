@@ -409,3 +409,78 @@ Source: developers.facebook.com/docs/facebook-login/guides/advanced/manual-flow
   only 429 and 5xx without a rate limit code depend on it.
 - Does `data_access_expires_at` (about 90 days on the token) stop a Page token from
   publishing when it passes? If so it must be stored and shown as the expiry.
+
+## 2026-11-24 - review fixes: confirmation before a Page can publish, and credentials in URLs
+
+### A Page is connected only after the user confirmed it
+
+The first version of `connect()` saved every Page Facebook returned as active, before
+the selection step. A Page the user had disconnected came back with a new token as
+soon as anyone reconnected another Page, and stayed connected if the selection was
+left open. Changed as follows.
+
+- New channel status `pending`: saved by a connect, holds the Page token, cannot
+  publish (`Channel::canPublish()` is false for it).
+- `Channel::recordConnection()` decides the status for every adapter. A channel that
+  is `active` or `needs_reconnect` was chosen by the user and not disconnected since:
+  it is renewed and active at once, so it keeps publishing while the user is asked
+  about other Pages. A new Page, a `disconnected` one and one that is still `pending`
+  are saved as `pending`.
+- Only the user's choice makes a pending channel active (`Channel::confirm()`).
+- One Page that is new to the workspace is confirmed without a question, because the
+  user granted exactly that Page in the dialog a moment ago.
+- One Page that was disconnected earlier is asked about. Reason: the grant stays with
+  Facebook after a disconnect in Noon Gun, so the dialog can return the Page without
+  the user picking it again. Whether it really does is a question for the spike (see
+  the fixture README); asking is the safe side either way.
+- A pending channel that is not confirmed is discarded: deleted, or set back to
+  `disconnected` with its token erased when post variants point at it. This happens
+  when the user declines, when a new connect starts, when the choice is older than 15
+  minutes (`Channel::PENDING_MINUTES`), and from the scheduled command
+  `noongun:discard-pending-channels` when nobody comes back at all.
+- The selection can only ever touch channels that are pending and were returned by
+  that connect. It cannot disconnect a channel that was already connected.
+
+The Page token of a pending channel is therefore stored, encrypted, for at most about
+20 minutes (15 minutes plus the five minute schedule) without a confirmation. Holding
+it somewhere is unavoidable: the code can be exchanged only once, so the token cannot
+be fetched again after the user has chosen.
+
+### Can credentials be kept out of the URL
+
+Checked on 2026-11-24. No "last updated" dates are shown on these pages.
+
+| Question | What the documentation says | Source |
+|---|---|---|
+| Is `Authorization: Bearer` accepted for Graph API or Pages API calls? | Not stated anywhere for these APIs. Every example on the access token guide, the Graph API overview and the Pages getting-started page passes `access_token` as a parameter. Only the WhatsApp Business documentation, a different product on the same host, uses `Authorization: Bearer` in its examples, and no page says the two forms are interchangeable. | developers.facebook.com/docs/facebook-login/guides/access-tokens, developers.facebook.com/docs/graph-api/overview, developers.facebook.com/docs/pages-api/getting-started |
+| May a POST carry `access_token` and `appsecret_proof` in its body? | Yes. The Pages getting-started example for publishing sends `access_token` in the request body, and the secure requests page shows `access_token` and `appsecret_proof` as form fields of a POST. | developers.facebook.com/docs/pages-api/getting-started, developers.facebook.com/docs/graph-api/guides/secure-requests |
+| Do the token endpoints (`/oauth/access_token` for the code exchange and for `fb_exchange_token`) accept POST with a form body? | Not stated. Only GET with query parameters is shown. | developers.facebook.com/docs/facebook-login/guides/advanced/manual-flow, developers.facebook.com/docs/facebook-login/guides/access-tokens/get-long-lived |
+| Does `debug_token` accept POST or a header? | Not stated. The reference gives only `GET /debug_token?input_token=...`. | developers.facebook.com/docs/graph-api/reference/debug_token |
+| Can a GET or DELETE carry its parameters in a body? | Not stated. The secure requests example reaches GET calls through a batch request, which is a POST with the credentials as form fields. | developers.facebook.com/docs/graph-api/guides/secure-requests |
+
+What follows for the adapter:
+
+- **Publish** (`POST /{page-id}/feed`) already sends the Page token and
+  `appsecret_proof` in the form body. Its URL holds no credential, and a test asserts
+  the exact URL.
+- **Code exchange, long-lived exchange, `/me/accounts`, `debug_token`, delete** stay
+  as documented, with their credentials in the query string. The documentation does
+  not support any other form for them, and an undocumented form that fails would break
+  connecting. Nothing was changed for these calls.
+- Our own failure path does not leak them: exceptions are rebuilt without the URL. The
+  remaining exposure is anything that records outgoing URLs: a proxy, HTTP client
+  events, Telescope if it is added. Until the spike has answered the questions below,
+  do not log outgoing request URLs for the Graph host.
+- The documented way to move GET and DELETE credentials into a body is a batch
+  request. It changes every response shape (an array of `code`, `headers`, `body`), so
+  it is not adopted before the spike has shown the real shapes.
+
+Questions for the spike, also listed in `tests/Fixtures/facebook/README.md`:
+
+1. Is `Authorization: Bearer {token}` accepted on `GET /me/accounts`, on
+   `DELETE /{post-id}` and on `GET /debug_token` (with the app token), with
+   `appsecret_proof` still as a parameter?
+2. Do the two `/oauth/access_token` calls work as POST with a form body?
+3. Does `GET /debug_token` accept `input_token` anywhere but the query string?
+4. After a Page was disconnected in Noon Gun only, does the login dialog return it
+   again without the user selecting it?

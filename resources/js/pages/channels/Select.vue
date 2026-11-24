@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { Head, Link, useForm } from '@inertiajs/vue3';
+import { Head, router, useForm } from '@inertiajs/vue3';
+import { ref } from 'vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { index } from '@/routes/channels';
-import { edit, update } from '@/routes/channels/selection';
+import { destroy, edit, update } from '@/routes/channels/selection';
 import type { Channel } from '@/types/channels';
 
 defineOptions({
@@ -15,23 +16,35 @@ defineOptions({
                 href: index(),
             },
             {
-                title: 'Choose what to keep',
+                title: 'Choose what to connect',
                 href: edit(),
             },
         ],
     },
 });
 
-const props = defineProps<{
+defineProps<{
     channels: Channel[];
+    renewed: Channel[];
+    minutes: number;
 }>();
 
-const form = useForm({
-    keep: props.channels.map((channel) => channel.id),
+// Nothing is ticked for you: a channel is connected only because you chose it.
+const form = useForm<{ keep: number[] }>({
+    keep: [],
 });
+
+const cancelling = ref(false);
 
 function submit(): void {
     form.put(update.url());
+}
+
+function keepNone(): void {
+    router.delete(destroy.url(), {
+        onStart: () => (cancelling.value = true),
+        onFinish: () => (cancelling.value = false),
+    });
 }
 </script>
 
@@ -43,16 +56,16 @@ function submit(): void {
         @submit.prevent="submit"
     >
         <header class="grid gap-1">
-            <h1 class="text-lg font-medium">Choose what to keep</h1>
+            <h1 class="text-lg font-medium">Choose what to connect</h1>
             <p class="text-sm text-muted-foreground">
-                Access was granted to {{ channels.length }} channels. Keep the
-                ones this workspace publishes to. For the others, Noon Gun
-                erases the access it received.
+                Access was granted to the channels below, and none of them is
+                connected yet. Tick the ones this workspace publishes to. For
+                the others, Noon Gun erases the access it received.
             </p>
         </header>
 
         <fieldset class="rounded-md border text-sm">
-            <legend class="sr-only">Channels to keep</legend>
+            <legend class="sr-only">Channels to connect</legend>
             <label
                 v-for="channel in channels"
                 :key="channel.id"
@@ -81,20 +94,45 @@ function submit(): void {
         <div class="flex items-center gap-3">
             <Button
                 type="submit"
-                :disabled="form.processing || form.keep.length === 0"
+                :disabled="
+                    form.processing || cancelling || form.keep.length === 0
+                "
                 data-test="keep-selected"
             >
                 <Spinner v-if="form.processing" />
-                Keep {{ form.keep.length }} selected
+                Connect {{ form.keep.length }} selected
             </Button>
-            <Button variant="ghost" as-child>
-                <Link :href="index()">Decide later</Link>
+            <Button
+                type="button"
+                variant="ghost"
+                :disabled="form.processing || cancelling"
+                data-test="keep-none"
+                @click="keepNone"
+            >
+                <Spinner v-if="cancelling" />
+                Connect none of them
             </Button>
         </div>
 
         <p class="text-sm text-muted-foreground">
-            Until you choose, all of them stay connected. You can disconnect a
-            channel at any time from the Channels page.
+            If you leave this page without choosing, none of them is connected
+            and the access is erased after {{ minutes }} minutes.
         </p>
+
+        <section v-if="renewed.length" class="grid gap-1 text-sm">
+            <h2 class="font-medium">Already connected</h2>
+            <p class="text-muted-foreground">
+                These were connected before. Their access was renewed and they
+                are not affected by your choice.
+            </p>
+            <ul class="mt-1 grid gap-0.5">
+                <li v-for="channel in renewed" :key="channel.id">
+                    {{ channel.display_name }}
+                    <span class="text-xs text-muted-foreground">
+                        - {{ channel.platform_label }}
+                    </span>
+                </li>
+            </ul>
+        </section>
     </form>
 </template>

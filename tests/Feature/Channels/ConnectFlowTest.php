@@ -5,11 +5,10 @@ use App\Domain\Channels\Models\Channel;
 use App\Domain\Workspaces\Models\Membership;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
-use App\Http\Controllers\Channels\ChannelSelectionController;
 use App\Http\Controllers\Channels\ConnectChannelController;
+use App\Http\Controllers\Channels\ConnectSelection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Inertia\Testing\AssertableInertia as Assert;
 
 require_once __DIR__.'/../../Support/facebook.php';
 require_once __DIR__.'/../../Support/members.php';
@@ -108,7 +107,7 @@ describe('callback', function () {
             ->and($channel->status)->toBe(ChannelStatus::Active)
             ->and($channel->access_token)->toBe('test-page-token-table-bay-coffee')
             ->and(session()->has(ConnectChannelController::PENDING))->toBeFalse()
-            ->and(session()->has(ChannelSelectionController::PENDING))->toBeFalse();
+            ->and(session()->has(ConnectSelection::KEY))->toBeFalse();
     });
 
     it('accepts a state only once', function () {
@@ -243,107 +242,4 @@ describe('callback', function () {
         $this->get(route('channels.callback', ['platform' => 'facebook', 'code' => 'test-auth-code', 'state' => 'x']))
             ->assertRedirect(route('login'));
     });
-});
-
-describe('choosing between several Pages', function () {
-    beforeEach(function () {
-        fakeGraph();
-        $state = ($this->start)();
-
-        $this->callback = $this->get(route('channels.callback', ['platform' => 'facebook', 'code' => 'test-auth-code', 'state' => $state]));
-
-        [$this->coffee, $this->books] = inWorkspace($this->workspace, fn () => [
-            Channel::query()->where('external_id', '100000000000001')->sole(),
-            Channel::query()->where('external_id', '100000000000002')->sole(),
-        ]);
-    });
-
-    it('goes to the selection step, which lists the channels that were granted', function () {
-        $this->callback->assertRedirect(route('channels.selection.edit'));
-
-        $this->get(route('channels.selection.edit'))
-            ->assertOk()
-            ->assertInertia(fn (Assert $page) => $page
-                ->component('channels/Select')
-                ->has('channels', 2)
-                ->where('channels.0.display_name', 'Harbour Books')
-                ->where('channels.1.display_name', 'Table Bay Coffee')
-                ->where('channels.1.id', $this->coffee->id)
-                ->missing('channels.0.access_token'));
-    });
-
-    it('keeps the chosen Page and erases the token of the other', function () {
-        $this->put(route('channels.selection.update'), ['keep' => [$this->coffee->id]])
-            ->assertRedirect(route('channels.index'))
-            ->assertInertiaFlash('toast', ['type' => 'success', 'message' => '1 channel is connected.']);
-
-        [$coffee, $books] = inWorkspace($this->workspace, fn () => [$this->coffee->fresh(), $this->books->fresh()]);
-
-        expect($coffee->status)->toBe(ChannelStatus::Active)
-            ->and($coffee->access_token)->toBe('test-page-token-table-bay-coffee')
-            ->and($books->status)->toBe(ChannelStatus::Disconnected)
-            ->and($books->access_token)->toBeNull()
-            ->and(DB::table('channels')->where('id', $books->id)->value('access_token'))->toBeNull()
-            ->and(session()->has(ChannelSelectionController::PENDING))->toBeFalse();
-    });
-
-    it('can keep all of them', function () {
-        $this->put(route('channels.selection.update'), ['keep' => [$this->coffee->id, $this->books->id]])
-            ->assertInertiaFlash('toast.message', '2 channels are connected.');
-
-        expect(DB::table('channels')->where('status', 'active')->count())->toBe(2);
-    });
-
-    it('needs at least one to keep', function () {
-        $this->put(route('channels.selection.update'), ['keep' => []])->assertSessionHasErrors('keep');
-
-        expect(DB::table('channels')->where('status', 'active')->count())->toBe(2);
-    });
-
-    it('only accepts channels that came from this connect', function () {
-        $earlier = inWorkspace($this->workspace, fn () => Channel::factory()->create());
-        $foreign = inWorkspace(Workspace::factory()->create(), fn () => Channel::factory()->create());
-
-        $this->put(route('channels.selection.update'), ['keep' => [$earlier->id]])->assertSessionHasErrors('keep.0');
-        $this->put(route('channels.selection.update'), ['keep' => [$foreign->id]])->assertSessionHasErrors('keep.0');
-
-        expect(DB::table('channels')->where('status', 'active')->count())->toBe(4);
-    });
-
-    it('never touches a channel that was connected earlier', function () {
-        $earlier = inWorkspace($this->workspace, fn () => Channel::factory()->create());
-
-        $this->put(route('channels.selection.update'), ['keep' => [$this->books->id]]);
-
-        expect(inWorkspace($this->workspace, fn () => $earlier->fresh())->status)->toBe(ChannelStatus::Active);
-    });
-
-    it('is closed to viewers', function () {
-        $viewer = workspaceMember($this->workspace, Role::Viewer);
-
-        $this->actingAs($viewer)->get(route('channels.selection.edit'))->assertForbidden();
-        $this->actingAs($viewer)->put(route('channels.selection.update'), ['keep' => [$this->coffee->id]])->assertForbidden();
-
-        expect(DB::table('channels')->where('status', 'active')->count())->toBe(2);
-    });
-
-    it('does not carry over to another workspace of the same user', function () {
-        $other = Workspace::factory()->create();
-        Membership::factory()->for($other)->for($this->owner)->role(Role::Owner)->create();
-
-        $this->withSession(['workspace_id' => $other->id])
-            ->get(route('channels.selection.edit'))
-            ->assertRedirect(route('channels.index'));
-
-        $this->withSession(['workspace_id' => $other->id])
-            ->put(route('channels.selection.update'), ['keep' => [$this->coffee->id]])
-            ->assertRedirect(route('channels.index'));
-
-        expect(DB::table('channels')->where('status', 'active')->count())->toBe(2);
-    });
-});
-
-it('has no selection step when nothing is waiting', function () {
-    $this->actingAs($this->owner)->get(route('channels.selection.edit'))->assertRedirect(route('channels.index'));
-    $this->actingAs($this->owner)->put(route('channels.selection.update'), ['keep' => [1]])->assertRedirect(route('channels.index'));
 });

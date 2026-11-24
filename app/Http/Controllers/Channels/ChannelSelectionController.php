@@ -2,12 +2,10 @@
 
 namespace App\Http\Controllers\Channels;
 
-use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Http\Controllers\Channels\Concerns\PresentsChannels;
 use App\Http\Controllers\Controller;
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -16,16 +14,15 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * The step after a connect that returned more than one account. Every account
- * was saved by the adapter; here the user says which ones to keep, and the
- * rest are disconnected, which erases their tokens.
+ * The step after a connect that returned accounts the user has not confirmed.
+ * Those were saved as pending, which cannot publish. Here the user says which
+ * ones to keep; only those become active. Declining, cancelling and waiting
+ * too long all discard the pending ones. Channels that were already connected
+ * are never changed here.
  */
 class ChannelSelectionController extends Controller
 {
     use PresentsChannels;
-
-    /** Session key of the channels that the last connect returned. */
-    public const PENDING = 'channels.selection';
 
     public function __construct(private readonly CurrentWorkspace $current) {}
 
@@ -33,14 +30,16 @@ class ChannelSelectionController extends Controller
     {
         Gate::authorize('create', Channel::class);
 
-        $channels = $this->pending($request);
+        $selection = $this->selection($request);
 
-        if ($channels->isEmpty()) {
-            return to_route('channels.index');
+        if ($closed = $this->closeIfOver($selection)) {
+            return $closed;
         }
 
         return Inertia::render('channels/Select', [
-            'channels' => $channels->map($this->present(...))->all(),
+            'channels' => $selection->waiting()->map($this->present(...))->values()->all(),
+            'renewed' => $selection->renewed()->map($this->present(...))->values()->all(),
+            'minutes' => Channel::PENDING_MINUTES,
         ]);
     }
 
@@ -48,52 +47,78 @@ class ChannelSelectionController extends Controller
     {
         Gate::authorize('create', Channel::class);
 
-        $channels = $this->pending($request);
+        $selection = $this->selection($request);
 
-        if ($channels->isEmpty()) {
-            return to_route('channels.index');
+        if ($closed = $this->closeIfOver($selection)) {
+            return $closed;
         }
 
         $validated = $request->validate([
             'keep' => ['required', 'array', 'min:1'],
-            'keep.*' => ['integer', 'distinct', Rule::in($channels->modelKeys())],
+            'keep.*' => ['integer', 'distinct', Rule::in($selection->waiting()->modelKeys())],
         ], [
-            'keep.required' => __('Choose at least one to keep.'),
-            'keep.min' => __('Choose at least one to keep.'),
+            'keep.required' => __('Choose at least one to keep, or keep none of them.'),
+            'keep.min' => __('Choose at least one to keep, or keep none of them.'),
         ]);
 
-        $keep = array_map(intval(...), $validated['keep']);
+        $confirmed = $selection->resolve(array_map(intval(...), $validated['keep']));
 
-        $channels->reject(fn (Channel $channel): bool => in_array($channel->id, $keep, true))
-            ->each(fn (Channel $channel) => $channel->disconnect());
-
-        $request->session()->forget(self::PENDING);
-
-        $this->toast('success', trans_choice('{1} :count channel is connected.|[2,*] :count channels are connected.', count($keep), ['count' => count($keep)]));
+        $this->toast('success', trans_choice(
+            '{1} :count channel is connected.|[2,*] :count channels are connected.',
+            $confirmed->count(),
+            ['count' => $confirmed->count()],
+        ));
 
         return to_route('channels.index');
     }
 
     /**
-     * The channels of the last connect that are still waiting for a choice.
-     * Scoped to the current workspace by the model, and checked against the
-     * workspace the connect ran in.
-     *
-     * @return Collection<int, Channel>
+     * Keep none of them.
      */
-    private function pending(Request $request): Collection
+    public function destroy(Request $request): RedirectResponse
     {
-        $pending = $request->session()->get(self::PENDING);
-        $ids = is_array($pending) && is_array($pending['channel_ids'] ?? null) ? $pending['channel_ids'] : [];
+        Gate::authorize('create', Channel::class);
 
-        if ($ids === [] || ($pending['workspace_id'] ?? null) !== $this->current->id()) {
-            return new Collection;
+        $selection = $this->selection($request);
+
+        if ($selection->exists()) {
+            $selection->abandon();
+
+            $this->toast('info', __('Nothing new was connected.'));
         }
 
-        return Channel::query()
-            ->whereKey($ids)
-            ->where('status', ChannelStatus::Active)
-            ->orderBy('display_name')
-            ->get();
+        return to_route('channels.index');
+    }
+
+    private function selection(Request $request): ConnectSelection
+    {
+        return new ConnectSelection($request->session(), $this->current);
+    }
+
+    /**
+     * Ends a choice that is too old, and sends the user away when there is
+     * nothing to choose.
+     */
+    private function closeIfOver(ConnectSelection $selection): ?RedirectResponse
+    {
+        if (! $selection->exists()) {
+            return to_route('channels.index');
+        }
+
+        if ($selection->expired()) {
+            $selection->abandon();
+
+            $this->toast('warning', __('The choice was open for too long, so nothing new was connected. Connect again to choose.'));
+
+            return to_route('channels.index');
+        }
+
+        if ($selection->waiting()->isEmpty()) {
+            $selection->abandon();
+
+            return to_route('channels.index');
+        }
+
+        return null;
     }
 }

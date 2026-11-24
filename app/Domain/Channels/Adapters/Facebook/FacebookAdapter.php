@@ -16,6 +16,7 @@ use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
 use Carbon\CarbonImmutable;
 use Illuminate\Contracts\Config\Repository;
+use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Routing\UrlGenerator;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Collection;
@@ -58,6 +59,11 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
     private readonly GraphClient $graph;
 
     /**
+     * ChannelManager keeps this adapter for the life of the process, so it
+     * must not hold anything that is scoped to one request or job. The
+     * current workspace is such a thing: it is taken from the container each
+     * time it is needed, never kept.
+     *
      * @param  array<string, mixed>  $settings  config('noongun.channels.facebook') without the adapter key
      */
     public function __construct(
@@ -65,7 +71,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
         Factory $http,
         private readonly Repository $config,
         private readonly UrlGenerator $url,
-        private readonly CurrentWorkspace $currentWorkspace,
+        private readonly Container $container,
     ) {
         $timeout = $this->config->get('noongun.publishing.timeout', 30);
 
@@ -178,16 +184,18 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             );
         }
 
-        return $this->currentWorkspace->run($workspace, fn (): Collection => DB::transaction(
-            fn (): Collection => (new Collection($pages))->map(fn (array $page): Channel => Channel::query()->updateOrCreate(
-                ['platform' => self::PLATFORM, 'external_id' => $page['id']],
+        // Channel::recordConnection() decides the status: only a channel the
+        // user already has connected is active straight away.
+        return $this->container->make(CurrentWorkspace::class)->run($workspace, fn (): Collection => DB::transaction(
+            fn (): Collection => (new Collection($pages))->map(fn (array $page): Channel => Channel::recordConnection(
+                self::PLATFORM,
+                $page['id'],
                 [
                     'display_name' => $page['name'],
                     'access_token' => $page['token'],
                     'refresh_token' => null,
                     'token_expires_at' => $page['expires_at'],
                     'scopes' => $page['scopes'],
-                    'status' => ChannelStatus::Active,
                 ],
             ))->values(),
         ));
@@ -260,7 +268,9 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
      */
     public function refreshToken(Channel $channel): Channel
     {
-        if ($channel->status === ChannelStatus::Disconnected) {
+        // Neither is connected: a disconnected channel holds no token, and a
+        // pending one is waiting for the user, not for a check.
+        if ($channel->status === ChannelStatus::Disconnected || $channel->status === ChannelStatus::Pending) {
             return $channel;
         }
 
