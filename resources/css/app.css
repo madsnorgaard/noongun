@@ -1,7 +1,12 @@
-@import 'tailwindcss';
+/* Class names are read from the frontend and the views only. Left to itself
+   Tailwind also reads the documentation, where words and class names in the
+   text become rules that no page uses. */
+@import 'tailwindcss' source(none);
 
 @import 'tw-animate-css';
 
+@source '../js';
+@source '../views';
 @source '../../vendor/laravel/framework/src/Illuminate/Pagination/resources/views/*.blade.php';
 @source '../../storage/framework/views/*.php';
 
