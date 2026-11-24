@@ -84,6 +84,44 @@ docker compose -f docker-compose.yml up -d --build
 
 The health endpoint `/up` returns 200 only when PostgreSQL and Redis respond.
 
+## Publishing
+
+Nothing is published without a human approval. A post goes
+`draft -> approved -> scheduled -> publishing -> published` (or `failed`), and
+only a signed-in owner or editor can approve it. See
+`docs/adr/0009-post-state-machine.md`.
+
+The `scheduler` container runs two commands:
+
+| Command | Runs | What it does |
+|---|---|---|
+| `noongun:dispatch-due-posts` | every minute | Finds scheduled posts whose time has come, claims each one and queues a `PublishPostJob` for it. A post is claimed once, however often the command runs. |
+| `noongun:recover-stuck-posts` | every five minutes | Finds posts that have been in the publishing state with no sign of life from their job, and settles them: published if every variant is out, otherwise failed. It never sends anything. |
+
+Both can be run by hand, for example `./dev artisan noongun:dispatch-due-posts`.
+
+`PublishPostJob` runs in the `horizon` container. It sends each variant of
+the post once, under a lock for that variant, and never sends a variant that
+already has an id from its platform. It tries again only when the platform
+answers with an error that can pass (rate limit, outage), after the wait set
+in `NOONGUN_PUBLISH_BACKOFF`. Any other error fails the post at once. A failed
+post is only sent again when a person chooses to retry it, and then only the
+variants that are still missing are sent.
+
+Two things to know when operating it:
+
+- The cache store holds the publishing locks, so it must be shared by all
+  workers. Keep `CACHE_STORE=redis` (or `database`); `array` and `file` are
+  not safe with more than one worker.
+- A publishing job is never run twice by the queue. Keep
+  `REDIS_QUEUE_RETRY_AFTER` (90 seconds by default) above the time limit of a
+  job, or the queue reports long jobs as failed while they are still running.
+  The post itself is not affected.
+- If a worker dies in the middle of a platform call, the post may be on the
+  platform without the app knowing. Such a post is marked as failed with the
+  text "Publishing was interrupted before a result was recorded". Look at the
+  channel before you retry it, or the post can appear twice.
+
 ## Running on a home server
 
 `./setup` gives a development stack: it mounts the source code and runs in debug
@@ -181,11 +219,11 @@ Do not change `APP_KEY` on an instance that has data.
 | `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
 | `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
 | `NOONGUN_PUBLISH_MAX_ATTEMPTS` | `5` | How many times one variant is sent before the post is marked as failed. Only retryable errors are tried again. |
-| `NOONGUN_PUBLISH_BACKOFF` | `60,300,900,3600` | Seconds to wait before each retry, comma separated. The last value repeats. |
-| `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. |
-| `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Longest time the lock on one variant is held. Must be longer than the timeout. |
-| `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state before it is treated as failed. |
-| `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. |
+| `NOONGUN_PUBLISH_BACKOFF` | `60,300,900,3600` | Seconds to wait before each retry, comma separated. The last value repeats. The largest value is also the longest wait a platform may ask for; a longer one fails the post. |
+| `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
+| `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Shortest lifetime of the lock on one variant. Must be longer than the timeout. The lock always outlives the time limit of the job that holds it. |
+| `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
+| `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
 
 Times are stored in UTC. Each workspace has its own timezone for display and
 scheduling. The application timezone is fixed to UTC in `config/app.php` and

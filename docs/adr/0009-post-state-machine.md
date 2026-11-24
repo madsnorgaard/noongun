@@ -101,6 +101,61 @@ published and to `failed` otherwise. A post with some variants out and some not 
   have an `external_id` are skipped, so a retry never repeats a public post.
 - If the content has to change, `returnToDraft()` and a new approval are required.
 
+### Actions
+
+Controllers call the classes in `App\Domain\Content\Actions`, never the
+transition methods: `ApprovePost`, `RejectPost`, `SchedulePost`,
+`UnschedulePost`, `ReturnPostToDraft` and `RetryPost`. Each takes the acting
+user, allows owners and editors of the post's workspace, and checks what the
+state machine cannot: the post has a variant, every variant that is still to
+be sent has a channel that can publish and a text the platform accepts, and
+the time is not in the past and not more than a year ahead.
+
+`ApprovePost` is the only caller of `Post::approve()`. When the draft has a
+planned time it schedules in the same transaction. A planned time that has
+passed is refused instead of being published at once: the user picks a new
+time or clears it.
+
+### The publishing job
+
+`PublishPostJob` is one job per post and per round. A round is one claim by
+the scheduler: the first, and one for each human retry. The job is per post,
+not per variant, because the post is what is claimed and finished, and a
+variant has no state column: only one owner of the round can know that no
+variant will be tried again, which is what `finishPublishing()` requires.
+
+- The job acts only on a post that is `publishing`, in the round it was
+  queued for (told apart by `scheduled_at`, which `retry()` renews), with
+  `approved_at` set.
+- Each platform call is made under the lock of that variant, after reading
+  the variant again inside the lock. A variant with an `external_id` is never
+  sent.
+- The queue never runs the job twice by itself (`tries` is 1). A run that was
+  cut off may have reached the platform, so nothing repeats it automatically.
+- A retry happens only after the adapter answered with a retryable failure.
+  The job then queues its own successor with the backoff as delay, or the
+  platform's `retryAfterSeconds` if that is longer. The successor carries the
+  attempt number and the variants that already failed for good, so those are
+  not sent again in the same round. A platform that asks for a longer wait
+  than the largest configured backoff fails the variant.
+- A retryable failure writes its message to `error` while the post waits, so
+  a variant of a `publishing` post can carry an error and still be tried.
+- A failure that is not a `ChannelException` is treated as an unknown outcome:
+  no retry, and the variant is marked with a text that says so.
+- `PostFailedToPublish` is fired when a post ends as `failed`.
+
+### Posts stuck in publishing
+
+`posts.updated_at` is the sign of life of a publishing post. The claim sets
+it and the job renews it at the start of every attempt. A post that has been
+silent for `stuck_after_minutes` plus the largest backoff is settled by
+`noongun:recover-stuck-posts`, and a job that throws settles its own post in
+the same way: under the locks of the unpublished variants, those variants are
+marked as failed with a text that tells the user to check the channel, and
+`finishPublishing()` makes the post `published` or `failed`. Recovery never
+calls a platform and never puts a post back in the queue. A job that arrives
+after its post was settled does nothing.
+
 ### Metrics
 
 `ChannelAdapter` in M3 has `platform`, `capabilities`, `authorizationUrl`,
@@ -114,11 +169,24 @@ together with `MetricSnapshot`.
 - Editing an approved or scheduled post costs a second approval. That is intended.
 - `approved_by` becomes empty if the approving user is deleted; `approved_at`
   stays, and the audit trail (M7) will hold the name.
-- A worker that dies mid-publish leaves a post in `publishing`. Track B must detect
-  this (`noongun.publishing.stuck_after_minutes`) and finish such posts.
-- If a platform accepts a post and the process dies before `markPublished()`, the
-  variant looks unpublished. The per-variant lock and the `external_id` check
-  cannot see this case. It is left open for M7 (hardening).
+- A worker that dies mid-publish leaves a post in `publishing` until the
+  recovery settles it, which takes `stuck_after_minutes` plus the largest
+  backoff (90 minutes with the defaults).
+- If a platform accepts a post and the process dies before `markPublished()` is
+  committed, the variant looks unpublished. The per-variant lock and the
+  `external_id` check cannot see this case. Nothing sends such a variant again
+  automatically: the post becomes `failed` with a warning to check the channel.
+  A human who retries without checking gets a duplicate. Closing this needs a
+  record of the attempt that is written before the call, or a lookup on the
+  platform, and is left open for M7 (hardening).
+- The same holds when an adapter reports a failure as retryable although the
+  platform did accept the post, for example a timeout while reading the
+  response. The job trusts `retryable`. Adapters must set it only when the
+  platform certainly did not create the post.
+- The locks live in the cache store. They guard against two jobs running at
+  once; the `external_id` check guards against two jobs running one after the
+  other. A cache store that is not shared by all workers, or that loses its
+  locks while two copies of a job run, removes the first guard.
 - Factories write later states directly to the table. That shortcut is for tests
   and seeders only.
 - Adding `fetchMetrics()` in M6 changes the interface, so every adapter and the
