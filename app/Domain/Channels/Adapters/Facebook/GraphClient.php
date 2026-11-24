@@ -3,11 +3,15 @@
 namespace App\Domain\Channels\Adapters\Facebook;
 
 use App\Domain\Channels\Exceptions\ChannelException;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\ConnectTimeoutException;
+use GuzzleHttp\Exception\NetworkTimeoutException;
 use GuzzleHttp\Exception\TransferException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Response;
 use SensitiveParameter;
+use Throwable;
 
 /**
  * Sends one request to the Graph API and turns every failure into a
@@ -38,11 +42,19 @@ final class GraphClient
     /** Permission denied. Codes 200 to 299 are permission errors too. */
     private const PERMISSION_CODE = 10;
 
-    /** App, user, Pages API, custom and application rate limits. Codes 80000 to 80014 are business use case limits. */
-    private const RATE_LIMIT_CODES = [4, 17, 32, 341, 613];
+    /**
+     * App, user, Pages API and custom rate limits. Codes 80000 to 80014 are
+     * business use case limits. Each is documented purely as throttling: the
+     * call was turned away, not attempted.
+     */
+    private const RATE_LIMIT_CODES = [4, 17, 32, 613];
 
-    /** Unknown error and service error: "possibly temporary downtime, retry". */
-    private const TRANSIENT_CODES = [1, 2];
+    /**
+     * Unknown error, service error and "application limit reached". All are
+     * documented as "temporary downtime" (341 as "downtime or throttling"),
+     * which does not say how far the call got before it failed.
+     */
+    private const TRANSIENT_CODES = [1, 2, 341];
 
     /**
      * @param  string  $platform  platform name for exceptions
@@ -59,16 +71,37 @@ final class GraphClient
     ) {}
 
     /**
+     * $safeToRepeat decides what "retryable" may mean for this call, and the
+     * default is the careful one.
+     *
+     * false (a call that creates something, such as a post): a failure is
+     * retryable only when Facebook certainly did not act: the connection was
+     * never made, or Facebook answered with a rate limit error. A timeout, a
+     * broken connection, a 5xx, an "unknown" or "service" error and an
+     * answer that cannot be read all leave the outcome unknown, and are
+     * reported as not retryable with `outcome_unknown` in the context,
+     * because sending the call again could create the thing twice.
+     *
+     * true (reading, or a call whose repetition changes nothing, such as a
+     * delete): every temporary failure is retryable.
+     *
      * @param  'GET'|'POST'|'DELETE'  $method
      * @param  array<string, string|int>  $parameters  sent in the query for GET and DELETE, in the form body for POST
      * @param  string|null  $token  user or Page access token; appsecret_proof is added for it
      * @param  class-string<ChannelException>  $failure  the exception class to throw
+     * @param  bool  $safeToRepeat  true only when sending the same call twice does no harm
      * @return array<string, mixed> the decoded JSON body
      *
      * @throws ChannelException
      */
-    public function send(string $method, string $path, #[SensitiveParameter] array $parameters = [], #[SensitiveParameter] ?string $token = null, string $failure = ChannelException::class): array
-    {
+    public function send(
+        string $method,
+        string $path,
+        #[SensitiveParameter] array $parameters = [],
+        #[SensitiveParameter] ?string $token = null,
+        string $failure = ChannelException::class,
+        bool $safeToRepeat = false,
+    ): array {
         if ($token !== null) {
             $parameters['access_token'] = $token;
             $parameters['appsecret_proof'] = hash_hmac('sha256', $token, $this->appSecret);
@@ -89,12 +122,25 @@ final class GraphClient
                 'DELETE' => $request->withQueryParameters($parameters)->delete($path),
                 'POST' => $request->asForm()->post($path, $parameters),
             };
-        } catch (ConnectionException|TransferException) {
+        } catch (ConnectionException|TransferException $exception) {
             // Deliberately not chained: the original message holds the URL.
-            throw $failure::retryable(
-                $this->platform,
-                'Facebook could not be reached. The connection failed or timed out.',
-                context: ['endpoint' => $endpoint],
+            $neverConnected = $this->neverConnected($exception);
+            unset($exception);
+
+            if ($safeToRepeat || $neverConnected) {
+                throw $failure::retryable(
+                    $this->platform,
+                    $neverConnected
+                        ? 'Facebook could not be reached. No connection was made, so nothing was sent.'
+                        : 'Facebook could not be reached. The connection failed or timed out.',
+                    context: ['endpoint' => $endpoint],
+                );
+            }
+
+            throw $this->outcomeUnknown(
+                $failure,
+                'The connection to Facebook failed or timed out after the request may have been sent.',
+                ['endpoint' => $endpoint],
             );
         }
 
@@ -104,14 +150,57 @@ final class GraphClient
             return $body;
         }
 
-        throw $this->failure($response, $failure, $endpoint, $secrets);
+        throw $this->failure($response, $failure, $endpoint, $secrets, $safeToRepeat);
+    }
+
+    /**
+     * True only when the connection was never established: the host or
+     * proxy did not resolve, the connection was refused, or the TLS
+     * handshake failed. No byte of the request left this machine then.
+     *
+     * This relies on Guzzle 8, where ConnectException means exactly that and
+     * timeouts have classes of their own. In Guzzle 7 a ConnectException
+     * could also be a timeout after the request was sent, so without the
+     * Guzzle 8 classes nothing is taken as "never connected". A timeout
+     * while connecting is not trusted either: Guzzle tells it apart from a
+     * later timeout by the text of the curl error.
+     */
+    private function neverConnected(Throwable $exception): bool
+    {
+        if (! class_exists(NetworkTimeoutException::class)) {
+            return false;
+        }
+
+        for ($cause = $exception; $cause !== null; $cause = $cause->getPrevious()) {
+            if ($cause instanceof TransferException) {
+                return $cause instanceof ConnectException && ! $cause instanceof ConnectTimeoutException;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * A failure of a call that is not safe to repeat, where Facebook may
+     * have done what was asked. Never retryable.
+     *
+     * @param  class-string<ChannelException>  $failure
+     * @param  array<string, mixed>  $context
+     */
+    private function outcomeUnknown(string $failure, string $what, array $context): ChannelException
+    {
+        return $failure::permanent(
+            $this->platform,
+            $what.' The outcome is unknown: Facebook may have carried out the request. Check the Page before trying again.',
+            [...$context, 'outcome_unknown' => true],
+        );
     }
 
     /**
      * @param  class-string<ChannelException>  $failure
      * @param  list<string>  $secrets
      */
-    private function failure(Response $response, string $failure, string $endpoint, #[SensitiveParameter] array $secrets): ChannelException
+    private function failure(Response $response, string $failure, string $endpoint, #[SensitiveParameter] array $secrets, bool $safeToRepeat): ChannelException
     {
         $error = $response->json('error');
         $error = is_array($error) ? $error : [];
@@ -139,7 +228,9 @@ final class GraphClient
             );
         }
 
-        if ($this->rateLimited($code) || $response->status() === 429) {
+        // A rate limit error is a definite refusal: Facebook turned the call
+        // away before doing anything, so it is retryable for every call.
+        if ($this->rateLimited($code)) {
             return $failure::retryable(
                 $this->platform,
                 'Facebook is limiting requests at the moment.'.$detail,
@@ -148,11 +239,29 @@ final class GraphClient
             );
         }
 
-        if (in_array($code, self::TRANSIENT_CODES, true) || $response->serverError()) {
+        $temporary = in_array($code, self::TRANSIENT_CODES, true)
+            || $response->serverError()
+            || $response->status() === 429;
+
+        if ($temporary && $safeToRepeat) {
             return $failure::retryable(
                 $this->platform,
-                'Facebook had a temporary problem.'.$detail,
+                $response->status() === 429 ? 'Facebook is limiting requests at the moment.'.$detail : 'Facebook had a temporary problem.'.$detail,
                 $this->retryAfter($response),
+                $context,
+            );
+        }
+
+        // For a call that creates something, none of these says whether
+        // Facebook acted: "unknown" and "service" errors (1, 2, 341) and 5xx
+        // can come from any stage of handling, and a 429 or 2xx without a
+        // readable body cannot be trusted either.
+        if (! $safeToRepeat && ($temporary || $error === [])) {
+            return $this->outcomeUnknown(
+                $failure,
+                $error === []
+                    ? "Facebook gave an answer that could not be read (HTTP {$response->status()})."
+                    : 'Facebook had a temporary problem while handling the request.'.$detail,
                 $context,
             );
         }

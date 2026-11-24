@@ -60,7 +60,13 @@ interface ChannelAdapter
      * the lock, has checked external_id, and records the result with
      * PostVariant::markPublished().
      *
-     * @throws PublishFailed with retryable set when trying again can help
+     * A failure is retryable only when the platform certainly did not create
+     * the post, for example a rate limit refusal. When the post may exist
+     * (a timeout after the request was sent, a server error, an answer that
+     * cannot be read) the failure must not be retryable: the caller resends
+     * automatically, and a second public post is the worst outcome there is.
+     *
+     * @throws PublishFailed with retryable set only when the platform certainly published nothing
      */
     public function publish(PostVariant $variant): PublishResult;
 

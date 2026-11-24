@@ -143,14 +143,14 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             'redirect_uri' => $this->redirectUri(),
             'client_secret' => $this->setting('app_secret'),
             'code' => $code,
-        ]));
+        ], safeToRepeat: true));
 
         $longLived = $this->tokenFrom($this->graph->send('GET', 'oauth/access_token', [
             'grant_type' => 'fb_exchange_token',
             'client_id' => $this->setting('app_id'),
             'client_secret' => $this->setting('app_secret'),
             'fb_exchange_token' => $shortLived,
-        ]));
+        ], safeToRepeat: true));
 
         $pages = [];
 
@@ -213,9 +213,9 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             $parameters['link'] = $this->linkWithUtm((string) $variant->link, $variant->utm ?? []);
         }
 
-        // One call, no read-after-write: the answer is the post id alone, so
-        // there is no second step that can fail after the post is public.
-        $response = $this->graph->send('POST', $channel->external_id.'/feed', $parameters, $channel->access_token, PublishFailed::class);
+        // One call, no read-after-write. Creating a post is not safe to repeat:
+        // a failure is retryable only when Facebook certainly made no post.
+        $response = $this->graph->send('POST', $channel->external_id.'/feed', $parameters, $channel->access_token, PublishFailed::class, safeToRepeat: false);
 
         $id = $response['id'] ?? null;
 
@@ -224,7 +224,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             throw PublishFailed::permanent(
                 self::PLATFORM,
                 'Facebook accepted the post but returned no id for it. Check the Page before trying again.',
-                ['endpoint' => 'POST /'.$channel->external_id.'/feed'],
+                ['endpoint' => 'POST /'.$channel->external_id.'/feed', 'outcome_unknown' => true],
             );
         }
 
@@ -245,7 +245,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             throw ChannelException::reconnectRequired(self::PLATFORM, 'The Page is not connected. Connect it again.');
         }
 
-        $response = $this->graph->send('DELETE', (string) $variant->external_id, [], $channel->access_token);
+        $response = $this->graph->send('DELETE', (string) $variant->external_id, [], $channel->access_token, safeToRepeat: true);
 
         if (($response['success'] ?? false) !== true) {
             throw ChannelException::permanent(self::PLATFORM, 'Facebook did not confirm that the post was deleted.');
@@ -303,7 +303,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
                 'fields' => 'id,name,tasks,access_token',
                 'limit' => 100,
                 'after' => $after,
-            ], fn (mixed $value): bool => $value !== null), $userToken);
+            ], fn (mixed $value): bool => $value !== null), $userToken, safeToRepeat: true);
 
             foreach (is_array($response['data'] ?? null) ? $response['data'] : [] as $page) {
                 if (! is_array($page) || ! is_scalar($page['id'] ?? null) || ! is_string($page['access_token'] ?? null) || $page['access_token'] === '') {
@@ -347,7 +347,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
         $response = $this->graph->send('GET', 'debug_token', [
             'input_token' => $token,
             'access_token' => $this->setting('app_id').'|'.$this->setting('app_secret'),
-        ]);
+        ], safeToRepeat: true);
 
         $data = is_array($response['data'] ?? null) ? $response['data'] : [];
         $expiresAt = is_numeric($data['expires_at'] ?? null) ? (int) $data['expires_at'] : 0;

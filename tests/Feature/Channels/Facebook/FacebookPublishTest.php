@@ -6,6 +6,10 @@ use App\Domain\Channels\Exceptions\PublishFailed;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\Models\Workspace;
+use GuzzleHttp\Exception\ConnectException;
+use GuzzleHttp\Exception\ConnectTimeoutException;
+use GuzzleHttp\Exception\NetworkException;
+use GuzzleHttp\Exception\NetworkTimeoutException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -121,30 +125,59 @@ describe('publish', function () {
             true, false, 720, ['code' => 80001],
         ],
         'rate limit without advice: retry' => [fn () => facebookResponse('error_rate_limit', 400), true, false, null, ['code' => 80001]],
-        'HTTP 429 with Retry-After: retry' => [fn () => Http::response('Too many requests', 429, ['Retry-After' => '30']), true, false, 30, ['http_status' => 429]],
-        'service error: retry' => [fn () => facebookResponse('error_service', 500), true, false, null, ['code' => 2, 'http_status' => 500]],
-        'gateway error without JSON: retry' => [fn () => Http::response('<html>Bad gateway</html>', 502), true, false, null, ['http_status' => 502, 'code' => null]],
+        'rate limit error with HTTP 429 and Retry-After: retry' => [fn () => facebookResponse('error_rate_limit', 429, ['Retry-After' => '30']), true, false, 30, ['code' => 80001, 'http_status' => 429]],
+        'rate limit error with HTTP 500: still a definite refusal, retry' => [fn () => facebookResponse('error_rate_limit', 500), true, false, null, ['code' => 80001]],
         'validation error: permanent' => [fn () => facebookResponse('error_validation', 400), false, false, null, ['code' => 100]],
         'duplicate post: permanent' => [fn () => facebookResponse('error_duplicate_post', 400), false, false, null, ['code' => 506]],
-        'unreadable success: permanent, the post may be public' => [fn () => Http::response('OK', 200), false, false, null, ['http_status' => 200]],
-        'success without an id: permanent, the post may be public' => [fn () => Http::response(['success' => true], 200), false, false, null, []],
     ]);
 
-    it('treats a network failure as retryable', function () {
-        fakeGraph(['feed' => fn (Request $request) => throw new ConnectionException(
-            'cURL error 28: Operation timed out after 30001 milliseconds for '.$request->url().'?access_token='.PAGE_TOKEN,
-        )]);
+    it('never marks a failure as retryable when the post may have been made', function (Closure $response, array $context) {
+        fakeGraph(['feed' => $response]);
+
+        try {
+            ($this->publish)(($this->variant)());
+            $this->fail('Expected PublishFailed.');
+        } catch (PublishFailed $exception) {
+            expect($exception->retryable)->toBeFalse()
+                ->and($exception->requiresReconnect)->toBeFalse()
+                ->and($exception->retryAfterSeconds)->toBeNull()
+                ->and($exception->getMessage())->toContain('Check the Page before trying again.')
+                ->and($exception->context())->toMatchArray(['endpoint' => 'POST /100000000000001/feed', 'outcome_unknown' => true, ...$context])
+                ->and($exception->getPrevious())->toBeNull();
+        }
+    })->with([
+        'timeout while waiting for the answer' => [fn (Request $request) => throw facebookConnectionFailure($request, NetworkTimeoutException::class, 'Operation timed out after 30001 milliseconds'), []],
+        'timeout that is reported as a connect timeout' => [fn (Request $request) => throw facebookConnectionFailure($request, ConnectTimeoutException::class, 'Connection timed out after 10001 milliseconds'), []],
+        'connection reset after sending' => [fn (Request $request) => throw facebookConnectionFailure($request, NetworkException::class, 'Recv failure: Connection reset by peer'), []],
+        'empty reply' => [fn (Request $request) => throw facebookConnectionFailure($request, NetworkException::class, 'Empty reply from server'), []],
+        'network failure with no detail' => [fn (Request $request) => throw new ConnectionException('Something went wrong for '.$request->url()), []],
+        'service error with HTTP 500' => [fn () => facebookResponse('error_service', 500), ['code' => 2, 'http_status' => 500]],
+        'service error with HTTP 400' => [fn () => facebookResponse('error_service', 400), ['code' => 2]],
+        'unknown error' => [fn () => Http::response(['error' => ['message' => 'An unknown error has occurred.', 'type' => 'OAuthException', 'code' => 1]], 500), ['code' => 1]],
+        'application limit or downtime' => [fn () => Http::response(['error' => ['message' => 'Application limit reached', 'type' => 'OAuthException', 'code' => 341]], 400), ['code' => 341]],
+        'gateway error without JSON' => [fn () => Http::response('<html>Bad gateway</html>', 502), ['http_status' => 502, 'code' => null]],
+        'HTTP 503 with another error' => [fn () => facebookResponse('error_validation', 503), ['http_status' => 503]],
+        'HTTP 429 without a Graph error' => [fn () => Http::response('Too many requests', 429, ['Retry-After' => '30']), ['http_status' => 429]],
+        'success that cannot be read' => [fn () => Http::response('OK', 200), ['http_status' => 200]],
+        'success without an id' => [fn () => Http::response(['success' => true], 200), []],
+    ]);
+
+    it('retries when the connection was never made, because nothing was sent', function (string $text) {
+        fakeGraph(['feed' => fn (Request $request) => throw facebookConnectionFailure($request, ConnectException::class, $text)]);
 
         try {
             ($this->publish)(($this->variant)());
             $this->fail('Expected PublishFailed.');
         } catch (PublishFailed $exception) {
             expect($exception->retryable)->toBeTrue()
-                ->and($exception->requiresReconnect)->toBeFalse()
+                ->and($exception->context())->not->toHaveKey('outcome_unknown')
                 ->and($exception->getPrevious())->toBeNull()
                 ->and($exception->getMessage())->not->toContain('access_token')->not->toContain('graph.facebook');
         }
-    });
+    })->with([
+        'host not resolved' => ['Could not resolve host: graph.facebook.test'],
+        'connection refused' => ['Failed to connect to graph.facebook.test port 443'],
+    ]);
 
     it('keeps the token, the proof and the secret out of the message, the context and the trace', function (Closure $response) {
         fakeGraph(['feed' => $response]);
@@ -228,6 +261,17 @@ describe('delete', function () {
         }
     });
 
+    it('may be tried again after a failure that leaves the outcome open, because deleting twice does no harm', function (Closure $response) {
+        fakeGraph(['delete' => $response]);
+
+        $variant = inWorkspace($this->workspace, fn () => PostVariant::factory()->for($this->channel)->published('100000000000001_900000000000001')->create());
+
+        expect(fn () => inWorkspace($this->workspace, fn () => facebookAdapter()->delete($variant)))->toThrow(
+            fn (ChannelException $exception) => expect($exception->retryable)->toBeTrue()
+                ->and($exception->context())->not->toHaveKey('outcome_unknown'),
+        );
+    })->with(facebookAmbiguousFailures());
+
     it('refuses a variant that was never published, without a call', function () {
         $variant = ($this->variant)();
 
@@ -298,12 +342,14 @@ describe('refreshToken', function () {
         Http::assertNothingSent();
     });
 
-    it('does not mark the channel when the check itself fails', function () {
-        fakeGraph(['debug' => facebookResponse('error_service', 500)]);
+    it('reports a failed check as retryable, because reading is safe to repeat, and does not mark the channel', function (Closure $response) {
+        fakeGraph(['debug' => $response]);
 
-        expect(fn () => inWorkspace($this->workspace, fn () => facebookAdapter()->refreshToken($this->channel)))
-            ->toThrow(fn (ChannelException $exception) => expect($exception->retryable)->toBeTrue());
+        expect(fn () => inWorkspace($this->workspace, fn () => facebookAdapter()->refreshToken($this->channel)))->toThrow(
+            fn (ChannelException $exception) => expect($exception->retryable)->toBeTrue()
+                ->and($exception->context())->not->toHaveKey('outcome_unknown'),
+        );
 
         expect(inWorkspace($this->workspace, fn () => $this->channel->fresh())->status)->toBe(ChannelStatus::Active);
-    });
+    })->with(facebookAmbiguousFailures());
 });

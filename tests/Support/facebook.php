@@ -2,7 +2,11 @@
 
 use App\Domain\Channels\Adapters\Facebook\FacebookAdapter;
 use App\Domain\Channels\ChannelManager;
+use GuzzleHttp\Exception\NetworkException;
+use GuzzleHttp\Exception\NetworkTimeoutException;
 use GuzzleHttp\Promise\PromiseInterface;
+use GuzzleHttp\Psr7\Request as GuzzleRequest;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 
@@ -121,6 +125,36 @@ function fakeGraph(array $responses = []): void
 
         return is_string($response) ? facebookResponse($response) : $response;
     });
+}
+
+/**
+ * A network failure as the HTTP client reports it: Laravel's exception around
+ * the Guzzle exception whose class says how far the call got. The message
+ * holds the URL with a token, as real ones can.
+ *
+ * @param  class-string<NetworkException>  $class  ConnectException: never connected. The others: unknown.
+ */
+function facebookConnectionFailure(Request $request, string $class, string $text): ConnectionException
+{
+    $message = "cURL error: {$text} for {$request->url()}?access_token=test-page-token-table-bay-coffee";
+
+    return new ConnectionException($message, 0, new $class($message, new GuzzleRequest($request->method(), $request->url())));
+}
+
+/**
+ * The failures that do not say whether Facebook acted. On a call that is
+ * safe to repeat they are retryable; on publish they must not be.
+ *
+ * @return array<string, array{Closure}>
+ */
+function facebookAmbiguousFailures(): array
+{
+    return [
+        'read timeout' => [fn (Request $request) => throw facebookConnectionFailure($request, NetworkTimeoutException::class, 'Operation timed out after 30001 milliseconds')],
+        'service error with HTTP 500' => [fn () => facebookResponse('error_service', 500)],
+        'gateway error without JSON' => [fn () => Http::response('<html>Bad gateway</html>', 502)],
+        'HTTP 429 without a Graph error' => [fn () => Http::response('Too many requests', 429)],
+    ];
 }
 
 /**

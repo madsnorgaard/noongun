@@ -30,8 +30,8 @@ Each point is an assumption that the adapter or its tests rely on.
 | `error_*.json` | The error envelope is `error.message`, `error.type`, `error.code`, optional `error.error_subcode`, `error_user_title`, `error_user_msg`, and `error.fbtrace_id`. Documented. |
 | `error_token_expired.json` | Code 190 with subcode 463. Documented codes; the message text is illustrative. |
 | `error_permission.json` | Code 200 for a missing permission. The code range 200 to 299 is documented; this message is illustrative. |
-| `error_rate_limit.json` | Code 80001 for the Page rate limit. Documented. |
-| `error_service.json` | Code 2 for a temporary service error. Documented. |
+| `error_rate_limit.json` | Code 80001 for the Page rate limit. Documented. **The adapter treats a rate limit code as proof that no post was made, and it is the only Graph error after which a publish is sent again automatically.** The spike cannot easily provoke one; the claim rests on the documentation calling these codes throttling. |
+| `error_service.json` | Code 2 for a temporary service error. Documented. On publish this is treated as "outcome unknown" and is not retried. |
 | `error_validation.json` | Code 100 for an invalid parameter. Code 100 is not in the error handling guide; it is what the API is known to use. |
 | `error_duplicate_post.json` | Code 506 is documented. Subcode 1455006 and the user message are from memory, not from the documentation. |
 | `error_code_used.json` | The code exchange refuses a used code with a Graph error envelope. The manual flow page only says "an explanatory error message"; code 100 and subcode 36009 are from memory. |
@@ -40,9 +40,15 @@ Each point is an assumption that the adapter or its tests rely on.
 Not in a file, but assumed by the tests:
 
 - **HTTP status codes.** Meta's documentation does not say which status an
-  error carries. The tests use 400, 403 and 500. The adapter decides by
-  `error.code` first; the status only matters for 429 and for 5xx without a
-  readable error.
+  error carries. The tests use 400, 403, 429 and 500. The adapter decides by
+  `error.code` first; the status only matters for 429 and 5xx without a rate
+  limit code. On publish those are "outcome unknown" and are not retried; on
+  calls that are safe to repeat they are retried.
+- **Network failures.** The tests build them from Guzzle 8 exception classes:
+  `ConnectException` for a connection that was never made (retried, also on
+  publish), `NetworkTimeoutException`, `ConnectTimeoutException` and
+  `NetworkException` for everything else (not retried on publish). Nothing
+  here was observed against the real API.
 - **`X-Business-Use-Case-Usage`.** Documented as JSON with
   `estimated_time_to_regain_access` in minutes. The tests key it by Page id.
 - **`appsecret_proof`** is accepted on `/me/accounts`, `/{page-id}/feed` and

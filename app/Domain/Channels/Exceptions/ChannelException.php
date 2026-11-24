@@ -12,6 +12,14 @@ use RuntimeException;
  * anything that looks like a credential. There is deliberately no $previous
  * argument, because HTTP client exceptions carry request URLs and headers,
  * which is where tokens live.
+ *
+ * $retryable is a promise, not a guess: it means the platform certainly did
+ * not perform the action, so sending the same call again cannot do it twice.
+ * For a call that creates something (publish), a timeout, a broken
+ * connection or a server error does not qualify, because the platform may
+ * have acted before the failure. Such a failure is not retryable, says that
+ * the outcome is unknown, and carries `outcome_unknown` in its context.
+ * Callers such as PublishPostJob resend automatically on $retryable alone.
  */
 class ChannelException extends RuntimeException
 {
@@ -37,7 +45,7 @@ class ChannelException extends RuntimeException
     /**
      * @param  string  $platform  platform name as in config('noongun.channels')
      * @param  string  $message  safe summary, shown to the user and stored on the variant
-     * @param  bool  $retryable  true when the same call may succeed later (rate limit, timeout, server error)
+     * @param  bool  $retryable  true only when the platform certainly did not perform the action and the same call may succeed later (a rate limit; for calls that are safe to repeat also a timeout or server error)
      * @param  int|null  $retryAfterSeconds  the platform's own advice on how long to wait, if it gave any
      * @param  bool  $requiresReconnect  true when the token is expired or revoked and a human must connect again
      * @param  array<string, mixed>  $context  platform error code, HTTP status and similar; never credentials
@@ -56,7 +64,10 @@ class ChannelException extends RuntimeException
     }
 
     /**
-     * A failure worth trying again: rate limit, timeout, platform outage.
+     * A failure after which the same call can safely be sent again, because
+     * the platform certainly did not act: a rate limit, or a timeout or
+     * outage on a call that is safe to repeat. Never use it for a publish
+     * whose outcome is unknown.
      *
      * @param  array<string, mixed>  $context
      */

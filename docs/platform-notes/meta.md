@@ -353,12 +353,38 @@ Source: developers.facebook.com/docs/facebook-login/guides/advanced/manual-flow
 9. **`appsecret_proof`** is sent on every call that carries a user or Page token. It
    is not sent with the app token on `debug_token`, as in the spike scripts.
 10. **Error mapping** (`GraphClient`). Reconnect: codes 102, 190, 10, 200 to 299 and
-    the subcodes listed above. Retry: codes 1, 2, 4, 17, 32, 341, 613, 80000 to 80014,
-    HTTP 429, any 5xx and network failures, with the wait from
-    `X-Business-Use-Case-Usage` or `Retry-After` when given. Everything else is
+    the subcodes listed above. Everything that is neither a reconnect nor a retry is
     permanent, including 368: Meta says to wait and retry, but a policy block should
-    be looked at by a person and not retried by a job. A 2xx answer that cannot be read,
-    or that has no post id, is permanent as well, because the post may be public.
+    be looked at by a person and not retried by a job.
+
+    What counts as a retry depends on the call, because `PublishPostJob` resends on
+    `retryable` alone and a second public post is the worst failure there is. Every
+    call to `GraphClient::send()` states whether it is safe to repeat, and the default
+    is that it is not. (Revised later on 2026-11-24; the first version retried
+    timeouts and 5xx on publish too.)
+
+    - **Publish (`POST /{page-id}/feed`), not safe to repeat.** Retryable only when
+      Facebook certainly made no post:
+      - a Graph error with a rate limit code: 4, 17, 32, 613 or 80000 to 80014,
+        whatever the HTTP status, with the wait from `X-Business-Use-Case-Usage` or
+        `Retry-After` when given. These are documented purely as throttling, so the
+        call was turned away and not attempted;
+      - a connection that was never made: host or proxy not resolved, connection
+        refused, TLS handshake failed. Guzzle 8 reports these as `ConnectException`.
+
+      Not retryable, with "the outcome is unknown, check the Page before trying
+      again" and `outcome_unknown` in the context:
+      - any timeout, also one reported as a connect timeout (Guzzle tells the two
+        apart by the text of the curl error, which is not a guarantee), and any
+        connection that broke after it was made;
+      - codes 1 (unknown), 2 (service) and 341 (application limit). Meta describes
+        all three as "temporary downtime" (341 as "downtime or throttling"), which
+        does not say how far the call got;
+      - any 5xx, and a 429, without a rate limit code in a readable Graph error;
+      - a 2xx answer that cannot be read or that has no post id.
+    - **Token exchange, `/me/accounts`, `debug_token`, delete: safe to repeat.**
+      Retryable for all of the above: rate limit codes, codes 1, 2 and 341, HTTP 429,
+      any 5xx and every network failure.
 11. **Capabilities.** Body: 63,206 characters. This is not in the Graph API
     documentation; it is the limit Facebook announced for posts in 2011 and is still
     widely reported. Setting `max_body_length` in the `facebook` entry of
@@ -373,10 +399,13 @@ Source: developers.facebook.com/docs/facebook-login/guides/advanced/manual-flow
 - Does a failed read-after-write leave the post published (decision 1)?
 - Does `debug_token` return the granted permissions in `scopes` for a Page token, and
   `expires_at` `0` (decision 3)?
-- Does a network timeout on `POST /{page-id}/feed` ever follow a post that was
-  created? The adapter reports timeouts as retryable, as the brief asks. Meta
-  documents no idempotency key for this call. ADR 0009 leaves this case to M7.
+- Does a network timeout or a 5xx on `POST /{page-id}/feed` ever follow a post that
+  was created? The adapter assumes it can, and does not retry (decision 10). Meta
+  documents no idempotency key for this call. A post that fails this way needs a
+  person to look at the Page; ADR 0009 leaves an automatic check to M7.
+- Do the rate limit codes really mean that nothing was created? The documentation
+  describes them only as throttling, and the adapter relies on that.
 - Which HTTP status do Graph errors carry? The mapping uses the error code first, so
-  only 429 and 5xx without a readable body depend on it.
+  only 429 and 5xx without a rate limit code depend on it.
 - Does `data_access_expires_at` (about 90 days on the token) stop a Page token from
   publishing when it passes? If so it must be stored and shown as the expiry.
