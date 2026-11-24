@@ -25,7 +25,10 @@ variants is on a platform. Everything else is kept. `DeletePost` enforces this
 under a row lock; the delete button is only shown when the rule allows it.
 
 A draft can hold a published variant when a partly published post was returned
-to draft. That post is kept as well. Deleting in Noon Gun never calls a
+to draft. That post is kept as well. So is a post with a variant whose outcome
+is unknown (`PostVariant::hasUnknownOutcome()`, ADR 0009): a platform was
+called for it and may hold the post, and the row with its error text is the
+only trace of that. Deleting in Noon Gun never calls a
 platform. Removing a public post, and removing its local record with it, is
 left for a later milestone together with the audit trail.
 
@@ -34,7 +37,12 @@ left for a later milestone together with the audit trail.
 `SaveDraft` creates a draft or replaces the planned time and the per-channel
 texts of an existing one. It works only on a draft and never changes a state.
 A text may be empty or too long: unfinished work can be saved, and the
-readiness check on approval decides what may go out. A channel can only be
+readiness check on approval decides what may go out. A variant that is
+published is never changed or removed. A variant whose outcome is unknown can
+be reworded but not removed: leaving its channel out of a save keeps the
+variant, so the warning cannot be lost by removing the channel and adding it
+again. The model refuses to delete such a variant or to move it to another
+channel, whoever asks. A channel can only be
 added to a post while it can publish.
 
 ### One lock for edits and state changes
@@ -71,6 +79,10 @@ start on Monday.
 
 ## Consequences
 
+- A post with a variant in doubt cannot be deleted, and that channel cannot
+  be taken off it, until a publish for the variant is recorded. There is no
+  way yet to say "I checked the Page and it is not there"; that belongs with
+  the audit trail.
 - A published post cannot be removed from the lists. The history grows; it is
   paged.
 - Two people who edit the same draft at the same time: the last save wins.

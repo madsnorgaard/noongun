@@ -66,14 +66,16 @@ function sourcesMatching(string $pattern, ?string $under = null): array
  */
 function runEverythingAutomatic(Post $post): void
 {
-    $round = PublishPostJob::roundOf($post);
+    $current = freshPost($post)->publish_round;
 
-    foreach ([1, 2, 5] as $attempt) {
-        $job = new PublishPostJob($post->workspace_id, $post->id, $round, $attempt);
+    foreach ([$current, $current + 1] as $round) {
+        foreach ([1, 2, 5] as $step) {
+            $job = new PublishPostJob($post->workspace_id, $post->id, $round, step: $step, attempt: $step);
 
-        dispatch(clone $job);
-        runPublishJob(clone $job);
-        $job->failed(new RuntimeException('Failed.'));
+            dispatch(clone $job);
+            runPublishJob(clone $job);
+            $job->failed(new RuntimeException('Failed.'));
+        }
     }
 
     test()->artisan('noongun:dispatch-due-posts')->assertSuccessful();
@@ -134,7 +136,7 @@ describe('the publishing job', function () {
         $post = postInState($this->workspace, $state, 2);
         $before = DB::table('posts')->where('id', $post->id)->first();
 
-        $job = new PublishPostJob($post->workspace_id, $post->id, PublishPostJob::roundOf($post));
+        $job = new PublishPostJob($post->workspace_id, $post->id, freshPost($post)->publish_round);
         runPublishJob($job);
         dispatch(clone $job);
 

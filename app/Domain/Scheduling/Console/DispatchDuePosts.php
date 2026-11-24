@@ -3,7 +3,9 @@
 namespace App\Domain\Scheduling\Console;
 
 use App\Domain\Content\Models\Post;
+use App\Domain\Scheduling\Exceptions\LockStoreNotShared;
 use App\Domain\Scheduling\PublishPostJob;
+use App\Domain\Scheduling\VariantLock;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
 use DateTimeInterface;
@@ -16,8 +18,8 @@ use Throwable;
  * that are scheduled with a time that has come, claims each one and queues
  * its PublishPostJob.
  *
- * The claim is one conditional UPDATE (scheduled -> publishing), so a post
- * is queued once however many copies of this command run. The command only
+ * The claim is one conditional UPDATE (scheduled and due -> publishing), so
+ * a post is queued once however many copies of this command run. The command only
  * ever looks at scheduled posts: it cannot approve or schedule anything.
  */
 class DispatchDuePosts extends Command
@@ -30,6 +32,15 @@ class DispatchDuePosts extends Command
 
     public function handle(CurrentWorkspace $currentWorkspace): int
     {
+        try {
+            // Nothing is claimed while the locks would not work.
+            VariantLock::assertStoreIsShared();
+        } catch (LockStoreNotShared $e) {
+            $this->error($e->getMessage());
+
+            return self::FAILURE;
+        }
+
         $now = now();
         $dispatched = 0;
         $this->errors = 0;
@@ -62,7 +73,9 @@ class DispatchDuePosts extends Command
                     continue;
                 }
 
-                if (! $post->claimForPublishing()) {
+                // The time is part of the claim: a post that was moved
+                // to a later time since the query is left alone.
+                if (! $post->claimForPublishing($now)) {
                     continue;
                 }
 

@@ -47,8 +47,8 @@ it('fails a post whose worker died, without calling the platform', function () {
     $this->fake->assertNothingPublished();
     expect(freshPost($post)->state)->toBe(PostState::Failed)
         ->and(freshPost($post)->approved_at)->not->toBeNull()
-        ->and($first->error)->toBe(SettleInterruptedPost::MESSAGE)
-        ->and($second->error)->toBe(SettleInterruptedPost::MESSAGE)
+        ->and($first->error)->toBe(SettleInterruptedPost::NOT_SENT)
+        ->and($second->error)->toBe(SettleInterruptedPost::NOT_SENT)
         ->and($first->isPublished())->toBeFalse();
 
     Event::assertDispatched(PostFailedToPublish::class, fn (PostFailedToPublish $event) => $event->postId === $post->id);
@@ -124,7 +124,7 @@ it('never causes a second platform call for a variant that has an external id', 
         ->and($out->external_id)->toBe('fb_out')
         ->and($out->permalink)->toBe('https://platform.test/posts/fb_out')
         ->and($out->error)->toBeNull()
-        ->and($missing->error)->toBe(SettleInterruptedPost::MESSAGE);
+        ->and($missing->error)->toBe(SettleInterruptedPost::NOT_SENT);
 
     $this->fake->assertNothingPublished();
 
@@ -168,15 +168,44 @@ it('leaves a post alone while a job holds one of its variants', function () {
     $first->release();
 });
 
+it('tells the user to check the channel when a platform call was started and never answered', function () {
+    [$post] = claimedPost($this->workspace, 2);
+    [$inDoubt, $untouched] = variantsOf($post);
+
+    // The worker died inside the call for the first variant.
+    DB::table('post_variants')->where('id', $inDoubt->id)->update(['outcome_unknown_since' => now()]);
+
+    $this->travel(41)->minutes();
+    $this->artisan('noongun:recover-stuck-posts')->assertSuccessful();
+
+    [$inDoubt, $untouched] = variantsOf($post);
+
+    expect($inDoubt->error)->toBe(SettleInterruptedPost::MESSAGE)
+        ->and($inDoubt->hasUnknownOutcome())->toBeTrue()
+        ->and($untouched->error)->toBe(SettleInterruptedPost::NOT_SENT)
+        ->and($untouched->hasUnknownOutcome())->toBeFalse();
+});
+
 it('keeps the last recorded error next to its own message', function () {
     [$post] = claimedPost($this->workspace, 1);
-    DB::table('post_variants')->where('post_id', $post->id)->update(['error' => 'The platform is busy.']);
+    DB::table('post_variants')->where('post_id', $post->id)->update(['error' => 'The platform is busy.', 'outcome_unknown_since' => now()]);
 
     $this->travel(41)->minutes();
     $this->artisan('noongun:recover-stuck-posts')->assertSuccessful();
 
     expect(variantsOf($post)[0]->error)
         ->toBe(SettleInterruptedPost::MESSAGE.' Last recorded error: The platform is busy.');
+});
+
+it('keeps the error of a variant the platform refused, because nothing about it is in doubt', function () {
+    [$post] = claimedPost($this->workspace, 1);
+    DB::table('post_variants')->where('post_id', $post->id)->update(['error' => 'The platform is busy.']);
+
+    $this->travel(41)->minutes();
+    $this->artisan('noongun:recover-stuck-posts')->assertSuccessful();
+
+    expect(variantsOf($post)[0]->error)->toBe('The platform is busy.')
+        ->and(freshPost($post)->state)->toBe(PostState::Failed);
 });
 
 it('only looks at posts that are publishing', function (PostState $state) {

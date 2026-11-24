@@ -27,6 +27,11 @@ class PostNotEditable extends LogicException
         return new self("Variant #{$variant->getKey()} is already published and cannot be changed.");
     }
 
+    public static function outcomeUnknown(PostVariant $variant): self
+    {
+        return new self("Variant #{$variant->getKey()} may already be on its platform. It cannot be removed or moved to another channel.");
+    }
+
     public static function outcomeWrittenDirectly(PostVariant $variant): self
     {
         return new self("The publishing outcome of variant #{$variant->getKey()} cannot be written directly. Use markPublished() or markFailed().");

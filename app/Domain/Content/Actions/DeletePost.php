@@ -20,7 +20,9 @@ use Illuminate\Support\Facades\DB;
  * a platform.
  *
  * A draft can hold a published variant when a partly published post was
- * returned to draft. Such a post is kept as well.
+ * returned to draft. Such a post is kept as well. So is a post with a variant
+ * whose outcome is unknown (PostVariant::hasUnknownOutcome()): the platform
+ * was called and may hold the post, and this row is the only trace of it.
  */
 final class DeletePost
 {
@@ -32,12 +34,12 @@ final class DeletePost
     public static function allows(Post $post): bool
     {
         return in_array($post->state, [PostState::Draft, PostState::Rejected], true)
-            && ! $post->variants->contains(fn (PostVariant $variant): bool => $variant->isPublished());
+            && ! $post->variants->contains(fn (PostVariant $variant): bool => $variant->isPublished() || $variant->hasUnknownOutcome());
     }
 
     /**
      * @throws PostActionNotAllowed the actor is not an owner or editor of the workspace
-     * @throws PostNotDeletable the post is approved or later, or has a published variant
+     * @throws PostNotDeletable the post is approved or later, or has a variant that is or may be published
      * @throws ModelNotFoundException the post is gone
      */
     public function handle(User $actor, Post $post): void

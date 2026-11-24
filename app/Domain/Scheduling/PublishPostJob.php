@@ -23,23 +23,31 @@ use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
- * Sends the variants of one claimed post to their platforms. One job per
- * post and per round of publishing (one claim by the scheduler).
+ * Sends the variants of one claimed post to their platforms. One chain of
+ * jobs per post and per round of publishing (one claim by the scheduler).
  *
  * A duplicate public post is the worst failure this system can have, so:
  *
- * - The job only acts on a post that is in the publishing state, in the
- *   round it was queued for, with an approval on the row. It cannot approve,
- *   schedule or claim anything.
+ * - Every job names a round and a step. Before it does anything it takes
+ *   that step on the post row with one conditional UPDATE
+ *   (Post::beginPublishingStep()). The database gives each round and step
+ *   out once, so a job that is run a second time - by queue:retry, by the
+ *   retry button in Horizon, by a queue that delivers twice - does nothing.
+ *   The post must also be publishing with an approval for the step to be
+ *   given. The job cannot approve, schedule or claim anything.
  * - Each platform call is made while holding the lock of that variant, after
  *   reading the variant again inside the lock. A variant with an external id
  *   is never sent.
- * - The queue never runs this job a second time by itself ($tries is 1). A
- *   run that was cut off may have reached the platform, so it is not
- *   repeated; SettleInterruptedPost fails the post and a human decides.
+ * - Just before the call the variant is marked (PostVariant::beginAttempt()).
+ *   The mark is cleared when the result is recorded or the platform
+ *   certainly made no post. If the process dies in between, the mark stays:
+ *   the outcome is unknown, and that is on the row for good.
  * - A retry happens only after the adapter answered with a failure it marks
- *   as retryable. The job then queues its own successor, which carries the
- *   attempt number and the variants that are already given up.
+ *   as retryable. The job then queues its successor: the next step, the
+ *   next attempt, and the variants that are already given up.
+ *
+ * One run sends at most noongun.publishing.calls_per_job variants and hands
+ * the rest to a successor, so the time limit of a job has an upper bound.
  *
  * Variants that fail for good do not stop the others. When no variant will
  * be tried again, the post is finished as published or failed.
@@ -50,10 +58,12 @@ final class PublishPostJob implements ShouldQueue
 
     public const UNKNOWN_OUTCOME = 'Publishing stopped with an unexpected error, and it is not known whether the post reached the channel. Check the channel before you try again.';
 
-    /** Seconds on top of the platform calls for the job's own work. */
-    private const SLACK_SECONDS = 15;
+    public const EARLIER_ATTEMPT = 'An earlier attempt may have reached the channel. Check it before you try again.';
 
-    /** The queue must never run this job again by itself. See the class comment. */
+    /**
+     * The queue must never run this job again by itself. A run by hand is
+     * stopped by the step, see the class comment.
+     */
     public int $tries = 1;
 
     public int $timeout;
@@ -61,8 +71,9 @@ final class PublishPostJob implements ShouldQueue
     public bool $failOnTimeout = true;
 
     /**
-     * @param  int  $round  identifies the claim this job belongs to, see roundOf()
-     * @param  int  $attempt  which attempt of this round this is, from 1
+     * @param  int  $round  the claim this job belongs to: posts.publish_round after the claim
+     * @param  int  $step  which run of the job in this round this is, from 1; each runs once
+     * @param  int  $attempt  how many times the variants that are still open have been sent, plus one
      * @param  list<int>  $givenUp  ids of variants that failed for good earlier in this round
      * @param  int  $calls  how many platform calls this run can make at most, for the time limit
      */
@@ -70,11 +81,12 @@ final class PublishPostJob implements ShouldQueue
         public int $workspaceId,
         public int $postId,
         public int $round,
+        public int $step = 1,
         public int $attempt = 1,
         public array $givenUp = [],
         int $calls = 1,
     ) {
-        $this->timeout = PublishingConfig::timeout() * max(1, $calls) + self::SLACK_SECONDS;
+        $this->timeout = PublishingConfig::jobSeconds($calls);
         $this->onQueue(PublishingConfig::queue());
     }
 
@@ -86,24 +98,18 @@ final class PublishPostJob implements ShouldQueue
         return new self(
             workspaceId: $post->workspace_id,
             postId: $post->id,
-            round: self::roundOf($post),
+            round: $post->publish_round,
             calls: $post->variants()->unpublished()->count(),
         );
     }
 
-    /**
-     * A post can be published in several rounds: the first, and one for each
-     * time a human retries it. Post::retry() gives every round a new
-     * scheduled_at, and that time cannot change while the post is scheduled
-     * or publishing, so it tells a job from an earlier round apart.
-     */
-    public static function roundOf(Post $post): int
-    {
-        return (int) $post->scheduled_at?->getTimestamp();
-    }
-
     public function handle(CurrentWorkspace $currentWorkspace, ChannelManager $channels): void
     {
+        // Before anything is read or taken: without a shared lock store
+        // nothing may be sent. The step is not used up, so the job can be
+        // retried once the store is fixed.
+        VariantLock::assertStoreIsShared();
+
         $workspace = Workspace::query()->find($this->workspaceId);
 
         if ($workspace === null) {
@@ -138,7 +144,10 @@ final class PublishPostJob implements ShouldQueue
             app(CurrentWorkspace::class)->run($workspace, function (): void {
                 $post = $this->postInThisRound();
 
-                if ($post !== null) {
+                // Only the run that holds the newest step, or the one
+                // that was next and never started, may settle. Settling
+                // sends nothing, and it ends the round for every job.
+                if ($post !== null && in_array($post->publish_step, [$this->step, $this->step - 1], true)) {
                     app(SettleInterruptedPost::class)->handle($post);
                 }
             });
@@ -155,16 +164,16 @@ final class PublishPostJob implements ShouldQueue
     {
         $post = $this->postInThisRound();
 
-        if ($post === null) {
+        // From here on this round and step belong to this run alone, and
+        // no other run will ever get them.
+        if ($post === null || ! $post->beginPublishingStep($this->round, $this->step)) {
             return;
         }
 
-        // Sign of life for the recovery of stuck posts.
-        Post::query()->whereKey($post->id)->where('state', PostState::Publishing)->touch();
-
         $givenUp = $this->givenUp;
+        $budget = PublishingConfig::callsPerJob();
         $retryIn = null;
-        $retrying = 0;
+        $open = 0;
 
         foreach ($post->variants()->unpublished()->orderBy('id')->pluck('id') as $variantId) {
             $variantId = (int) $variantId;
@@ -172,6 +181,15 @@ final class PublishPostJob implements ShouldQueue
             if (in_array($variantId, $givenUp, true)) {
                 continue;
             }
+
+            // Out of calls for this run: the successor takes this one.
+            if ($budget === 0) {
+                $open++;
+
+                continue;
+            }
+
+            $budget--;
 
             [$outcome, $wait] = $this->publishVariant($variantId, $channels);
 
@@ -185,13 +203,20 @@ final class PublishPostJob implements ShouldQueue
 
             if ($outcome === AttemptOutcome::RetryLater) {
                 $retryIn = max($retryIn ?? 0, $wait);
-                $retrying++;
+                $open++;
             }
         }
 
-        if ($retryIn !== null) {
-            dispatch(new self($this->workspaceId, $this->postId, $this->round, $this->attempt + 1, $givenUp, $retrying))
-                ->delay($retryIn);
+        if ($open > 0) {
+            dispatch(new self(
+                workspaceId: $this->workspaceId,
+                postId: $this->postId,
+                round: $this->round,
+                step: $this->step + 1,
+                attempt: $retryIn !== null ? $this->attempt + 1 : $this->attempt,
+                givenUp: $givenUp,
+                calls: $open,
+            ))->delay($retryIn ?? 0);
 
             return;
         }
@@ -215,9 +240,9 @@ final class PublishPostJob implements ShouldQueue
      */
     private function publishVariant(int $variantId, ChannelManager $channels): array
     {
-        // The lock outlives the job's own time limit, so it cannot expire
+        // The lock outlives the time limit of any job, so it cannot expire
         // while this process is still inside the platform call.
-        $lock = VariantLock::for($variantId, max(PublishingConfig::lockSeconds(), $this->timeout + 30));
+        $lock = VariantLock::for($variantId, PublishingConfig::lockSeconds());
 
         if (! $lock->get()) {
             return [AttemptOutcome::NotOurs, 0];
@@ -248,15 +273,23 @@ final class PublishPostJob implements ShouldQueue
             try {
                 $adapter = $channels->for($channel);
             } catch (ChannelAdapterNotAvailable) {
-                $variant->markFailed("Publishing to {$channel->platform} is not available on this instance.");
+                $variant->markFailed(PostPreconditions::platformUnavailable($channel));
 
                 return [AttemptOutcome::Failed, 0];
             }
 
             try {
+                // Written down before the call: from here the outcome is
+                // unknown until something says otherwise.
+                $firstMark = $variant->beginAttempt();
+            } catch (VariantAlreadyPublished) {
+                return [AttemptOutcome::Settled, 0];
+            }
+
+            try {
                 $result = $adapter->publish($variant);
             } catch (ChannelException $e) {
-                return $this->afterFailure($variant, $channel, $e);
+                return $this->afterFailure($variant, $channel, $e, $firstMark);
             } catch (Throwable $e) {
                 // Not an answer from the platform. The exception itself is
                 // not logged: HTTP client exceptions can carry tokens.
@@ -288,8 +321,25 @@ final class PublishPostJob implements ShouldQueue
         }
     }
 
+    /**
+     * Writes the result down. If the first try fails the result is logged
+     * at once, before any waiting: the job may run out of time while it
+     * waits to try again, and the log line is then the only record.
+     */
     private function record(PostVariant $variant, PublishResult $result): void
     {
+        try {
+            $variant->markPublished($result);
+
+            return;
+        } catch (VariantAlreadyPublished) {
+            $this->confirmRecorded($variant, $result);
+
+            return;
+        } catch (Throwable) {
+            $this->logUnrecorded($variant, $result);
+        }
+
         try {
             retry(
                 [200, 1000, 3000],
@@ -297,15 +347,29 @@ final class PublishPostJob implements ShouldQueue
                 when: fn (Throwable $e): bool => ! $e instanceof VariantAlreadyPublished,
             );
         } catch (VariantAlreadyPublished) {
-            $stored = PostVariant::query()->find($variant->id);
+            $this->confirmRecorded($variant, $result);
 
-            if ($stored?->external_id !== $result->externalId) {
-                $this->logUnrecorded($variant, $result);
-            }
-        } catch (Throwable $e) {
+            return;
+        }
+
+        Log::notice('The result of a published variant was recorded after all. The earlier critical entry needs no action.', [
+            'workspace_id' => $this->workspaceId,
+            'post_id' => $this->postId,
+            'variant_id' => $variant->id,
+            'external_id' => $result->externalId,
+        ]);
+    }
+
+    /**
+     * markPublished() found an external id on the row. Fine if it is ours
+     * (the write went through but its answer was lost), alarming if not.
+     */
+    private function confirmRecorded(PostVariant $variant, PublishResult $result): void
+    {
+        $stored = PostVariant::query()->find($variant->id);
+
+        if ($stored?->external_id !== $result->externalId) {
             $this->logUnrecorded($variant, $result);
-
-            throw $e;
         }
     }
 
@@ -326,17 +390,20 @@ final class PublishPostJob implements ShouldQueue
     }
 
     /**
+     * @param  bool  $firstMark  whether this attempt set the mark of an unknown outcome, see PostVariant::beginAttempt()
      * @return array{AttemptOutcome, int}
      */
-    private function afterFailure(PostVariant $variant, Channel $channel, ChannelException $e): array
+    private function afterFailure(PostVariant $variant, Channel $channel, ChannelException $e, bool $firstMark): array
     {
+        $context = $e->context();
+
         Log::warning('Publishing a variant failed.', [
             'workspace_id' => $this->workspaceId,
             'post_id' => $this->postId,
             'variant_id' => $variant->id,
             'attempt' => $this->attempt,
             'message' => $e->getMessage(),
-            ...$e->context(),
+            ...$context,
         ]);
 
         if ($e->requiresReconnect) {
@@ -345,12 +412,27 @@ final class PublishPostJob implements ShouldQueue
 
         $message = $e->getMessage();
 
+        // The adapter does not know whether the platform made the post.
+        // The mark stays, and nothing sends this variant again by itself.
+        if (($context['outcome_unknown'] ?? false) === true) {
+            $variant->markFailed($message);
+
+            return [AttemptOutcome::Failed, 0];
+        }
+
+        // From here the platform certainly made no post in this attempt.
+        // The mark is cleared only if this attempt set it: one left by an
+        // earlier attempt still stands, whatever the platform says now.
+        $write = function (string $text) use ($variant, $firstMark): void {
+            $firstMark ? $variant->markRefused($text) : $variant->markFailed($text.' '.self::EARLIER_ATTEMPT);
+        };
+
         if ($e->retryable && ! $e->requiresReconnect && $this->attempt < PublishingConfig::maxAttempts()) {
             $wait = max(PublishingConfig::backoffBefore($this->attempt), $e->retryAfterSeconds ?? 0);
 
             if ($wait <= PublishingConfig::longestBackoff()) {
                 // Shown as the last error while the post waits for its retry.
-                $variant->markFailed($message);
+                $write($message);
 
                 return [AttemptOutcome::RetryLater, $wait];
             }
@@ -358,7 +440,7 @@ final class PublishPostJob implements ShouldQueue
             $message .= ' The platform asked for a longer wait than this instance retries for. Try again later.';
         }
 
-        $variant->markFailed($message);
+        $write($message);
 
         return [AttemptOutcome::Failed, 0];
     }
@@ -372,7 +454,7 @@ final class PublishPostJob implements ShouldQueue
     {
         $post = Post::query()->find($this->postId);
 
-        if ($post === null || $post->state !== PostState::Publishing || self::roundOf($post) !== $this->round) {
+        if ($post === null || $post->state !== PostState::Publishing || $post->publish_round !== $this->round) {
             return null;
         }
 

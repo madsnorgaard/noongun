@@ -88,6 +88,10 @@ return [
     | retry of a retryable failure, comma separated; the last value repeats.
     | "lock_seconds" is how long the lock on one variant is held at most, and
     | must be longer than "timeout", the limit for one platform call.
+    | "calls_per_job" is how many variants one run of the job sends before it
+    | hands the rest to a successor. It bounds the time limit of a job, which
+    | is timeout x calls_per_job + 15 seconds and must stay below the
+    | "retry_after" of the queue connection.
     | "stuck_after_minutes" is how long a post may stay in the publishing
     | state without a sign of life from its job before it is treated as
     | failed. The largest backoff is added to it.
@@ -98,6 +102,7 @@ return [
         'max_attempts' => (int) env('NOONGUN_PUBLISH_MAX_ATTEMPTS', 5),
         'backoff' => array_map(intval(...), explode(',', (string) env('NOONGUN_PUBLISH_BACKOFF', '60,300,900,3600'))),
         'timeout' => (int) env('NOONGUN_PUBLISH_TIMEOUT', 30),
+        'calls_per_job' => (int) env('NOONGUN_PUBLISH_CALLS_PER_JOB', 3),
         'lock_seconds' => (int) env('NOONGUN_PUBLISH_LOCK_SECONDS', 120),
         'stuck_after_minutes' => (int) env('NOONGUN_PUBLISH_STUCK_AFTER_MINUTES', 30),
     ],

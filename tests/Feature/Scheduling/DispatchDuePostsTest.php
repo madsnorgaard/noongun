@@ -53,7 +53,9 @@ it('claims each due post and queues one job for it', function () {
         fn (PublishPostJob $job) => $job->postId === $due->id
             && $job->workspaceId === $this->workspace->id
             && $job->attempt === 1
-            && $job->round === PublishPostJob::roundOf(freshPost($due))
+            && $job->round === freshPost($due)->publish_round
+            && $job->round === 1
+            && $job->step === 1
             && $job->timeout === 75,
     );
 
@@ -100,6 +102,32 @@ it('does not queue a post that another process claimed between the query and the
 
     expect($won)->toBeTrue();
     Queue::assertNothingPushed();
+});
+
+it('does not send a post that a human moved to a later time between the query and the claim', function () {
+    Queue::fake();
+    $post = postInState($this->workspace, PostState::Scheduled, 1, now()->subMinute());
+
+    // The command has read the post as due. Before it claims, the user
+    // moves the post to next week. It stays scheduled, so only the time in
+    // the claim itself can stop it.
+    $moved = false;
+    Post::retrieved(function (Post $retrieved) use (&$moved): void {
+        if (! $moved) {
+            $moved = true;
+            DB::table('posts')->where('id', $retrieved->id)->update(['scheduled_at' => now()->addWeek()]);
+        }
+    });
+
+    $this->artisan('noongun:dispatch-due-posts')->expectsOutputToContain('Queued 0 due post(s).')->assertSuccessful();
+
+    expect($moved)->toBeTrue()
+        ->and(freshPost($post)->state)->toBe(PostState::Scheduled)
+        ->and(freshPost($post)->scheduled_at->toDateTimeString())->toBe('2026-12-01 10:00:00')
+        ->and(freshPost($post)->publish_round)->toBe(0);
+
+    Queue::assertNothingPushed();
+    $this->fake->assertNothingPublished();
 });
 
 it('ignores posts that are not scheduled, even when their time has passed', function (PostState $state) {

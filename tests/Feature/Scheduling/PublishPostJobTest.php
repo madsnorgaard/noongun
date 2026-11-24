@@ -84,13 +84,13 @@ it('runs on the configured queue, is never run twice by the queue, and has a tim
 
 it('survives the trip through the queue with everything it needs', function () {
     [, $job] = claimedPost($this->workspace, 2);
-    $successor = (new PublishPostJob($job->workspaceId, $job->postId, $job->round, attempt: 2, givenUp: [7], calls: 2))->delay(60);
+    $successor = (new PublishPostJob($job->workspaceId, $job->postId, $job->round, step: 3, attempt: 2, givenUp: [7], calls: 2))->delay(60);
 
     $restored = unserialize(serialize($successor));
 
     expect($restored)->toBeInstanceOf(PublishPostJob::class)
-        ->and([$restored->workspaceId, $restored->postId, $restored->round, $restored->attempt, $restored->givenUp])
-        ->toBe([$job->workspaceId, $job->postId, $job->round, 2, [7]])
+        ->and([$restored->workspaceId, $restored->postId, $restored->round, $restored->step, $restored->attempt, $restored->givenUp])
+        ->toBe([$job->workspaceId, $job->postId, $job->round, 3, 2, [7]])
         ->and($restored->timeout)->toBe(75)
         ->and($restored->tries)->toBe(1)
         ->and($restored->queue)->toBe('publishing')
@@ -152,11 +152,20 @@ describe('a duplicate public post never happens', function () {
         expect(freshPost($post)->state)->toBe(PostState::Publishing)
             ->and(variantsOf($post)[1]->error)->toBeNull();
 
+        // The job has used its step. Running it again does nothing; the
+        // post is left to whoever held the variant, or to the recovery.
         $held->release();
         runPublishJob($job);
 
-        $this->fake->assertPublishedOnce($first)->assertPublishedOnce($second);
-        expect(freshPost($post)->state)->toBe(PostState::Published);
+        $this->fake->assertNothingPublished();
+        expect(freshPost($post)->state)->toBe(PostState::Publishing);
+
+        $this->travel(2)->hours();
+        $this->artisan('noongun:recover-stuck-posts')->assertSuccessful();
+
+        $this->fake->assertNothingPublished();
+        expect(freshPost($post)->state)->toBe(PostState::Failed)
+            ->and(variantsOf($post)[0]->error)->toBe(SettleInterruptedPost::NOT_SENT);
     });
 
     it('releases the lock of a variant when it is done with it', function () {
@@ -235,7 +244,9 @@ describe('a duplicate public post never happens', function () {
         expect($current->round)->not->toBe($stale->round);
 
         // A late copy of the first job must not act on the new round.
-        runPublishJob(new PublishPostJob($stale->workspaceId, $stale->postId, $stale->round, attempt: 3, givenUp: [variantsOf($post)[0]->id]));
+        foreach ([1, 2, 3] as $step) {
+            runPublishJob(new PublishPostJob($stale->workspaceId, $stale->postId, $stale->round, step: $step, attempt: 3));
+        }
 
         expect($this->fake->publishCount())->toBe(1)
             ->and(freshPost($post)->state)->toBe(PostState::Publishing);
@@ -263,6 +274,7 @@ describe('retryable failures', function () {
         $second = Queue::pushed(PublishPostJob::class)->sole();
 
         expect($second->attempt)->toBe(2)
+            ->and($second->step)->toBe(2)
             ->and($second->delay)->toBe(60)
             ->and($second->round)->toBe($job->round)
             ->and($second->tries)->toBe(1);
@@ -611,7 +623,7 @@ describe('a job the queue gave up on', function () {
 
         $this->fake->assertNothingPublished();
         expect(freshPost($post)->state)->toBe(PostState::Failed)
-            ->and(variantsOf($post)[0]->error)->toBe(SettleInterruptedPost::MESSAGE);
+            ->and(variantsOf($post)[0]->error)->toBe(SettleInterruptedPost::NOT_SENT);
 
         Event::assertDispatchedTimes(PostFailedToPublish::class, 1);
     });
@@ -638,7 +650,7 @@ describe('a job the queue gave up on', function () {
     it('leaves a post of a later round alone', function () {
         [$post, $job] = claimedPost($this->workspace, 1);
 
-        (new PublishPostJob($job->workspaceId, $job->postId, $job->round - 60))->failed(new RuntimeException('Late.'));
+        (new PublishPostJob($job->workspaceId, $job->postId, $job->round - 1))->failed(new RuntimeException('Late.'));
 
         expect(freshPost($post)->state)->toBe(PostState::Publishing);
     });
