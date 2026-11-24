@@ -59,3 +59,28 @@ Not in a file, but assumed by the tests:
   a first request.
 - **Denied consent** comes back as `error=access_denied` and
   `error_reason=user_denied`. Documented.
+
+## Questions for the spike about where credentials travel
+
+The tests record that these calls carry credentials in the query string, because
+that is the only form Meta documents for them (checked 2026-11-24, details in
+`docs/platform-notes/meta.md`). If the spike shows that a safer form works, the
+adapter and the tests should move to it.
+
+- Is `Authorization: Bearer {token}` accepted on `GET /me/accounts`, on
+  `DELETE /{post-id}` and on `GET /debug_token` with the app token, with
+  `appsecret_proof` still sent as a parameter?
+- Do the code exchange and the `fb_exchange_token` call on
+  `/oauth/access_token` work as POST with a form body?
+- Does `/debug_token` accept `input_token` anywhere but the query string?
+
+`POST /{page-id}/feed` already keeps the token and `appsecret_proof` in the
+form body, as documented, and the publish test asserts that its URL holds
+nothing else.
+
+## Question for the spike about returned Pages
+
+- After a Page was disconnected in Noon Gun only (the grant still exists at
+  Facebook), does the login dialog return it again in `/me/accounts` without
+  the user selecting it? The connect flow assumes it can, and asks before
+  such a Page is connected again.
