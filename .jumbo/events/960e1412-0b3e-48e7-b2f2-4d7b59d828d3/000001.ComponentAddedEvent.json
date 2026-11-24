@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "960e1412-0b3e-48e7-b2f2-4d7b59d828d3",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:33.178Z",
+  "payload": {
+    "name": "CI",
+    "type": "service",
+    "description": "GitHub Actions workflow running Pint, Larastan, the migration rollback check and Pest on every pull request",
+    "responsibility": "Enforce the definition of done on pull requests",
+    "path": ".github/workflows/ci.yml",
+    "status": "active"
+  },
+  "seq": 1
+}

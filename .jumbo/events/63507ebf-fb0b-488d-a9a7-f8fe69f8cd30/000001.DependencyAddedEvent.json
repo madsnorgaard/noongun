@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "63507ebf-fb0b-488d-a9a7-f8fe69f8cd30",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:25.352Z",
+  "payload": {
+    "name": "Laravel Fortify",
+    "ecosystem": "composer",
+    "packageName": "laravel/fortify",
+    "versionConstraint": "^1.37.2",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

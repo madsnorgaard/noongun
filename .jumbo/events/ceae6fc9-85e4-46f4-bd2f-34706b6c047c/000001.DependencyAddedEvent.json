@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "ceae6fc9-85e4-46f4-bd2f-34706b6c047c",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:29.843Z",
+  "payload": {
+    "name": "Tailscale serve",
+    "ecosystem": "service",
+    "packageName": "tailscale-serve",
+    "versionConstraint": "1.104",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

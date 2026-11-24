@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "dd289439-af89-40fc-89bf-2ade5668ecd6",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:28.784Z",
+  "payload": {
+    "name": "FrankenPHP",
+    "ecosystem": "docker",
+    "packageName": "dunglas/frankenphp",
+    "versionConstraint": "1.14-php8.5-alpine",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

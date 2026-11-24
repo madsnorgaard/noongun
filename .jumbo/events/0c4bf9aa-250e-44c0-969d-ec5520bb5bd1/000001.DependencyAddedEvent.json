@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "0c4bf9aa-250e-44c0-969d-ec5520bb5bd1",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:29.489Z",
+  "payload": {
+    "name": "Redis",
+    "ecosystem": "docker",
+    "packageName": "redis",
+    "versionConstraint": "8.10-alpine",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

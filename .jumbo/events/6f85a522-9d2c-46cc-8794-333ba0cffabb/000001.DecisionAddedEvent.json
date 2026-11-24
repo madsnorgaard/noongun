@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "6f85a522-9d2c-46cc-8794-333ba0cffabb",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:23.690Z",
+  "payload": {
+    "title": "Pinned versions for M2 (ADR 0006)",
+    "context": "CLAUDE.md asks for the current stable version of each dependency, checked at pinning time. Versions were looked up on 2026-11-23. See docs/adr/0006-pinned-versions.md.",
+    "rationale": "PHP 8.5 not 8.6 because phpredis does not build against 8.6 yet; Redis 8.10 not 8.12 because 8.12 had no official image; Node 24 from the Alpine package; frontend tooling as shipped by the starter kit; Larastan level 7.",
+    "alternatives": [],
+    "consequences": "Laravel 13, FrankenPHP 1.14, PostgreSQL 19, Redis 8.10. Caret ranges with lock files; Docker images pinned to a minor version. Move to PHP 8.6 once phpredis supports it; Larastan level 8 once domain models exist."
+  },
+  "seq": 1
+}

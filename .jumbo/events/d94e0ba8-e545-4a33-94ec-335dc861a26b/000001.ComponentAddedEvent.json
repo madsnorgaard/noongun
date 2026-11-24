@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "d94e0ba8-e545-4a33-94ec-335dc861a26b",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:30.510Z",
+  "payload": {
+    "name": "WorkspaceScope",
+    "type": "lib",
+    "description": "Global scope and BelongsToWorkspace trait. Fails closed: a query without a current workspace throws MissingWorkspaceContext, a write to another workspace throws CrossWorkspaceWrite",
+    "responsibility": "Scope every tenant-owned query and write by workspace_id",
+    "path": "app/Domain/Workspaces/Scopes/WorkspaceScope.php",
+    "status": "active"
+  },
+  "seq": 1
+}

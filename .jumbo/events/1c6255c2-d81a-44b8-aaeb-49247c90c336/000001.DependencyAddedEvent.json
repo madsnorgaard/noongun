@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "1c6255c2-d81a-44b8-aaeb-49247c90c336",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:26.014Z",
+  "payload": {
+    "name": "Laravel Wayfinder",
+    "ecosystem": "composer",
+    "packageName": "laravel/wayfinder",
+    "versionConstraint": "^0.1.14",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

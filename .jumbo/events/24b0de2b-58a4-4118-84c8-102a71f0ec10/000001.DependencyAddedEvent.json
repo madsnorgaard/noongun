@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "24b0de2b-58a4-4118-84c8-102a71f0ec10",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:25.009Z",
+  "payload": {
+    "name": "Laravel Horizon",
+    "ecosystem": "composer",
+    "packageName": "laravel/horizon",
+    "versionConstraint": "^5.52",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

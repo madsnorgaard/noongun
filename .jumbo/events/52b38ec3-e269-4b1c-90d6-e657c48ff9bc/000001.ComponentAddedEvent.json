@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "52b38ec3-e269-4b1c-90d6-e657c48ff9bc",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:30.172Z",
+  "payload": {
+    "name": "Workspaces",
+    "type": "lib",
+    "description": "Workspace and Membership models, Role enum and WorkspacePolicy",
+    "responsibility": "Tenant boundary: who belongs to which workspace and what each role may do",
+    "path": "app/Domain/Workspaces",
+    "status": "active"
+  },
+  "seq": 1
+}

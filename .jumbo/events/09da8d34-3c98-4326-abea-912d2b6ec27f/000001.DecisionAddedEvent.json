@@ -1,0 +1,18 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "09da8d34-3c98-4326-abea-912d2b6ec27f",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:24.005Z",
+  "payload": {
+    "title": "Home server install behind a TLS proxy (ADR 0008)",
+    "context": "Phase 1 runs on a home server reachable only over Tailscale. The development stack is not suitable for a server and the app built http links behind tailscale serve. See docs/adr/0008-home-server-install.md.",
+    "rationale": "Production image from docker-compose.yml alone, web port bound to 127.0.0.1, HTTPS terminated by tailscale serve, and NOONGUN_TRUSTED_PROXIES naming trusted proxies with a default of none.",
+    "alternatives": [
+      "Trust every proxy by default",
+      "Force HTTPS from APP_URL",
+      "Production path inside ./setup"
+    ],
+    "consequences": "Server install is a manual sequence in the README. Instances sharing a host need their own port, project name and session cookie name. Backups belong to M7."
+  },
+  "seq": 1
+}

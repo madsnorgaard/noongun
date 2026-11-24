@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "c7a5957a-317c-4c9d-92a4-6883ecf23241",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:28.435Z",
+  "payload": {
+    "name": "Vite+",
+    "ecosystem": "npm",
+    "packageName": "vite-plus",
+    "versionConstraint": "1.4.0",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}
