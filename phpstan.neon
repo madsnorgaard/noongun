@@ -11,3 +11,9 @@ parameters:
         - routes/
 
     level: 7
+
+    ignoreErrors:
+        -
+            identifier: trait.unused
+            path: app/Domain/Workspaces/Concerns/BelongsToWorkspace.php
+            reportUnmatched: false
