@@ -84,6 +84,72 @@ docker compose -f docker-compose.yml up -d --build
 
 The health endpoint `/up` returns 200 only when PostgreSQL and Redis respond.
 
+## Running on a home server
+
+`./setup` gives a development stack: it mounts the source code and runs in debug
+mode. On a server, run the production image instead. The app container then holds
+the code and the built assets, and nothing on the host needs PHP or Node.
+
+The steps below put the app behind `tailscale serve`, which provides HTTPS on the
+machine's tailnet name and keeps it off the public internet. Another TLS reverse
+proxy works the same way.
+
+1. Clone the repository and create `.env`:
+
+   ```sh
+   git clone git@github.com:madsnorgaard/noongun.git && cd noongun
+   cp .env.example .env && chmod 600 .env
+   ```
+
+2. Set these values in `.env`:
+
+   | Variable | Value |
+   |---|---|
+   | `COMPOSE_FILE` | `docker-compose.yml`, so the development override is not loaded |
+   | `APP_ENV` | `production` |
+   | `APP_DEBUG` | `false` |
+   | `APP_URL` | The HTTPS address, for example `https://myserver.example.ts.net` |
+   | `NOONGUN_HTTP_PORT` | `127.0.0.1:8090`, so only the proxy on the same machine reaches the app |
+   | `NOONGUN_TRUSTED_PROXIES` | `172.16.0.0/12,192.168.0.0/16` (see below) |
+   | `SESSION_SECURE_COOKIE` | `true` |
+   | `LOG_LEVEL` | `info` |
+   | `DB_PASSWORD` | A long random value |
+   | `NOONGUN_UID`, `NOONGUN_GID` | Output of `id -u` and `id -g` |
+
+3. Build the image, generate the application key and start the stack:
+
+   ```sh
+   docker compose build app
+   docker compose run --rm --no-deps --entrypoint "" app php artisan key:generate --show
+   ```
+
+   Put the printed value in `.env` as `APP_KEY`, then:
+
+   ```sh
+   docker compose up -d --wait
+   ```
+
+4. Publish it on the tailnet over HTTPS:
+
+   ```sh
+   sudo tailscale serve --bg --https=443 http://127.0.0.1:8090
+   ```
+
+5. Open `APP_URL` and complete the setup screen.
+
+`NOONGUN_TRUSTED_PROXIES` lists the proxies whose `X-Forwarded-*` headers the app
+trusts. Without it the app sees plain HTTP behind the proxy and builds `http://`
+links and redirects. A request from a proxy on the host arrives from the Docker
+network gateway, which is why the value above names the private ranges Docker
+uses. Leave it empty when no proxy is in front of the app.
+
+To update, pull and rebuild. Migrations run when the `app` container starts.
+
+```sh
+git pull
+docker compose up -d --build --wait
+```
+
 ## Environment and secrets
 
 `.env` is created from `.env.example` by `./setup` and is never committed. Setup
@@ -101,9 +167,10 @@ Do not change `APP_KEY` on an instance that has data.
 | Variable | Default | Meaning |
 |---|---|---|
 | `NOONGUN_MODE` | `self_hosted` | `self_hosted`: one workspace, created on first run, registration closed. `saas` is not built yet. |
-| `NOONGUN_HTTP_PORT` | `8080` | Host port for the web app. Keep `APP_URL` in step. |
+| `NOONGUN_HTTP_PORT` | `8080` | Host port for the web app. Keep `APP_URL` in step. Accepts an address too, for example `127.0.0.1:8090`. |
 | `NOONGUN_VITE_PORT` | `5173` | Host port for `./dev vite`. |
 | `NOONGUN_AUTO_MIGRATE` | `true` | Run migrations when the `app` container starts. |
+| `NOONGUN_TRUSTED_PROXIES` | empty | Reverse proxies whose forwarded headers are trusted: comma separated addresses or CIDR ranges, or `*`. |
 | `NOONGUN_DEFAULT_TIMEZONE` | `Europe/Copenhagen` | Preselected timezone on the setup screen if the browser timezone is unknown. |
 | `NOONGUN_UID`, `NOONGUN_GID` | `1000` | User and group the containers run as. |
 | `APP_URL` | `http://localhost:8080` | Public address of the app. |
