@@ -92,10 +92,14 @@ class PostPreconditions
      */
     public function problems(Post $post): array
     {
-        $variants = $post->variants()->with('channel')->orderBy('id')->get();
+        // A list that has loaded the variants for many posts at once does
+        // not pay for a query per post here.
+        $variants = $post->relationLoaded('variants')
+            ? $post->variants->loadMissing('channel')->sortBy('id')->values()
+            : $post->variants()->with('channel')->orderBy('id')->get();
 
         if ($variants->isEmpty()) {
-            return ['variants' => ['The post has no text for any channel. Add at least one channel.']];
+            return ['variants' => [self::text('The post has no text for any channel. Add at least one channel.')]];
         }
 
         $errors = [];
@@ -109,7 +113,7 @@ class PostPreconditions
             $problem = self::channelProblem($channel);
 
             if ($channel === null || $problem !== null) {
-                $errors["variants.{$variant->id}.channel"] = [$problem ?? 'The channel no longer exists.'];
+                $errors["variants.{$variant->id}.channel"] = [$problem ?? self::text('The channel no longer exists.')];
 
                 continue;
             }
@@ -117,16 +121,19 @@ class PostPreconditions
             try {
                 $capabilities = $this->channels->for($channel)->capabilities();
             } catch (ChannelAdapterNotAvailable) {
-                $errors["variants.{$variant->id}.channel"] = ["Publishing to {$channel->platform} is not available on this instance."];
+                $errors["variants.{$variant->id}.channel"] = [self::platformUnavailable($channel)];
 
                 continue;
             }
 
             if (trim($variant->body) === '') {
-                $errors["variants.{$variant->id}.body"] = ["The text for {$channel->display_name} is empty."];
+                $errors["variants.{$variant->id}.body"] = [self::text('The text for :channel is empty.', ['channel' => $channel->display_name])];
             } elseif (! $capabilities->fits($variant->body)) {
-                $length = mb_strlen($variant->body);
-                $errors["variants.{$variant->id}.body"] = ["The text for {$channel->display_name} is {$length} characters long. The limit is {$capabilities->maxBodyLength}."];
+                $errors["variants.{$variant->id}.body"] = [self::text('The text for :channel is :length characters long. The limit is :limit.', [
+                    'channel' => $channel->display_name,
+                    'length' => mb_strlen($variant->body),
+                    'limit' => $capabilities->maxBodyLength,
+                ])];
             }
         }
 
@@ -144,11 +151,11 @@ class PostPreconditions
         $at = CarbonImmutable::instance($at);
 
         if ($at->lt(now()->subSeconds(self::PAST_GRACE_SECONDS))) {
-            throw new PostNotPublishable($post, ['scheduled_at' => ['The scheduled time has passed. Choose a time in the future.']]);
+            throw new PostNotPublishable($post, ['scheduled_at' => [self::text('The scheduled time has passed. Choose a time in the future.')]]);
         }
 
         if ($at->gt(now()->addDays(self::MAX_DAYS_AHEAD))) {
-            throw new PostNotPublishable($post, ['scheduled_at' => ['The scheduled time is more than a year ahead.']]);
+            throw new PostNotPublishable($post, ['scheduled_at' => [self::text('The scheduled time is more than a year ahead.')]]);
         }
     }
 
@@ -160,18 +167,41 @@ class PostPreconditions
     public static function channelProblem(?Channel $channel): ?string
     {
         if ($channel === null) {
-            return 'The channel no longer exists.';
+            return self::text('The channel no longer exists.');
         }
 
         if ($channel->canPublish()) {
             return null;
         }
 
+        $name = ['channel' => $channel->display_name];
+
         return match (true) {
-            $channel->status === ChannelStatus::NeedsReconnect => "{$channel->display_name} must be connected again before it can publish.",
-            $channel->status === ChannelStatus::Disconnected => "{$channel->display_name} is disconnected.",
-            $channel->tokenExpired() => "The access to {$channel->display_name} has expired. Connect it again.",
-            default => "{$channel->display_name} cannot publish right now.",
+            $channel->status === ChannelStatus::NeedsReconnect => self::text(':channel must be connected again before it can publish.', $name),
+            $channel->status === ChannelStatus::Disconnected => self::text(':channel is disconnected.', $name),
+            $channel->tokenExpired() => self::text('The access to :channel has expired. Connect it again.', $name),
+            default => self::text(':channel cannot publish right now.', $name),
         };
+    }
+
+    /**
+     * The text for a channel whose platform has no adapter on this instance.
+     */
+    public static function platformUnavailable(Channel $channel): string
+    {
+        return self::text('Publishing to :platform is not available on this instance.', ['platform' => $channel->platform]);
+    }
+
+    /**
+     * Every text a user reads goes through the translator, as in the
+     * controllers.
+     *
+     * @param  array<string, string|int>  $replace
+     */
+    private static function text(string $key, array $replace = []): string
+    {
+        $text = __($key, $replace);
+
+        return is_string($text) ? $text : $key;
     }
 }
