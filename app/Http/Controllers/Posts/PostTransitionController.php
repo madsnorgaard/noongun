@@ -93,6 +93,7 @@ class PostTransitionController extends Controller
 
         $actor = $this->actor($request);
         $approved = 0;
+        $refused = [];
 
         foreach ($selection as $id => $version) {
             try {
@@ -106,20 +107,26 @@ class PostTransitionController extends Controller
                 });
 
                 $approved++;
-            } catch (PostNotPublishable|IllegalPostTransition|ValidationException) {
-                // Left as it is. The queue shows why it cannot be approved.
+            } catch (PostNotPublishable $exception) {
+                $refused["posts.{$id}"] = $exception->getMessage();
+            } catch (ValidationException $exception) {
+                $refused["posts.{$id}"] = $exception->getMessage();
+            } catch (IllegalPostTransition) {
+                $refused["posts.{$id}"] = $this->notPossibleNow($id);
             }
         }
 
-        $refused = count($selection) - $approved;
-
-        if ($refused === 0) {
+        if ($refused === []) {
             $this->toast('success', trans_choice('{1} :count post is approved.|[2,*] :count posts are approved.', $approved, ['count' => $approved]));
-        } else {
-            $this->toast('warning', __(':approved approved, :refused not approved. Open what is left to see why.', ['approved' => $approved, 'refused' => $refused]));
+
+            return back();
         }
 
-        return back();
+        $this->toast('warning', __(':approved approved, :refused not approved. Each one that is left says why.', ['approved' => $approved, 'refused' => count($refused)]));
+
+        // One message per refused post, keyed "posts.{id}", so the queue can
+        // show each reason at its draft.
+        return back()->withErrors($refused);
     }
 
     public function reject(Request $request, int $post, RejectPost $action): RedirectResponse

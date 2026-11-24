@@ -1,5 +1,6 @@
 <?php
 
+use App\Domain\Content\Models\Post;
 use App\Domain\Content\PostState;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
@@ -91,6 +92,20 @@ it('gives each draft what is needed to review and approve it in place', function
             ->where('sections.drafts.0.can.approve', true)
             ->where('sections.drafts.1.id', $empty->id)
             ->where('sections.drafts.1.problems', ['variants.'.variantsOf($empty)[0]->id.'.body' => ['The text for Alpha is empty.']]));
+});
+
+it('says how many posts a section has when it shows only the first hundred', function () {
+    inWorkspace($this->workspace, fn () => Post::factory()->count(103)->create());
+    postInState($this->workspace, PostState::Failed, [$this->channel]);
+
+    $this->actingAs($this->owner)->get(route('queue.index'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->has('sections.drafts', 100)
+            ->has('sections.failed', 1)
+            ->where('totals', ['drafts' => 103, 'upcoming' => 0, 'failed' => 1]));
+
+    $this->get(route('queue.index', ['view' => 'history']))
+        ->assertInertia(fn (Assert $page) => $page->where('totals', null));
 });
 
 it('shows the permalink of published posts in the history, newest first', function () {

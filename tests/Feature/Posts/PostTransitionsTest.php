@@ -283,8 +283,16 @@ describe('approving a selection from the queue', function () {
             ]])
             ->assertInertiaFlash('toast', [
                 'type' => 'warning',
-                'message' => '1 approved, 3 not approved. Open what is left to see why.',
-            ]);
+                'message' => '1 approved, 3 not approved. Each one that is left says why.',
+            ])
+            // One reason per refused post, keyed by its id, for the queue to
+            // show at that post.
+            ->assertSessionHasErrors([
+                "posts.{$empty->id}" => 'The text for Alpha is empty.',
+                "posts.{$edited->id}" => 'The post was changed after you opened it. Read it again before you approve it.',
+                "posts.{$already->id}" => 'That is not possible: the post is rejected now.',
+            ])
+            ->assertSessionDoesntHaveErrors(["posts.{$ready->id}"]);
 
         expect(stateOf($ready))->toBe('approved')
             ->and(stateOf($empty))->toBe('draft')

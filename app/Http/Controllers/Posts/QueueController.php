@@ -46,6 +46,7 @@ class QueueController extends Controller
             return Inertia::render('queue/Index', [
                 'view' => 'history',
                 'sections' => null,
+                'totals' => null,
                 'history' => [
                     'posts' => array_map($present, $history->items()),
                     'previous' => $history->previousPageUrl(),
@@ -55,32 +56,25 @@ class QueueController extends Controller
             ]);
         }
 
+        // Soonest planned time first, posts without a time last, oldest
+        // first among equals.
+        $drafts = $this->posts(PostState::Draft)->orderByRaw('scheduled_at asc nulls last')->orderBy('id');
+        $upcoming = $this->posts(PostState::Approved, PostState::Scheduled, PostState::Publishing)->orderByRaw('scheduled_at asc nulls last')->orderBy('id');
+        $failed = $this->posts(PostState::Failed)->orderByDesc('updated_at')->orderByDesc('id');
+
         return Inertia::render('queue/Index', [
             'view' => 'working',
             'sections' => [
-                // Soonest planned time first, drafts without a time last,
-                // oldest first among equals.
-                'drafts' => $this->posts(PostState::Draft)
-                    ->orderByRaw('scheduled_at asc nulls last')
-                    ->orderBy('id')
-                    ->limit(self::SECTION_LIMIT)
-                    ->get()
-                    ->map($present)
-                    ->all(),
-                'upcoming' => $this->posts(PostState::Approved, PostState::Scheduled, PostState::Publishing)
-                    ->orderByRaw('scheduled_at asc nulls last')
-                    ->orderBy('id')
-                    ->limit(self::SECTION_LIMIT)
-                    ->get()
-                    ->map($present)
-                    ->all(),
-                'failed' => $this->posts(PostState::Failed)
-                    ->orderByDesc('updated_at')
-                    ->orderByDesc('id')
-                    ->limit(self::SECTION_LIMIT)
-                    ->get()
-                    ->map($present)
-                    ->all(),
+                'drafts' => $drafts->limit(self::SECTION_LIMIT)->get()->map($present)->all(),
+                'upcoming' => $upcoming->limit(self::SECTION_LIMIT)->get()->map($present)->all(),
+                'failed' => $failed->limit(self::SECTION_LIMIT)->get()->map($present)->all(),
+            ],
+            // How many posts each section really has. A section shows at
+            // most SECTION_LIMIT of them, and the page says when it is cut.
+            'totals' => [
+                'drafts' => Post::query()->inState(PostState::Draft)->count(),
+                'upcoming' => Post::query()->inState(PostState::Approved, PostState::Scheduled, PostState::Publishing)->count(),
+                'failed' => Post::query()->inState(PostState::Failed)->count(),
             ],
             'history' => null,
             'can' => ['manage' => $mayChange],
