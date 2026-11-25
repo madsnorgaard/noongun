@@ -104,6 +104,11 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
         );
     }
 
+    public function setupSteps(): array
+    {
+        return [];
+    }
+
     public function missingSettings(): array
     {
         return array_values(array_filter([

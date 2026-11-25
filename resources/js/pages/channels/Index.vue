@@ -186,6 +186,9 @@ function access(channel: Channel): string {
                         >{{ platform.redirect_uri }}</code
                     >
                 </li>
+                <li v-for="step in platform.setup_steps" :key="step">
+                    {{ step }}
+                </li>
                 <li>
                     Set
                     <template
