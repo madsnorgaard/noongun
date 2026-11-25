@@ -8,8 +8,9 @@ use App\Domain\Workspaces\Role;
 use App\Models\User;
 
 /**
- * Every member may look at the channels of a workspace. Owners and editors
- * may connect and disconnect them.
+ * Every member may look at the channels of a workspace. Only owners may
+ * connect and disconnect them: a channel holds the access to an account on a
+ * platform.
  */
 class ChannelPolicy
 {
@@ -25,7 +26,7 @@ class ChannelPolicy
      */
     public function create(User $user): bool
     {
-        return $this->roleInCurrentWorkspace($user)?->canEditContent() ?? false;
+        return $this->roleInCurrentWorkspace($user)?->canManageWorkspace() ?? false;
     }
 
     /**
@@ -33,7 +34,7 @@ class ChannelPolicy
      */
     public function delete(User $user, Channel $channel): bool
     {
-        return $channel->workspace?->roleOf($user)?->canEditContent() ?? false;
+        return $channel->workspace?->roleOf($user)?->canManageWorkspace() ?? false;
     }
 
     private function roleInCurrentWorkspace(User $user): ?Role

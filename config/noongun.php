@@ -33,6 +33,18 @@ return [
         'Australia/Sydney',
     ],
 
+    /*
+    | Who may open the Horizon dashboard: the email addresses of the people
+    | who run this instance, comma separated. The account must have a verified
+    | email address. When the list is empty, a self-hosted instance falls back
+    | to the owners of its first workspace, and a saas instance lets nobody in.
+    */
+
+    'operators' => array_values(array_filter(array_map(
+        fn (string $email): string => mb_strtolower(trim($email)),
+        explode(',', (string) env('NOONGUN_OPERATOR_EMAILS', '')),
+    ))),
+
     'default_timezone' => env('NOONGUN_DEFAULT_TIMEZONE', 'Europe/Copenhagen'),
 
     'locales' => [

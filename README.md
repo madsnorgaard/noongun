@@ -29,13 +29,21 @@ time, for example after pulling changes.
 When it finishes, open <http://localhost:8080>. A fresh instance shows the setup
 screen: create the owner account and the workspace (name, timezone, language).
 You land on the dashboard, logged in. After that the setup screen is gone and
-registration is closed.
+registration is closed. The setup screen stays closed for as long as a
+workspace exists, and the only owner of a workspace cannot delete their
+account.
 
 If port 8080 is taken, choose another before the first run:
 
 ```sh
 NOONGUN_HTTP_PORT=8081 ./setup
 ```
+
+The app is published on `127.0.0.1` only, so other machines on the network
+cannot reach it. To open it to them, set `NOONGUN_HTTP_PORT` in `.env` to an
+address and a port, for example `0.0.0.0:8080`, and run `./dev up`. Docker
+bypasses host firewalls for published ports, so do this only on a network you
+trust.
 
 ## Daily commands
 
@@ -474,7 +482,10 @@ Three things to know when operating it:
 
 `./setup` gives a development stack: it mounts the source code and runs in debug
 mode. On a server, run the production image instead. The app container then holds
-the code and the built assets, and nothing on the host needs PHP or Node.
+the code and the built assets, and nothing on the host needs PHP or Node. The
+production image runs PHP with `php.ini-production`, so PHP errors go to the
+container log and never to the browser; `docker/app/php.ini` is applied on top
+of it in both images.
 
 The steps below put the app behind `tailscale serve`, which provides HTTPS on the
 machine's tailnet name and keeps it off the public internet. Another TLS reverse
@@ -523,11 +534,31 @@ proxy works the same way.
 
 5. Open `APP_URL` and complete the setup screen.
 
-`NOONGUN_TRUSTED_PROXIES` lists the proxies whose `X-Forwarded-*` headers the app
-trusts. Without it the app sees plain HTTP behind the proxy and builds `http://`
-links and redirects. A request from a proxy on the host arrives from the Docker
-network gateway, which is why the value above names the private ranges Docker
-uses. Leave it empty when no proxy is in front of the app.
+`NOONGUN_TRUSTED_PROXIES` lists the proxies whose `X-Forwarded-For` and
+`X-Forwarded-Proto` headers the app trusts. Without it the app sees plain HTTP
+behind the proxy and builds `http://` links and redirects. A request from a
+proxy on the host arrives from the Docker network gateway, which is why the
+value above names the private ranges Docker uses. Leave it empty when no proxy
+is in front of the app.
+
+The app never reads the host name from `X-Forwarded-Host` or the port from
+`X-Forwarded-Port`. It uses the `Host` header, so the proxy must pass that
+header on unchanged. `tailscale serve` and Caddy do. nginx needs
+`proxy_set_header Host $host;`.
+
+Outside the `local` environment the app only answers requests whose host is the
+host of `APP_URL`, or `localhost`, `127.0.0.1` or `[::1]`, which the container
+health check uses. A request for any other host gets a 400 response. If every
+page answers 400 after an update, `APP_URL` does not match the address in the
+browser, or the proxy rewrites the `Host` header.
+
+Every page is sent with `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and
+`Referrer-Policy: same-origin`, so the app cannot be shown inside a frame on
+another site. Over HTTPS it also sends `Strict-Transport-Security` for one
+year, without subdomains: a browser that has opened the app over HTTPS refuses
+plain HTTP for that host name from then on. The Content-Security-Policy does
+not restrict scripts or styles yet.
 
 To update, pull and rebuild. Migrations run when the `app` container starts.
 
@@ -556,13 +587,14 @@ it there.
 | Variable | Default | Meaning |
 |---|---|---|
 | `NOONGUN_MODE` | `self_hosted` | `self_hosted`: one workspace, created on first run, registration closed. `saas` is not built yet. |
-| `NOONGUN_HTTP_PORT` | `8080` | Host port for the web app. Keep `APP_URL` in step. Accepts an address too, for example `127.0.0.1:8090`. |
+| `NOONGUN_HTTP_PORT` | `127.0.0.1:8080` | Where the web app is published on the host, as `address:port`. Keep the port of `APP_URL` in step. A bare port, for example `8080`, is published on every network interface; an `.env` from before this default still has that form. |
 | `NOONGUN_VITE_PORT` | `5173` | Host port for `./dev vite`. |
 | `NOONGUN_AUTO_MIGRATE` | `true` | Run migrations when the `app` container starts. |
-| `NOONGUN_TRUSTED_PROXIES` | empty | Reverse proxies whose forwarded headers are trusted: comma separated addresses or CIDR ranges, or `*`. |
+| `NOONGUN_TRUSTED_PROXIES` | empty | Reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are trusted: comma separated addresses or CIDR ranges, or `*`. |
+| `NOONGUN_OPERATOR_EMAILS` | empty | Who may open the Horizon dashboard at `/horizon`: email addresses of accounts with a verified address, comma separated. Empty: the owners of the first workspace in `self_hosted` mode, nobody in `saas` mode. The rule applies in every environment, including `local`. |
 | `NOONGUN_DEFAULT_TIMEZONE` | `Europe/Copenhagen` | Preselected timezone on the setup screen if the browser timezone is unknown. |
 | `NOONGUN_UID`, `NOONGUN_GID` | `1000` | User and group the containers run as. |
-| `APP_URL` | `http://localhost:8080` | Public address of the app. |
+| `APP_URL` | `http://localhost:8080` | Public address of the app. Outside the `local` environment its host is the only one the app answers to, besides the loopback names. |
 | `DB_*` | `pgsql`, host `postgres` | Database connection. The compose file uses the same values to create the database. |
 | `REDIS_HOST` | `redis` | Redis host. |
 | `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` | empty | Credentials of the Meta app this instance connects Pages with. |
@@ -655,8 +687,9 @@ your role on the Page or remove the app. The channel then shows **Needs
 reconnecting**; choose **Connect again**. **Disconnect** erases the token and
 keeps the history of what was published.
 
-Owners and editors of a workspace can connect and disconnect channels. Viewers
-can only see them.
+Only owners of a workspace can connect and disconnect channels, because a
+channel holds the access to an account on a platform. Editors and viewers can
+see them.
 
 ## Tests
 
