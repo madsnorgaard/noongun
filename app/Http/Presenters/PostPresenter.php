@@ -194,6 +194,6 @@ final class PostPresenter
 
     private function platformLabel(string $platform): string
     {
-        return Str::headline($platform);
+        return PlatformLabel::for($platform);
     }
 }

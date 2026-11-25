@@ -18,10 +18,11 @@ final class SaveBrief
 
     /**
      * @param  array<array-key, mixed>  $callsToAction  entries of ['text' => ..., 'url' => ...]
+     * @param  bool  $onlyIfChanged  return the current version, and add none, when the save is the same as it
      *
      * @throws DraftingNotAllowed the actor is not an owner or editor of the workspace
      */
-    public function handle(User $actor, string $title, string $body, VoiceRules $voiceRules, array $callsToAction = []): Brief
+    public function handle(User $actor, string $title, string $body, VoiceRules $voiceRules, array $callsToAction = [], bool $onlyIfChanged = false): Brief
     {
         $workspace = $this->currentWorkspace->getOrFail();
 
@@ -29,6 +30,6 @@ final class SaveBrief
             throw DraftingNotAllowed::for($actor, $workspace);
         }
 
-        return Brief::saveNewVersion($title, $body, $voiceRules, $callsToAction, $actor);
+        return Brief::saveNewVersion($title, $body, $voiceRules, $callsToAction, $actor, $onlyIfChanged);
     }
 }

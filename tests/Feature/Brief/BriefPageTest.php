@@ -1,5 +1,6 @@
 <?php
 
+use App\Domain\Drafting\Actions\SaveBrief;
 use App\Domain\Drafting\Models\Brief;
 use App\Domain\Drafting\VoiceRules;
 use App\Domain\Workspaces\Models\Workspace;
@@ -8,6 +9,7 @@ use App\Http\Requests\Brief\SaveBriefRequest;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Route;
 use Inertia\Testing\AssertableInertia as Assert;
 
 require_once __DIR__.'/../../Support/members.php';
@@ -164,6 +166,52 @@ describe('saving', function () {
         $this->put(route('brief.update'), briefPayload())->assertRedirect(route('brief.edit'));
 
         expect(briefRows($this->workspace))->toHaveCount(1);
+    });
+
+    it('locks the workspace before it reads or writes a brief, so two saves at once cannot take the same version', function (bool $first) {
+        if (! $first) {
+            briefIn($this->workspace);
+        }
+
+        $statements = [];
+        DB::listen(function ($query) use (&$statements) {
+            $statements[] = strtolower($query->sql);
+        });
+
+        // The first save has no brief row to lock, so the lock is on the
+        // workspace. The comparison with the current version and the next
+        // version number are both read after it.
+        $this->actingAs($this->owner)->put(route('brief.update'), briefPayload())->assertSessionHasNoErrors();
+
+        $positions = fn (Closure $matches): array => array_keys(array_filter($statements, $matches));
+
+        $lock = $positions(fn (string $sql) => str_contains($sql, '"workspaces"') && str_contains($sql, 'for update'))[0] ?? null;
+        // The request reads the brief once before, only to know which
+        // platforms may have rules. What decides the save is read after.
+        $compares = $positions(fn (string $sql) => str_starts_with($sql, 'select') && str_contains($sql, 'from "briefs"') && str_contains($sql, '"is_current"'));
+        $numbers = $positions(fn (string $sql) => str_contains($sql, 'max("version")'));
+        $writes = $positions(fn (string $sql) => str_starts_with($sql, 'insert into "briefs"') || str_starts_with($sql, 'update "briefs"'));
+
+        expect($lock)->not->toBeNull()
+            ->and(max($compares))->toBeGreaterThan($lock)
+            ->and($numbers)->toHaveCount(1)
+            ->and($numbers[0])->toBeGreaterThan($lock)
+            ->and(min($writes))->toBeGreaterThan($lock)
+            ->and(array_filter($statements, fn (string $sql) => str_contains($sql, 'from "briefs"') && str_contains($sql, 'for update')))->toBeEmpty();
+    })->with(['the first save' => true, 'a later save' => false]);
+
+    it('adds one version when the same save arrives twice, as the second finds the first under the lock', function () {
+        $save = fn () => inWorkspace($this->workspace, fn () => app(SaveBrief::class)->handle(
+            $this->owner, 'Table Bay Coffee', 'We roast coffee.', new VoiceRules(['No contractions.']), [['text' => 'Order', 'url' => '']], onlyIfChanged: true,
+        ));
+
+        $one = $save();
+        $two = $save();
+
+        expect($one->wasRecentlyCreated)->toBeTrue()
+            ->and($two->wasRecentlyCreated)->toBeFalse()
+            ->and($two->id)->toBe($one->id)
+            ->and(briefRows($this->workspace))->toHaveCount(1);
     });
 
     it('stores the text as it was typed, markup included, and drops empty rules', function () {
@@ -332,5 +380,21 @@ it('never renders text from a user as markup on the brief, pillar, slot and idea
 
     foreach ($files as $file) {
         expect(file_get_contents($file))->not->toContain('v-html')->not->toContain('innerHTML');
+    }
+});
+
+it('leads from the setup pages on to proposing a week', function () {
+    expect(Route::has('proposals.create'))->toBeTrue();
+
+    foreach (['components/brief/BriefTabs.vue', 'pages/brief/Edit.vue', 'pages/settings/Drafting.vue', 'pages/Dashboard.vue'] as $file) {
+        $source = (string) file_get_contents(resource_path('js/'.$file));
+
+        expect($source)->toContain("from '@/routes/proposals'")->toContain(':href="proposeWeek()"');
+        // Proposing is never the red action of these pages.
+        expect($source)->not->toContain('variant="signal"');
+    }
+
+    foreach (['Edit' => 'can.update', 'Pillars' => 'can.manage', 'Slots' => 'can.manage'] as $page => $ability) {
+        expect((string) file_get_contents(resource_path("js/pages/brief/{$page}.vue")))->toContain(':can-propose="'.$ability.'"');
     }
 });

@@ -195,7 +195,7 @@ describe('changing', function () {
 });
 
 describe('deleting', function () {
-    it('removes the idea and keeps the posts that were written from it', function (Role $role) {
+    it('removes the idea and keeps the posts that were drafted from it', function (Role $role) {
         fakeChannelAdapter();
 
         $idea = ideaIn($this->workspace, $this->pillar);

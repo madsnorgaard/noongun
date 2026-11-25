@@ -56,11 +56,11 @@ defineProps<{
                 >
                     <h2 class="text-sm text-muted-foreground">Status</h2>
                     <p v-if="brief.is_current">
-                        This is the current version. Drafts are written from it.
+                        This is the current version. Posts are drafted from it.
                     </p>
                     <p v-else>
-                        An earlier version, kept as it was saved. Drafts that
-                        were written from it still point to it.
+                        An earlier version, kept as it was saved. Posts that
+                        were drafted from it still point to it.
                     </p>
                     <SavedLine :at="brief.saved_at" :by="brief.saved_by" />
                     <p

@@ -62,7 +62,7 @@ class SaveBriefRequest extends FormRequest
     {
         return [
             'title.required' => __('Give the brief a title, for example the name of the business.'),
-            'body.required' => __('Write the brief first. Drafts are written from this text.'),
+            'body.required' => __('Write the brief first. Posts are drafted from this text.'),
             'calls_to_action.*.text.required' => __('A call to action needs a text. Remove the row if it is not needed.'),
             'calls_to_action.*.url.url' => __('The link must be a full address that starts with http:// or https://.'),
         ];

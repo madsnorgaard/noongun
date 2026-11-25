@@ -14,7 +14,7 @@ use Inertia\Inertia;
 use Inertia\Response;
 
 /**
- * Topics to write about. The source of an idea is stored as an address and
+ * Topics to draft posts from. The source of an idea is stored as an address and
  * is never opened by the server.
  */
 class IdeaController extends Controller
@@ -78,7 +78,7 @@ class IdeaController extends Controller
     }
 
     /**
-     * Removes the idea. Posts that were written from it stay and lose the
+     * Removes the idea. Posts that were drafted from it stay and lose the
      * link to it: the foreign key clears the column.
      */
     public function destroy(int $idea): RedirectResponse
@@ -89,7 +89,7 @@ class IdeaController extends Controller
 
         $idea->delete();
 
-        $this->toast('success', __('The idea is deleted. Posts that were written from it are kept.'));
+        $this->toast('success', __('The idea is deleted. Posts that were drafted from it are kept.'));
 
         return to_route('ideas.index');
     }
