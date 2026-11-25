@@ -68,7 +68,7 @@ class BriefController extends Controller
         );
 
         if ($brief->wasRecentlyCreated) {
-            $this->toast('success', __('The brief is saved as version :version. The next drafts are drafted from it.', ['version' => $brief->version]));
+            $this->toast('success', __('The brief is saved as version :version. The next posts are drafted from it.', ['version' => $brief->version]));
         } else {
             $this->toast('info', __('Nothing changed. Version :version is still the current one.', ['version' => $brief->version]));
         }

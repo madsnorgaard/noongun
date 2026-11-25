@@ -159,7 +159,7 @@ function confirmDelete(): void {
             <h2 class="text-heading">There are no ideas yet</h2>
             <p class="mt-1 max-w-[72ch] text-muted-foreground">
                 An idea is a topic before it becomes posts: a title, and if you
-                have them a source to write from and a few notes.
+                have them a source to draft from and a few notes.
                 <template v-if="!can.manage">
                     An owner or editor of this workspace can add them.
                 </template>
@@ -306,12 +306,12 @@ function confirmDelete(): void {
                         {{ shown.posts_count }}
                         {{
                             shown.posts_count === 1
-                                ? 'post was written from it. It is kept, without the link to this idea.'
-                                : 'posts were written from it. They are kept, without the link to this idea.'
+                                ? 'post was drafted from it. It is kept, without the link to this idea.'
+                                : 'posts were drafted from it. They are kept, without the link to this idea.'
                         }}
                     </template>
                     <template v-else>
-                        No post was written from it, so nothing else changes.
+                        No post was drafted from it, so nothing else changes.
                     </template>
                 </DialogDescription>
             </DialogHeader>

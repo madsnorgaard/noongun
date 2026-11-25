@@ -130,8 +130,8 @@ function remove(slot: Slot): void {
         </header>
 
         <p class="max-w-[72ch] text-base">
-            A slot proposes a firing time for a draft. It schedules nothing: a
-            post fires only after you approve it.
+            A slot proposes a planned time for a draft. It schedules nothing:
+            nothing is published until you approve it.
         </p>
 
         <section

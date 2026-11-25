@@ -169,7 +169,7 @@ Owners and editors write, approve, schedule and delete. Viewers can look.
 
 ## Brief, pillars and slots
 
-Drafts are written from what a workspace keeps on these pages.
+Posts are drafted from what a workspace keeps on these pages.
 
 - **Brief** (`/brief`) holds the title, the brief itself, the voice rules and
   the calls to action. The brief is plain text or markdown and is kept exactly
@@ -184,7 +184,7 @@ Drafts are written from what a workspace keeps on these pages.
   leaves them without a pillar. The page says how many before it happens.
 - **Slots** (`/brief/slots`) are the preferred posting times of a channel: a
   weekday and a time on the clock of the workspace. A slot stays at the same
-  time of day when the clocks change. It proposes a firing time for a draft
+  time of day when the clocks change. It proposes a planned time for a draft
   and schedules nothing. Channels that are disconnected or not yet confirmed
   cannot be given slots.
 - **Ideas** (`/ideas`) is a list of topics: a title, and optionally a pillar,
@@ -322,7 +322,8 @@ the page says which and links to where it is set.
 
 What it makes are drafts. Each one arrives in the queue like a post written
 by hand, with its slot time as planned time, and is approved or rejected by a
-person, one post at a time. There is no "approve all", and nothing a proposal
+person. Drafts can be approved one at a time or as a selection, and the person
+makes that selection: nothing is ever selected for them, and nothing a proposal
 creates is ever published by itself. See `docs/adr/0012-proposing-a-week.md`.
 
 Before anything starts, the page shows the week, every post that would be

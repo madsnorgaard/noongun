@@ -270,10 +270,15 @@ decide. Until then the interface follows the system and borrows only the look.
 - **Fixing a failed post.** The guide has one button that reconnects and
   publishes. The system opens the post first, because sending again can make a
   duplicate.
-- **Not built yet.** Firing time slots, idea and pillar, "Why it was drafted this
-  way", voice rule checks, photos and alt text, the platform preview, the day
-  strip, reject with undo, the one-card review on a phone, channel status in the
-  sidebar, the draft count in the navigation, Brief, Library and Insights.
+- **Slots.** The guide calls them firing time slots. A slot only proposes a time
+  for a draft, so the pages say "planned time"; "firing time" stays for a post
+  that is approved.
+- **Built in M4.** Brief, slots, idea and pillar, and "Why it was drafted this
+  way".
+- **Not built yet.** Voice rule checks, photos and alt text, the platform
+  preview, the day strip, reject with undo, the one-card review on a phone,
+  channel status in the sidebar, the draft count in the navigation, Library and
+  Insights.
 - **Density.** `CLAUDE.md` asks for a calm, dense, tool-like interface. The guide
   sets body text at 17px, controls at 46px and cards at 20px radius. The guide's
   values are used.

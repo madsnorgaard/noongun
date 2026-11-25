@@ -257,9 +257,9 @@ onBeforeUnmount(() => {
             <h2 class="text-heading">There is no brief yet</h2>
             <template v-if="can.update">
                 <p class="mt-1 max-w-[72ch] text-muted-foreground">
-                    The brief is what a draft is written from. Write it the way
-                    you would explain the business to someone who is going to
-                    post for you. A useful brief answers these questions.
+                    The brief is what every post is drafted from. Write it the
+                    way you would explain the business to someone who is going
+                    to post for you. A useful brief answers these questions.
                 </p>
                 <ul class="mt-3 grid max-w-[72ch] list-disc gap-1.5 pl-5">
                     <li>Who are you, and what do you offer?</li>
@@ -271,8 +271,7 @@ onBeforeUnmount(() => {
                 </ul>
                 <p class="mt-3 max-w-[72ch] text-sm text-muted-foreground">
                     Do not put passwords, customer names or anything private in
-                    the brief. It is sent to the drafting service as it is
-                    written.
+                    the brief. It is sent to the drafting service as it stands.
                 </p>
             </template>
             <p v-else class="mt-1 max-w-[72ch] text-muted-foreground">
@@ -543,7 +542,7 @@ onBeforeUnmount(() => {
                             <span class="font-mono font-medium">
                                 {{ brief.version }}
                             </span>
-                            is the current version. Drafts are written from it.
+                            is the current version. Posts are drafted from it.
                         </p>
                         <SavedLine :at="brief.saved_at" :by="brief.saved_by" />
                     </template>
@@ -576,8 +575,8 @@ onBeforeUnmount(() => {
                         </template>
                         <template v-else>
                             Saving adds a version. Earlier versions are kept as
-                            they were, and drafts that are already written do
-                            not change.
+                            they were, and drafts that already exist do not
+                            change.
                         </template>
                     </p>
                 </section>
@@ -661,7 +660,7 @@ onBeforeUnmount(() => {
                         <span class="font-mono font-medium">
                             {{ brief.version }}
                         </span>
-                        is the current version. Drafts are written from it.
+                        is the current version. Posts are drafted from it.
                     </p>
                     <SavedLine :at="brief.saved_at" :by="brief.saved_by" />
                 </section>
