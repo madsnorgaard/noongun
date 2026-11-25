@@ -1,0 +1,11 @@
+{
+  "type": "WorkerIdentifiedEvent",
+  "aggregateId": "a0084095-d721-414d-9cf3-a086436b3ead",
+  "version": 1,
+  "timestamp": "2026-11-25T14:38:46.664Z",
+  "payload": {
+    "hostSessionKey": "0a8d11c3e0a6a708e527a567a73ce767ba5be460e208b267c98a8f6879f81139",
+    "mode": null
+  },
+  "seq": 1
+}
