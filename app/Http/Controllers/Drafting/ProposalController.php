@@ -51,7 +51,7 @@ class ProposalController extends Controller
             );
         }
 
-        $refusals = [...$refusals, ...$checks->overLimits(count($plan->posts))];
+        $refusals = [...$refusals, ...$checks->overLimits($workspace, count($plan->posts))];
 
         return Inertia::render('proposals/Create', [
             'week' => $this->presenter->week($workspace, $week),

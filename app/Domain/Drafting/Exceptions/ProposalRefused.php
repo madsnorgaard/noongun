@@ -29,6 +29,8 @@ class ProposalRefused extends RuntimeException
 
     public const DAILY_LIMIT = 'daily_limit';
 
+    public const INSTANCE_LIMIT = 'instance_limit';
+
     final public function __construct(public readonly string $reason, string $message)
     {
         parent::__construct($message);

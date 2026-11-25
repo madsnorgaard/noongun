@@ -86,7 +86,7 @@ final class ProposeWeek
                 );
             }
 
-            foreach ($this->checks->overLimits(count($plan->posts)) as $refusal) {
+            foreach ($this->checks->overLimits($workspace, count($plan->posts)) as $refusal) {
                 throw $refusal;
             }
 

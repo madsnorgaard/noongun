@@ -3,6 +3,7 @@
 namespace App\Domain\Drafting;
 
 use App\Domain\Drafting\Models\DraftRun;
+use App\Domain\Drafting\Models\InstanceKeyRun;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -28,6 +29,16 @@ final class DraftBudget
     public function usedByWorkspace(): int
     {
         return self::counting(DraftRun::query())->count();
+    }
+
+    /**
+     * The runs of every workspace that the key of the instance pays for
+     * and that count towards
+     * noongun.drafting.limits.instance_runs_per_day. A number only.
+     */
+    public function usedOnInstanceKey(): int
+    {
+        return self::counting(InstanceKeyRun::query())->count();
     }
 
     /**

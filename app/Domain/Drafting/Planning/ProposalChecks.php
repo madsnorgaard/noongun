@@ -4,7 +4,9 @@ namespace App\Domain\Drafting\Planning;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Drafting\CredentialScope;
 use App\Domain\Drafting\DraftBudget;
+use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\DraftRunStatus;
@@ -71,12 +73,13 @@ final class ProposalChecks
 
     /**
      * What stands in the way right now although the setup is complete: a
-     * proposal that is still at work, or the daily limit.
+     * proposal that is still at work, the daily limit of the workspace,
+     * or, when the key of the instance pays, the daily limit of that key.
      *
      * @param  int  $posts  how many posts the proposal would draft
      * @return list<ProposalRefused>
      */
-    public function overLimits(int $posts): array
+    public function overLimits(Workspace $workspace, int $posts): array
     {
         $refusals = [];
 
@@ -107,7 +110,39 @@ final class ProposalChecks
             );
         }
 
+        $instanceLimit = DraftingLimits::instanceRunsPerDay();
+
+        if ($posts > 0 && $this->paidByInstance($workspace)) {
+            $instanceUsed = $this->budget->usedOnInstanceKey();
+
+            if ($instanceUsed + $posts > $instanceLimit) {
+                $refusals[] = ProposalRefused::because(
+                    ProposalRefused::INSTANCE_LIMIT,
+                    (string) __('The API key of this instance is shared by all its workspaces and can draft :limit posts in 24 hours. :used are used and this proposal needs :posts.', [
+                        'limit' => $instanceLimit,
+                        'used' => $instanceUsed,
+                        'posts' => $posts,
+                    ]).' '.self::howToGetMore('NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY')
+                    .' '.__('A workspace with an API key of its own is not held by this limit.'),
+                );
+            }
+        }
+
         return $refusals;
+    }
+
+    /**
+     * Whether the key of the instance would pay for a draft of the
+     * workspace right now. False when no key resolves at all: that is
+     * refused elsewhere.
+     */
+    private function paidByInstance(Workspace $workspace): bool
+    {
+        try {
+            return $this->generators->contextFor($workspace)->key->scope === CredentialScope::Instance;
+        } catch (DraftingException|DraftGeneratorNotAvailable) {
+            return false;
+        }
     }
 
     /**

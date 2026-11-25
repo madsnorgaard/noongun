@@ -31,6 +31,15 @@ final class DraftingLimits
     }
 
     /**
+     * The most draft runs all workspaces together may open in 24 hours on
+     * the key of the instance. Runs on a workspace's own key do not count.
+     */
+    public static function instanceRunsPerDay(): int
+    {
+        return self::int('instance_runs_per_day', 200, 1);
+    }
+
+    /**
      * How many times one planned post is asked for at most, counting the
      * first.
      */

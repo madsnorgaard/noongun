@@ -9,6 +9,8 @@ use App\Domain\Drafting\Exceptions\DraftingNotAllowed;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\GenerateDraftJob;
 use App\Domain\Drafting\Models\DraftRun;
+use App\Domain\Drafting\Models\InstanceKeyRun;
+use App\Domain\Drafting\Models\LlmCredential;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
 use App\Models\User;
@@ -344,6 +346,65 @@ describe('limits', function () {
         inWorkspace($this->workspace, fn () => DraftRun::factory()->count(9)->failed('The provider did not accept the API key.')->create());
 
         expect(proposeWeek($this->workspace, $this->owner))->toHaveCount(3);
+    });
+
+    describe('on the key of the instance', function () {
+        beforeEach(function () {
+            config(['noongun.drafting.limits.instance_runs_per_day' => 5]);
+
+            $this->other = Workspace::factory()->create();
+        });
+
+        it('refuses a proposal that would take all workspaces together over the limit of that key', function () {
+            inWorkspace($this->other, fn () => DraftRun::factory()->count(3)->succeeded()->create());
+
+            $message = expectRefused(ProposalRefused::INSTANCE_LIMIT)->getMessage();
+
+            expect($message)->toContain('shared by all its workspaces and can draft 5 posts in 24 hours')
+                ->and($message)->toContain('3 are used and this proposal needs 3')
+                ->and($message)->toContain('NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY');
+        });
+
+        it('allows a proposal that exactly reaches the limit', function () {
+            inWorkspace($this->other, fn () => DraftRun::factory()->count(2)->succeeded()->create());
+
+            expect(proposeWeek($this->workspace, $this->owner))->toHaveCount(3);
+        });
+
+        it('counts open runs and runs that spent, of any workspace, in the last 24 hours and on the instance key only', function () {
+            inWorkspace($this->other, function () {
+                DraftRun::factory()->create();
+                DraftRun::factory()->running()->create();
+                DraftRun::factory()->succeeded()->create();
+                DraftRun::factory()->failed('The provider did not accept the API key.')->create();
+                $old = DraftRun::factory()->succeeded()->create();
+                $theirKey = DraftRun::factory()->succeeded()->create();
+
+                DB::table('draft_runs')->where('id', $old->id)->update(['created_at' => now()->subHours(25)]);
+                DB::table('draft_runs')->where('id', $theirKey->id)->update(['credential_scope' => 'workspace']);
+            });
+
+            expect(app(DraftBudget::class)->usedOnInstanceKey())->toBe(3)
+                ->and(inWorkspace($this->workspace, fn () => app(DraftBudget::class)->usedByWorkspace()))->toBe(0);
+        });
+
+        it('does not hold a workspace that pays with a key of its own', function () {
+            inWorkspace($this->other, fn () => DraftRun::factory()->count(5)->succeeded()->create());
+            inWorkspace($this->workspace, fn () => LlmCredential::store(DRAFT_TEST_PROVIDER, 'a-workspace-llm-key'));
+
+            $runs = proposeWeek($this->workspace, $this->owner);
+
+            expect($runs)->toHaveCount(3)
+                ->and(freshRun($runs[0])->credential_scope)->toBe('workspace');
+        });
+
+        it('gives numbers only: the model that counts cannot write a run', function () {
+            $run = draftRunIn($this->workspace, $this->owner);
+
+            expect(fn () => InstanceKeyRun::query()->findOrFail($run->id)->delete())->toThrow(LogicException::class)
+                ->and(fn () => InstanceKeyRun::query()->findOrFail($run->id)->forceFill(['model' => 'other'])->save())->toThrow(LogicException::class)
+                ->and(DB::table('draft_runs')->where('id', $run->id)->value('model'))->toBe(DRAFT_TEST_MODEL);
+        });
     });
 
     it('names the setting to a person who runs the instance, and not to a tenant', function (string $mode, bool $named) {
