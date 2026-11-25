@@ -62,6 +62,8 @@ export type PostOrigin = {
     model: string;
     rationale: string | null;
     alt_text: string | null;
+    /** The model suggested a link the author never gave, and it was left out. */
+    link_dropped: boolean;
     generated_at: string | null;
     /** Tokens the draft used, as the provider reported them. */
     input_tokens: number | null;

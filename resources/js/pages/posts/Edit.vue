@@ -975,6 +975,17 @@ const locked = computed(() => {
                             </dd>
                         </div>
                         <div
+                            v-if="post.origin.link_dropped"
+                            class="grid gap-0.5"
+                            data-test="post-origin-link-dropped"
+                        >
+                            <dt class="text-sm text-muted-foreground">Link</dt>
+                            <dd>
+                                The draft suggested a link that was not in the
+                                idea or the brief. It was left out.
+                            </dd>
+                        </div>
+                        <div
                             v-if="post.origin.input_tokens !== null"
                             class="grid gap-0.5"
                             data-test="post-origin-cost"

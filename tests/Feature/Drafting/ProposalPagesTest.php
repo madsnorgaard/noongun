@@ -581,6 +581,29 @@ describe('the editor', function () {
                 ->where('post.can.approve', true));
     });
 
+    it('says when the draft suggested a link that the author never gave', function () {
+        // The idea has no source and the brief no link: any link is the model's own.
+        $this->generator->returnsOutput(fn ($request) => [...FakeDraftGenerator::outputFor($request), 'link' => 'https://invented.example/offer']);
+
+        proposeWeek($this->workspace, $this->owner);
+        runQueuedDraftJobs();
+
+        $post = DB::table('posts')->orderBy('id')->first();
+
+        expect(DB::table('post_variants')->where('post_id', $post->id)->value('link'))->toBeNull();
+
+        $this->actingAs($this->owner)->get(route('posts.show', $post->id))
+            ->assertInertia(fn (Assert $page) => $page->where('post.origin.link_dropped', true));
+    });
+
+    it('says nothing about a link when none was left out', function () {
+        proposeWeek($this->workspace, $this->owner);
+        runQueuedDraftJobs();
+
+        $this->actingAs($this->owner)->get(route('posts.show', DB::table('posts')->value('id')))
+            ->assertInertia(fn (Assert $page) => $page->where('post.origin.link_dropped', false));
+    });
+
     it('shows no origin on a post written by hand', function () {
         $post = postInState($this->workspace, PostState::Draft, [$this->channel]);
 
