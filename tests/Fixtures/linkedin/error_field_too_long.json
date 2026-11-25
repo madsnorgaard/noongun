@@ -1,0 +1,5 @@
+{
+    "status": 400,
+    "code": "FIELD_LENGTH_TOO_LONG",
+    "message": "commentary length exceeds the allowed maximum"
+}

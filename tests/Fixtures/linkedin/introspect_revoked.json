@@ -1,0 +1,9 @@
+{
+    "active": false,
+    "client_id": "test-client-id",
+    "authorized_at": 1795600800,
+    "created_at": 1795600800,
+    "status": "revoked",
+    "expires_at": 1800784800,
+    "auth_type": "3L"
+}

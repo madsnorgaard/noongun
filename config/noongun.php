@@ -81,6 +81,30 @@ return [
             // See docs/platform-notes/meta.md.
             'max_body_length' => 63206,
         ],
+
+        // A member's own profile, through the self-serve products "Share on
+        // LinkedIn" and "Sign In with LinkedIn using OpenID Connect". See
+        // docs/platform-notes/linkedin.md and docs/adr/0007.
+        'linkedin' => [
+            'adapter' => 'App\\Domain\\Channels\\Adapters\\LinkedIn\\LinkedInAdapter',
+            'client_id' => env('LINKEDIN_CLIENT_ID'),
+            'client_secret' => env('LINKEDIN_CLIENT_SECRET'),
+            // Sent as the Linkedin-Version header, YYYYMM. LinkedIn supports
+            // a version for at least a year and refuses it after that.
+            'api_version' => env('LINKEDIN_API_VERSION', '202611'),
+            'api_url' => env('LINKEDIN_API_URL', 'https://api.linkedin.com'),
+            // Where the sign-in, the token endpoints and the posts live.
+            'web_url' => env('LINKEDIN_WEB_URL', 'https://www.linkedin.com'),
+            'scopes' => array_values(array_filter(array_map(
+                trim(...),
+                explode(',', (string) env('LINKEDIN_SCOPES', 'openid,profile,w_member_social')),
+            ))),
+            // Longest post text in characters. The Posts API documentation
+            // names no number; this is the limit of the LinkedIn composer.
+            'max_body_length' => 3000,
+            // Requests per member per day that Share on LinkedIn allows.
+            'rate_limit_per_day' => 150,
+        ],
     ],
 
     /*
