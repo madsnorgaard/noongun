@@ -29,7 +29,9 @@ time, for example after pulling changes.
 When it finishes, open <http://localhost:8080>. A fresh instance shows the setup
 screen: create the owner account and the workspace (name, timezone, language).
 You land on the dashboard, logged in. After that the setup screen is gone and
-registration is closed.
+registration is closed. The setup screen stays closed for as long as a
+workspace exists, and the only owner of a workspace cannot delete their
+account.
 
 If port 8080 is taken, choose another before the first run:
 
