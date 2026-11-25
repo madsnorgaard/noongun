@@ -203,6 +203,46 @@ describe('the editor', function () {
                 ->where('channels.2.link_previews', null));
     });
 
+    it('shows the title of a link only on the channel whose platform shows a card for it', function () {
+        $this->linkedin->withCapabilities(new ChannelCapabilities(maxBodyLength: LINKEDIN_LIMIT, linkPreviews: true, linkTitleLength: 60, linkDescriptionLength: 120));
+
+        $post = writeForBoth($this, ['variants' => [
+            ['channel_id' => $this->page->id, 'body' => 'We open at eight.', 'link' => 'https://example.com/hours', 'link_title' => 'Our hours', 'link_description' => 'When we open.'],
+            ['channel_id' => $this->profile->id, 'body' => 'We open at eight.', 'link' => 'https://example.com/hours', 'link_title' => 'Our hours', 'link_description' => 'When we open.'],
+        ]]);
+
+        $this->get(route('posts.show', $post->id))->assertInertia(fn (Assert $page) => $page
+            ->where('post.problems', [])
+            ->where('post.variants.0.platform_label', 'Facebook')
+            ->where('post.variants.0.link', 'https://example.com/hours')
+            ->where('post.variants.0.link_title', null)
+            ->where('post.variants.0.link_description', null)
+            ->where('post.variants.1.platform_label', 'LinkedIn')
+            ->where('post.variants.1.link_title', 'Our hours')
+            ->where('post.variants.1.link_description', 'When we open.'));
+    });
+
+    it('marks a text whose outcome on its platform is unknown, which the server keeps whatever is sent', function () {
+        $post = writeForBoth($this);
+        $kept = textsOf($post)[$this->profile->id];
+
+        DB::table('post_variants')->where('id', $kept->id)->update(['outcome_unknown_since' => now(), 'error' => 'No answer came back.']);
+
+        $this->get(route('posts.show', $post->id))->assertInertia(fn (Assert $page) => $page
+            ->where('post.variants.0.outcome_unknown', false)
+            ->where('post.variants.1.outcome_unknown', true));
+
+        // Leaving the channel out of a save does not take it off the post.
+        $this->put(route('posts.update', $post->id), [
+            'scheduled_at' => '2026-11-25T09:00',
+            'variants' => [
+                ['channel_id' => $this->page->id, 'body' => 'We open at eight tomorrow.', 'link' => null],
+            ],
+        ])->assertSessionHasNoErrors();
+
+        expect(array_keys(textsOf($post)))->toEqualCanonicalizing([$this->page->id, $this->profile->id]);
+    });
+
     it('refuses an approval when the text of either channel changed after it was read', function () {
         $post = writeForBoth($this);
         $seen = postVersion($post);

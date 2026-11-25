@@ -19,6 +19,8 @@ export type PostVariant = {
     link_title: string | null;
     link_description: string | null;
     published: boolean;
+    /** A platform was called for it and nothing says how that ended. */
+    outcome_unknown: boolean;
     permalink: string | null;
     published_at: string | null;
     error: string | null;
@@ -67,6 +69,8 @@ export type PostOrigin = {
     alt_text: string | null;
     /** The model suggested a link the author never gave, and it was left out. */
     link_dropped: boolean;
+    /** Channels the draft was planned for but could not be written for. */
+    left_out: string[];
     drafted_at: string | null;
     /** Tokens the draft used, as the provider reported them. */
     input_tokens: number | null;

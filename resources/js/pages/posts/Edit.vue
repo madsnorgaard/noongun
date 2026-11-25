@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { ChevronLeft } from '@lucide/vue';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+    computed,
+    nextTick,
+    onBeforeUnmount,
+    onMounted,
+    ref,
+    watch,
+} from 'vue';
 import InputError from '@/components/InputError.vue';
 import PostStateBadge from '@/components/posts/PostStateBadge.vue';
 import PostTexts from '@/components/posts/PostTexts.vue';
@@ -161,27 +168,164 @@ function isChosen(id: number): boolean {
     return form.variants.some((variant) => variant.channel_id === id);
 }
 
-function toggleChannel(id: number, chosen: boolean): void {
-    if (!chosen) {
-        form.variants = form.variants.filter(
-            (variant) => variant.channel_id !== id,
-        );
+// A text whose outcome on its platform is unknown stays on the post
+// whatever is sent (ADR 0009), so the page does not offer to take it off.
+const keptChannelIds = computed(() =>
+    (props.post?.variants ?? [])
+        .filter((variant) => !variant.published && variant.outcome_unknown)
+        .map((variant) => variant.channel_id),
+);
+
+function removable(id: number): boolean {
+    return !keptChannelIds.value.includes(id);
+}
+
+// The errors of a refused save are keyed by the position of a text. Once
+// a column is added or taken off they would point at another column.
+function clearVariantErrors(): void {
+    const keys = Object.keys(form.errors).filter((key) =>
+        key.startsWith('variants'),
+    );
+
+    if (keys.length) {
+        form.clearErrors(...(keys as never[]));
+    }
+}
+
+function addChannel(id: number): void {
+    if (isChosen(id)) {
+        return;
+    }
+
+    // A further channel starts from the first text, to be adjusted. The
+    // card of a link is only for a platform that shows one.
+    const first = form.variants[0];
+    const card = (channel(id)?.link_title_length ?? null) !== null;
+
+    form.variants.push({
+        channel_id: id,
+        body: first?.body ?? '',
+        link: first?.link ?? '',
+        link_title: card ? (first?.link_title ?? '') : '',
+        link_description: card ? (first?.link_description ?? '') : '',
+    });
+
+    clearVariantErrors();
+}
+
+// Where the keyboard goes when a dialog of this page closes.
+const focusAfterDialog = ref<string | null>(null);
+
+function focusElement(id: string): void {
+    void nextTick(() => document.getElementById(id)?.focus());
+}
+
+function removeChannel(id: number): void {
+    form.variants = form.variants.filter(
+        (variant) => variant.channel_id !== id,
+    );
+
+    clearVariantErrors();
+    // The column is gone. Its tick box is where it can be brought back.
+    focusElement(`channel-option-${id}`);
+}
+
+// Taking a column off throws its text away. That is asked about when the
+// text is nowhere else: no other column holds the same, or it was changed
+// since it was saved.
+function losesText(variant: VariantFields): boolean {
+    if (variant.body.trim() === '') {
+        return false;
+    }
+
+    const elsewhere = form.variants.some(
+        (other) =>
+            other.channel_id !== variant.channel_id &&
+            other.body === variant.body,
+    );
+    const saved = props.post?.variants.find(
+        (candidate) => candidate.channel_id === variant.channel_id,
+    );
+
+    return !elsewhere || (saved !== undefined && saved.body !== variant.body);
+}
+
+const removing = ref<number | null>(null);
+
+function requestRemoval(id: number): void {
+    const variant = form.variants.find(
+        (candidate) => candidate.channel_id === id,
+    );
+
+    if (!variant || !removable(id)) {
+        return;
+    }
+
+    if (losesText(variant)) {
+        removing.value = id;
+        confirming.value = 'remove-channel';
 
         return;
     }
 
-    if (!isChosen(id)) {
-        // A further channel starts from the first text, to be adjusted.
-        const first = form.variants[0];
+    removeChannel(id);
+}
 
-        form.variants.push({
-            channel_id: id,
-            body: first?.body ?? '',
-            link: first?.link ?? '',
-            link_title: first?.link_title ?? '',
-            link_description: first?.link_description ?? '',
-        });
+function onChannelTicked(id: number, event: Event): void {
+    const box = event.target as HTMLInputElement;
+
+    if (box.checked) {
+        addChannel(id);
+
+        return;
     }
+
+    // The box follows the post, not the click: it stays ticked until the
+    // column is really taken off.
+    box.checked = true;
+    requestRemoval(id);
+}
+
+const copying = ref<{ from: number; into: number } | null>(null);
+
+function copyText(into: number, from: number): void {
+    const target = form.variants.find(
+        (candidate) => candidate.channel_id === into,
+    );
+    const source = form.variants.find(
+        (candidate) => candidate.channel_id === from,
+    );
+
+    if (target && source) {
+        target.body = source.body;
+    }
+}
+
+function requestCopy(into: number, from: number): void {
+    const target = form.variants.find(
+        (candidate) => candidate.channel_id === into,
+    );
+    const source = form.variants.find(
+        (candidate) => candidate.channel_id === from,
+    );
+
+    if (!target || !source || target.body === source.body) {
+        return;
+    }
+
+    if (target.body.trim() !== '') {
+        copying.value = { from, into };
+        confirming.value = 'copy-text';
+
+        return;
+    }
+
+    copyText(into, from);
+    focusElement(`body-${into}`);
+}
+
+function channelName(id: number | null | undefined): string {
+    return (id != null ? channel(id)?.display_name : undefined) ?? '';
 }
 
 function fieldError(key: string): string | undefined {
@@ -244,7 +388,13 @@ const refusedMessages = computed(() =>
         .map(([, message]) => message),
 );
 
-type Confirmation = 'delete' | 'reopen' | 'publish-now' | 'retry';
+type Confirmation =
+    | 'delete'
+    | 'reopen'
+    | 'publish-now'
+    | 'retry'
+    | 'remove-channel'
+    | 'copy-text';
 
 const confirming = ref<Confirmation | null>(null);
 // What the dialog shows. Kept while it closes, so its text does not change
@@ -304,7 +454,43 @@ function requestReopen(): void {
     }
 }
 
+// A dialog gives the keyboard back to what opened it. When that is gone,
+// or the work goes on elsewhere, it is sent there instead.
+function onDialogClosed(event: Event): void {
+    const id = focusAfterDialog.value;
+    const element = id !== null ? document.getElementById(id) : null;
+
+    focusAfterDialog.value = null;
+
+    if (element) {
+        event.preventDefault();
+        element.focus();
+    }
+}
+
 function confirm(): void {
+    if (confirming.value === 'remove-channel') {
+        if (removing.value !== null) {
+            focusAfterDialog.value = `channel-option-${removing.value}`;
+            removeChannel(removing.value);
+        }
+
+        confirming.value = null;
+
+        return;
+    }
+
+    if (confirming.value === 'copy-text') {
+        if (copying.value !== null) {
+            focusAfterDialog.value = `body-${copying.value.into}`;
+            copyText(copying.value.into, copying.value.from);
+        }
+
+        confirming.value = null;
+
+        return;
+    }
+
     if (!props.post) {
         return;
     }
@@ -464,18 +650,17 @@ const locked = computed(() => {
                                 "
                             >
                                 <input
+                                    :id="`channel-option-${option.id}`"
                                     type="checkbox"
                                     class="mt-0.5 size-5 shrink-0 accent-primary"
                                     :checked="isChosen(option.id)"
-                                    :disabled="!selectable(option)"
-                                    :data-test="`channel-${option.id}`"
-                                    @change="
-                                        toggleChannel(
-                                            option.id,
-                                            ($event.target as HTMLInputElement)
-                                                .checked,
-                                        )
+                                    :disabled="
+                                        !selectable(option) ||
+                                        (isChosen(option.id) &&
+                                            !removable(option.id))
                                     "
+                                    :data-test="`channel-${option.id}`"
+                                    @change="onChannelTicked(option.id, $event)"
                                 />
                                 <span class="grid gap-0.5">
                                     <span>
@@ -494,6 +679,15 @@ const locked = computed(() => {
                                         "
                                     >
                                         {{ option.problem }}
+                                    </span>
+                                    <span
+                                        v-if="!removable(option.id)"
+                                        class="text-sm text-muted-foreground"
+                                        :data-test="`channel-kept-${option.id}`"
+                                    >
+                                        This channel was called for this post
+                                        and may hold it, so its text stays on
+                                        the post.
                                     </span>
                                 </span>
                             </label>
@@ -543,9 +737,12 @@ const locked = computed(() => {
                                     `variants.${column.position}.link_description`,
                                 ),
                             }"
+                            :removable="removable(column.variant.channel_id)"
                             :data-test="`text-${column.variant.channel_id}`"
-                            @remove="
-                                toggleChannel(column.variant.channel_id, false)
+                            @remove="requestRemoval(column.variant.channel_id)"
+                            @copy="
+                                (from: number) =>
+                                    requestCopy(column.variant.channel_id, from)
                             "
                         />
                     </div>
@@ -945,9 +1142,10 @@ const locked = computed(() => {
                         v-if="post && post.state === 'failed' && post.can.retry"
                         class="text-sm text-muted-foreground"
                     >
-                        Before you send it again, check the channel itself. If
-                        the post is there after all, sending it again makes a
-                        duplicate.
+                        Before you send it again, look at the channel itself. If
+                        the post is there, leave this post as it is: sending it
+                        again publishes a second copy. If it is not there, send
+                        it again.
                     </p>
                 </section>
 
@@ -1033,6 +1231,27 @@ const locked = computed(() => {
                             </dd>
                         </div>
                         <div
+                            v-if="post.origin.left_out.length"
+                            class="grid gap-0.5"
+                            data-test="post-origin-left-out"
+                        >
+                            <dt class="text-sm text-muted-foreground">
+                                Left out
+                            </dt>
+                            <dd class="break-words">
+                                {{ post.origin.left_out.join(', ') }} could not
+                                publish when this was drafted, so there is no
+                                text for
+                                {{
+                                    post.origin.left_out.length === 1
+                                        ? 'it. Its slot is'
+                                        : 'them. Their slots are'
+                                }}
+                                open again: connect the channel and propose the
+                                week again.
+                            </dd>
+                        </div>
+                        <div
                             v-if="post.origin.input_tokens !== null"
                             class="grid gap-0.5"
                             data-test="post-origin-cost"
@@ -1078,7 +1297,7 @@ const locked = computed(() => {
         :open="confirming !== null"
         @update:open="(open: boolean) => !open && (confirming = null)"
     >
-        <DialogContent>
+        <DialogContent @close-auto-focus="onDialogClosed">
             <DialogHeader class="space-y-3">
                 <DialogTitle>
                     <template v-if="dialog === 'delete'">
@@ -1089,6 +1308,12 @@ const locked = computed(() => {
                     </template>
                     <template v-else-if="dialog === 'retry'">
                         Send this post again?
+                    </template>
+                    <template v-else-if="dialog === 'remove-channel'">
+                        Take {{ channelName(removing) }} off this post?
+                    </template>
+                    <template v-else-if="dialog === 'copy-text'">
+                        Replace the text for {{ channelName(copying?.into) }}?
                     </template>
                     <template v-else>Return this post to draft?</template>
                 </DialogTitle>
@@ -1103,9 +1328,22 @@ const locked = computed(() => {
                         out, it cannot be taken back from here.
                     </template>
                     <template v-else-if="dialog === 'retry'">
-                        Look at {{ pendingNames }} first. If the post is there
-                        after all, sending it again puts a second copy in
-                        public, and Noon Gun cannot see or undo that.
+                        Look at {{ pendingNames }} first. Noon Gun cannot see
+                        whether the post arrived. If the post is there, choose
+                        Cancel and leave this post as it is. It stays listed as
+                        failed here, and that is all right. If the post is not
+                        there, tick the box and send it again.
+                    </template>
+                    <template v-else-if="dialog === 'remove-channel'">
+                        The text for {{ channelName(removing) }} is not in any
+                        other column as it stands. It is removed from this post
+                        when you save. The other texts stay as they are.
+                    </template>
+                    <template v-else-if="dialog === 'copy-text'">
+                        The text for {{ channelName(copying?.into) }} is
+                        replaced with the text for
+                        {{ channelName(copying?.from) }}. The link stays as it
+                        is.
                     </template>
                     <template v-else-if="post?.state === 'failed'">
                         The approval is removed and the post must be approved
@@ -1153,7 +1391,11 @@ const locked = computed(() => {
                 </Button>
                 <Button
                     type="button"
-                    :variant="dialog === 'delete' ? 'destructive' : 'default'"
+                    :variant="
+                        dialog === 'delete' || dialog === 'remove-channel'
+                            ? 'destructive'
+                            : 'default'
+                    "
                     :disabled="
                         busy !== null || (dialog === 'retry' && !checkedChannel)
                     "
@@ -1167,6 +1409,12 @@ const locked = computed(() => {
                     </template>
                     <template v-else-if="dialog === 'retry'">
                         Send again
+                    </template>
+                    <template v-else-if="dialog === 'remove-channel'">
+                        Take it off
+                    </template>
+                    <template v-else-if="dialog === 'copy-text'">
+                        Replace the text
                     </template>
                     <template v-else>Return to draft</template>
                 </Button>
