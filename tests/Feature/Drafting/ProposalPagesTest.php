@@ -1,12 +1,14 @@
 <?php
 
 use App\Domain\Content\PostState;
+use App\Domain\Drafting\Actions\StopOpenRuns;
 use App\Domain\Drafting\GenerateDraftJob;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
+use Tests\Fakes\FakeDraftGenerator;
 
 require_once __DIR__.'/../../Support/publishing.php';
 require_once __DIR__.'/../../Support/posts.php';
@@ -371,6 +373,175 @@ describe('progress in the queue', function () {
     it('has no progress on the history view', function () {
         $this->actingAs($this->owner)->get(route('queue.index', ['view' => 'history']))
             ->assertInertia(fn (Assert $page) => $page->where('drafting', null));
+    });
+});
+
+describe('a queue that does not run', function () {
+    it('says that it is waiting longer than expected once a draft has waited two minutes', function () {
+        proposeWeek($this->workspace, $this->owner);
+        $this->actingAs($this->owner);
+
+        $this->travel(119)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('drafting.proposal.active', true)
+            ->where('drafting.proposal.waiting_long', false));
+
+        $this->travel(1)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', true));
+    });
+
+    it('gives a retry its backoff before it counts as waiting long', function () {
+        config(['noongun.drafting.limits.backoff' => [300]]);
+
+        $runs = proposeWeek($this->workspace, $this->owner);
+        $this->generator->failRetryable();
+
+        foreach ($runs as $run) {
+            runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+        }
+
+        expect(DB::table('draft_runs')->where('request->retry_of', $runs[0]->id)->value('status'))->toBe('pending');
+
+        $this->actingAs($this->owner);
+
+        $this->travel(400)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', false));
+
+        $this->travel(20)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', true));
+    });
+
+    it('says so for a draft that has been with a worker for longer than a job may take', function () {
+        config(['noongun.drafting.timeout' => 20]);
+
+        $runs = proposeWeek($this->workspace, $this->owner);
+        inWorkspace($this->workspace, fn () => $runs[0]->markRunning());
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[1]->id));
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[2]->id));
+
+        $this->actingAs($this->owner);
+
+        // The job may take 2 x 20 + 15 seconds.
+        $this->travel(69)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', false));
+
+        $this->travel(1)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', true));
+    });
+
+    it('lets an owner or editor stop waiting: the open runs fail with a reason and nothing is spent', function (Role $role) {
+        $runs = proposeWeek($this->workspace, $this->owner);
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[0]->id));
+        inWorkspace($this->workspace, fn () => $runs[1]->markRunning());
+        $this->generator->assertGeneratedTimes(1);
+
+        $this->actingAs(userWithRole($this->workspace, $role))
+            ->post(route('proposals.stop'))
+            ->assertRedirect(route('queue.index'))
+            ->assertSessionHasNoErrors();
+
+        expect(freshRun($runs[0])->status)->toBe('succeeded')
+            ->and(freshRun($runs[1]))->toMatchObject(['status' => 'failed', 'failure_reason' => StopOpenRuns::STOPPED])
+            ->and(freshRun($runs[2]))->toMatchObject(['status' => 'failed', 'failure_reason' => StopOpenRuns::STOPPED])
+            ->and(DB::table('posts')->count())->toBe(1);
+
+        $this->generator->assertGeneratedTimes(1);
+
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('drafting.proposal.active', false)
+            ->where('drafting.proposal.waiting_long', false)
+            ->where('drafting.proposal.runs.1.failure_reason', StopOpenRuns::STOPPED));
+    })->with([Role::Owner, Role::Editor]);
+
+    it('leaves no dead end: the week can be proposed again right after', function () {
+        proposeWeek($this->workspace, $this->owner);
+
+        $this->actingAs($this->owner)->post(route('proposals.stop'))->assertSessionHasNoErrors();
+        $this->post(route('proposals.store'), proposalPayload($this->workspace))->assertSessionHasNoErrors();
+
+        expect(DB::table('draft_runs')->where('status', 'pending')->count())->toBe(3)
+            ->and(DB::table('draft_runs')->where('status', 'failed')->count())->toBe(3);
+    });
+
+    it('makes a job that arrives late for a stopped run do nothing', function () {
+        $runs = proposeWeek($this->workspace, $this->owner);
+
+        $this->actingAs($this->owner)->post(route('proposals.stop'));
+
+        runQueuedDraftJobs();
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[0]->id, 2));
+        (new GenerateDraftJob($this->workspace->id, $runs[0]->id))->failed(new RuntimeException('Late.'));
+
+        $this->generator->assertNothingGenerated();
+
+        expect(DB::table('posts')->count())->toBe(0)
+            ->and(DB::table('draft_runs')->count())->toBe(3)
+            ->and(DB::table('draft_runs')->pluck('failure_reason')->unique()->all())->toBe([StopOpenRuns::STOPPED]);
+    });
+
+    it('discards the answer of a worker that was in the middle of a stopped run, without an error', function () {
+        $runs = proposeWeek($this->workspace, $this->owner);
+
+        // The stop arrives while the provider is answering.
+        $this->generator->returnsOutput(function ($request) {
+            inWorkspace($this->workspace, fn () => app(StopOpenRuns::class)->handle($this->owner));
+
+            return FakeDraftGenerator::outputFor($request);
+        });
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[0]->id));
+
+        expect(DB::table('posts')->count())->toBe(0)
+            ->and(freshRun($runs[0]))->toMatchObject(['status' => 'failed', 'failure_reason' => StopOpenRuns::STOPPED]);
+    });
+
+    it('refuses a viewer and a guest', function () {
+        proposeWeek($this->workspace, $this->owner);
+
+        $this->post(route('proposals.stop'))->assertRedirect(route('login'));
+        $this->actingAs(userWithRole($this->workspace, Role::Viewer))->post(route('proposals.stop'))->assertForbidden();
+
+        expect(DB::table('draft_runs')->pluck('status')->unique()->all())->toBe(['pending']);
+    });
+
+    it('stops nothing in another workspace', function () {
+        proposeWeek($this->workspace, $this->owner);
+
+        $other = Workspace::factory()->create();
+        $theirs = draftRunIn($other);
+
+        $this->actingAs(userWithRole($other, Role::Owner))->withSession(['workspace_id' => $this->workspace->id])
+            ->post(route('proposals.stop'), ['workspace_id' => $this->workspace->id])
+            ->assertRedirect(route('queue.index'));
+
+        expect(DB::table('draft_runs')->where('workspace_id', $this->workspace->id)->pluck('status')->unique()->all())->toBe(['pending'])
+            ->and(freshRun($theirs)->status)->toBe('failed');
+    });
+
+    it('is throttled', function () {
+        $this->actingAs($this->owner);
+
+        foreach (range(1, 6) as $ignored) {
+            $this->post(route('proposals.stop'))->assertRedirect(route('queue.index'));
+        }
+
+        expect($this->post(route('proposals.stop'))->isRedirect(route('queue.index')))->toBeFalse();
+    });
+
+    it('takes the lock a proposal takes before it reads a run', function () {
+        proposeWeek($this->workspace, $this->owner);
+
+        $statements = [];
+        DB::listen(function ($query) use (&$statements) {
+            $statements[] = strtolower($query->sql);
+        });
+
+        inWorkspace($this->workspace, fn () => app(StopOpenRuns::class)->handle($this->owner));
+
+        $lock = array_key_first(array_filter($statements, fn (string $sql) => str_contains($sql, '"workspaces"') && str_contains($sql, 'for update')));
+        $firstRun = array_key_first(array_filter($statements, fn (string $sql) => str_contains($sql, '"draft_runs"')));
+
+        expect($lock)->not->toBeNull()->and($firstRun)->toBeGreaterThan($lock);
     });
 });
 

@@ -240,6 +240,10 @@ final class ProposalPresenter
             'requested_at' => $first?->created_at?->toIso8601String(),
             'requested_by' => $first?->requester?->name,
             'active' => $active,
+            // A run has waited for a worker, or been with one, longer than
+            // a queue that runs would need. The page then says so and
+            // offers a way to stop waiting.
+            'waiting_long' => $shown->contains(fn (DraftRun $run): bool => self::overdue($run)),
             'counts' => $counts,
             'max_attempts' => DraftingLimits::maxAttempts(),
             'runs' => $shown->map(function (DraftRun $run) use ($runs, $channelNames): array {
@@ -265,6 +269,20 @@ final class ProposalPresenter
                 ];
             })->all(),
         ];
+    }
+
+    private static function overdue(DraftRun $run): bool
+    {
+        if ($run->status === DraftRunStatus::Pending) {
+            $attempt = is_numeric($run->request['attempt'] ?? null) ? (int) $run->request['attempt'] : 1;
+
+            return $run->created_at !== null
+                && $run->created_at->lte(now()->subSeconds(DraftingLimits::slowAfterSeconds($attempt)));
+        }
+
+        return $run->status === DraftRunStatus::Running
+            && $run->started_at !== null
+            && $run->started_at->lte(now()->subSeconds(DraftingLimits::jobSeconds() + DraftingLimits::JOB_SLACK_SECONDS));
     }
 
     private function stillShown(mixed $finishedAt, bool $failed): bool

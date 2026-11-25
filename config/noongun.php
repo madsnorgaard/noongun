@@ -178,7 +178,7 @@ return [
             'instance_runs_per_day' => (int) env('NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY', 200),
             'max_attempts' => (int) env('NOONGUN_DRAFT_MAX_ATTEMPTS', 3),
             'backoff' => array_map(intval(...), explode(',', (string) env('NOONGUN_DRAFT_BACKOFF', '30,120'))),
-            'stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 15),
+            'stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 6),
             'estimate_input_tokens' => (int) env('NOONGUN_DRAFT_ESTIMATE_INPUT_TOKENS', 8000),
             'weeks_ahead' => 8,
         ],

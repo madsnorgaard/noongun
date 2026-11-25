@@ -137,7 +137,9 @@ it('has no way to approve what a proposal made other than the approval of M3', f
         ->values()
         ->all();
 
-    expect($routes)->toEqualCanonicalizing(['proposals.create', 'proposals.store'])
+    // Looking at a plan, starting it, and giving up on what is still open.
+    expect($routes)->toEqualCanonicalizing(['proposals.create', 'proposals.store', 'proposals.stop'])
+        ->and(sourcesMatching('/\bApprovePost\b|->approve\(|PostState::|SaveDraft/', 'Domain/Drafting/Actions/StopOpenRuns.php'))->toBe([])
         ->and(sourcesMatching('/\bApprovePost\b|->approve\(|approveSelected|approve_all|approveAll/i', 'Http/Controllers/Drafting/'))->toBe([])
         ->and(sourcesMatching('/\bApprovePost\b|approve_all|approveAll/i', 'Http/Presenters/ProposalPresenter.php'))->toBe([])
         ->and(sourcesMatching('/ShouldBeUnique|public (int )?\$tries = (?!1;)/', 'Domain/Drafting/GenerateDraftJob.php'))->toBe([]);

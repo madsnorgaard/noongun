@@ -11,6 +11,7 @@ use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
 use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
 use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\Exceptions\DraftingNotAllowed;
+use App\Domain\Drafting\Exceptions\DraftingStateConflict;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
@@ -141,6 +142,11 @@ final class GenerateDraftJob implements ShouldQueue
                 });
             } catch (DraftingException|DraftGeneratorNotAvailable|DraftingNotAllowed $failure) {
                 // GenerateDraft has marked the run failed with this reason.
+                $this->note($run, $failure);
+            } catch (DraftingStateConflict $failure) {
+                // The run was closed while the provider was answering: a
+                // person stopped waiting, or the recovery gave it up. The
+                // answer has nowhere to go and no post was created.
                 $this->note($run, $failure);
             }
 

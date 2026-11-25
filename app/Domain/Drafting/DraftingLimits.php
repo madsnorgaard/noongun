@@ -18,6 +18,9 @@ final class DraftingLimits
     /** Seconds on top of the provider calls for a job's own work. */
     public const JOB_SLACK_SECONDS = 15;
 
+    /** Seconds a run usually waits for a worker at most, on a queue that runs. */
+    public const SLOW_AFTER_SECONDS = 120;
+
     /** The most posts one proposal drafts. */
     public static function postsPerProposal(): int
     {
@@ -80,7 +83,17 @@ final class DraftingLimits
      */
     public static function stuckAfterSeconds(): int
     {
-        return max(self::int('stuck_after_minutes', 15, 1) * 60, self::jobSeconds() + 60);
+        return max(self::int('stuck_after_minutes', 6, 1) * 60, self::jobSeconds() + 60);
+    }
+
+    /**
+     * How long a run may wait for a worker before the page says that it is
+     * taking longer than expected. $attempt is the try the run is for: a
+     * retry waits out its backoff first.
+     */
+    public static function slowAfterSeconds(int $attempt = 1): int
+    {
+        return self::SLOW_AFTER_SECONDS + ($attempt > 1 ? self::backoffBefore($attempt - 1) : 0);
     }
 
     /**

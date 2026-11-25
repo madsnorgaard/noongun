@@ -6,6 +6,7 @@ use App\Domain\Drafting\Actions\ProposeWeek;
 use App\Domain\Drafting\Console\RecoverStuckDraftRuns;
 use App\Domain\Drafting\CredentialScope;
 use App\Domain\Drafting\DraftGenerators;
+use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\GenerateDraftJob;
@@ -655,6 +656,20 @@ describe('noongun:recover-stuck-draft-runs', function () {
         $this->artisan('noongun:recover-stuck-draft-runs')->assertSuccessful();
 
         expect(freshRun($run)->status)->toBe('running');
+    });
+
+    it('gives a run up soon after a job could still be at work, with the defaults', function () {
+        config([
+            'noongun.drafting.timeout' => 120,
+            'noongun.drafting.limits.stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 6),
+        ]);
+
+        // The job may take 2 x 120 + 15 = 255 seconds.
+        expect(DraftingLimits::jobSeconds())->toBe(255)
+            ->and(DraftingLimits::stuckAfterSeconds())->toBe(360)
+            ->and(DraftingLimits::unclaimedAfterSeconds())->toBe(480)
+            ->and(DraftingLimits::stuckAfterSeconds())->toBeGreaterThan(DraftingLimits::jobSeconds())
+            ->and((require config_path('noongun.php'))['drafting']['limits']['stuck_after_minutes'])->toBe(6);
     });
 
     it('is scheduled', function () {

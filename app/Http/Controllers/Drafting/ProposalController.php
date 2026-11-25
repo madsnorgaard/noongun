@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Drafting;
 
 use App\Domain\Drafting\Actions\ProposeWeek;
+use App\Domain\Drafting\Actions\StopOpenRuns;
 use App\Domain\Drafting\DraftBudget;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
@@ -99,6 +100,32 @@ class ProposalController extends Controller
                 ['count' => count($runs)],
             ),
         ]);
+
+        return to_route('queue.index');
+    }
+
+    /**
+     * "Stop waiting": closes the draft runs of the workspace that are still
+     * open, for when the queue is down and nothing else will. It calls no
+     * provider and creates nothing.
+     */
+    public function stop(Request $request, StopOpenRuns $stop): RedirectResponse
+    {
+        Gate::authorize('create', DraftRun::class);
+
+        $actor = $request->user();
+
+        abort_unless($actor instanceof User, 401);
+
+        $stopped = $stop->handle($actor);
+
+        Inertia::flash('toast', $stopped === 0
+            ? ['type' => 'info', 'message' => __('Nothing was waiting any more.')]
+            : ['type' => 'success', 'message' => trans_choice(
+                '{1} :count draft was stopped. Its time is open again.|[2,*] :count drafts were stopped. Their times are open again.',
+                $stopped,
+                ['count' => $stopped],
+            )]);
 
         return to_route('queue.index');
     }

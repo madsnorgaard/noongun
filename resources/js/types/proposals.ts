@@ -22,8 +22,10 @@ export type ProposalProgress = {
     week: string;
     requested_at: string | null;
     requested_by: string | null;
-    /** Whether a draft is still waiting or being written. */
+    /** Whether a draft is still waiting or being drafted. */
     active: boolean;
+    /** Whether a draft has waited longer than a queue that runs would need. */
+    waiting_long: boolean;
     counts: Record<DraftRunStatus, number>;
     max_attempts: number;
     runs: ProposalRun[];
