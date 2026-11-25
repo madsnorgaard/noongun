@@ -15,6 +15,9 @@ export type PostVariant = {
     max_body_length: number | null;
     body: string;
     link: string | null;
+    /** The card for the link on a platform that builds none itself. */
+    link_title: string | null;
+    link_description: string | null;
     published: boolean;
     permalink: string | null;
     published_at: string | null;
@@ -80,6 +83,9 @@ export type ChannelOption = {
     can_publish: boolean;
     problem: string | null;
     max_body_length: number | null;
+    /** Set when the platform shows a link only as the card the author types. */
+    link_title_length: number | null;
+    link_description_length: number | null;
 };
 
 export type CalendarEntry = {

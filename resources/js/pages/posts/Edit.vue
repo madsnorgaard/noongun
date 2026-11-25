@@ -62,7 +62,13 @@ const props = defineProps<{
     planned: string | null;
 }>();
 
-type VariantFields = { channel_id: number; body: string; link: string };
+type VariantFields = {
+    channel_id: number;
+    body: string;
+    link: string;
+    link_title: string;
+    link_description: string;
+};
 
 const timezone = useWorkspaceTimezone();
 const { busy, errors: refused, run } = usePostActions();
@@ -105,7 +111,15 @@ function fieldsFromServer(): {
             // With a single channel there is nothing to choose.
             variants:
                 usable.length === 1
-                    ? [{ channel_id: usable[0].id, body: '', link: '' }]
+                    ? [
+                          {
+                              channel_id: usable[0].id,
+                              body: '',
+                              link: '',
+                              link_title: '',
+                              link_description: '',
+                          },
+                      ]
                     : [],
         };
     }
@@ -118,6 +132,8 @@ function fieldsFromServer(): {
                 channel_id: variant.channel_id,
                 body: variant.body,
                 link: variant.link ?? '',
+                link_title: variant.link_title ?? '',
+                link_description: variant.link_description ?? '',
             })),
     };
 }
@@ -166,12 +182,23 @@ function toggleChannel(id: number, chosen: boolean): void {
             channel_id: id,
             body: first?.body ?? '',
             link: first?.link ?? '',
+            link_title: first?.link_title ?? '',
+            link_description: first?.link_description ?? '',
         });
     }
 }
 
 function fieldError(key: string): string | undefined {
     return (form.errors as Record<string, string | undefined>)[key];
+}
+
+// A platform that reads nothing from the linked page shows the link as the
+// card typed here.
+function needsLinkCard(variant: VariantFields): boolean {
+    return (
+        variant.link.trim() !== '' &&
+        (channel(variant.channel_id)?.link_title_length ?? null) !== null
+    );
 }
 
 function remaining(variant: VariantFields): number | null {
@@ -544,6 +571,65 @@ const locked = computed(() => {
                                     fieldError(`variants.${position}.link`)
                                 "
                             />
+                        </div>
+
+                        <div
+                            v-if="needsLinkCard(variant)"
+                            class="grid gap-4"
+                            :data-test="`link-card-${variant.channel_id}`"
+                        >
+                            <p
+                                class="max-w-[72ch] text-sm text-muted-foreground"
+                            >
+                                {{
+                                    channel(variant.channel_id)?.platform_label
+                                }}
+                                does not read the linked page. It shows the link
+                                with the title and description you write here.
+                            </p>
+                            <div class="grid gap-1.5">
+                                <Label
+                                    :for="`link-title-${variant.channel_id}`"
+                                >
+                                    Link title
+                                </Label>
+                                <Input
+                                    :id="`link-title-${variant.channel_id}`"
+                                    v-model="variant.link_title"
+                                    type="text"
+                                    :maxlength="
+                                        channel(variant.channel_id)
+                                            ?.link_title_length ?? undefined
+                                    "
+                                />
+                                <InputError
+                                    :message="
+                                        fieldError(
+                                            `variants.${position}.link_title`,
+                                        )
+                                    "
+                                />
+                            </div>
+                            <div class="grid gap-1.5">
+                                <Label
+                                    :for="`link-description-${variant.channel_id}`"
+                                >
+                                    Link description (optional)
+                                </Label>
+                                <textarea
+                                    :id="`link-description-${variant.channel_id}`"
+                                    v-model="variant.link_description"
+                                    rows="2"
+                                    class="w-full resize-y rounded-lg border border-input bg-card px-3 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                                ></textarea>
+                                <InputError
+                                    :message="
+                                        fieldError(
+                                            `variants.${position}.link_description`,
+                                        )
+                                    "
+                                />
+                            </div>
                         </div>
                     </section>
 

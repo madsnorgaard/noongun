@@ -4,12 +4,14 @@ namespace App\Domain\Content;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\ChannelStatus;
+use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Exceptions\IllegalPostTransition;
 use App\Domain\Content\Exceptions\PostActionNotAllowed;
 use App\Domain\Content\Exceptions\PostNotPublishable;
 use App\Domain\Content\Models\Post;
+use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Exceptions\CrossWorkspaceWrite;
 use App\Domain\Workspaces\Exceptions\MissingWorkspaceContext;
@@ -71,8 +73,8 @@ class PostPreconditions
 
     /**
      * The post has at least one variant, and every variant that is not on
-     * its platform yet has a channel that can publish and a text the
-     * platform accepts.
+     * its platform yet has a channel that can publish, a text the platform
+     * accepts and, where the platform builds no preview, a card for its link.
      *
      * @throws PostNotPublishable
      */
@@ -135,6 +137,48 @@ class PostPreconditions
                     'limit' => $capabilities->maxBodyLength,
                 ])];
             }
+
+            $errors += $this->linkCardProblems($variant, $channel, $capabilities);
+        }
+
+        return $errors;
+    }
+
+    /**
+     * A platform that reads nothing from a linked page shows the link only
+     * as the card the author typed. Without a title there is no card, so the
+     * post is held back rather than sent with a bare link.
+     *
+     * @return array<string, non-empty-list<string>>
+     */
+    private function linkCardProblems(PostVariant $variant, Channel $channel, ChannelCapabilities $capabilities): array
+    {
+        if (blank($variant->link) || $capabilities->linkTitleLength === null) {
+            return [];
+        }
+
+        $name = ['channel' => $channel->display_name];
+        $title = trim((string) $variant->link_title);
+        $errors = [];
+
+        if ($title === '') {
+            $errors["variants.{$variant->id}.link_title"] = [self::text('The link for :channel needs a title. This platform shows a link with the title you give it and reads nothing from the page.', $name)];
+        } elseif (mb_strlen($title) > $capabilities->linkTitleLength) {
+            $errors["variants.{$variant->id}.link_title"] = [self::text('The link title for :channel is :length characters long. The limit is :limit.', [
+                ...$name,
+                'length' => mb_strlen($title),
+                'limit' => $capabilities->linkTitleLength,
+            ])];
+        }
+
+        $description = (string) $variant->link_description;
+
+        if ($capabilities->linkDescriptionLength !== null && mb_strlen($description) > $capabilities->linkDescriptionLength) {
+            $errors["variants.{$variant->id}.link_description"] = [self::text('The link description for :channel is :length characters long. The limit is :limit.', [
+                ...$name,
+                'length' => mb_strlen($description),
+                'limit' => $capabilities->linkDescriptionLength,
+            ])];
         }
 
         return $errors;

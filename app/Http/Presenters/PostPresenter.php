@@ -4,6 +4,7 @@ namespace App\Http\Presenters;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\ChannelStatus;
+use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Actions\DeletePost;
@@ -104,13 +105,13 @@ final class PostPresenter
 
     /**
      * A fingerprint of what a human reads before signing off: the planned
-     * time and every text. The approve request sends it back, so that a
+     * time, every text and every link with its card. The approve request sends it back, so that a
      * post that was edited in the meantime is not approved unseen.
      */
     public function version(Post $post): string
     {
         $content = $post->variants->sortBy('id')->values()
-            ->map(fn (PostVariant $variant): array => [$variant->id, $variant->channel_id, $variant->body, $variant->link])
+            ->map(fn (PostVariant $variant): array => [$variant->id, $variant->channel_id, $variant->body, $variant->link, $variant->link_title, $variant->link_description])
             ->all();
 
         return substr(hash('sha256', (string) json_encode([$post->scheduled_at?->getTimestamp(), $content])), 0, 20);
@@ -158,14 +159,22 @@ final class PostPresenter
             ->orderBy('platform')
             ->orderBy('display_name')
             ->get()
-            ->map(fn (Channel $channel): array => [
-                'id' => $channel->id,
-                'display_name' => $channel->display_name,
-                'platform_label' => $this->platformLabel($channel->platform),
-                'can_publish' => $channel->canPublish(),
-                'problem' => PostPreconditions::channelProblem($channel),
-                'max_body_length' => $this->maxBodyLength($channel),
-            ])
+            ->map(function (Channel $channel): array {
+                $capabilities = $this->capabilities($channel);
+
+                return [
+                    'id' => $channel->id,
+                    'display_name' => $channel->display_name,
+                    'platform_label' => $this->platformLabel($channel->platform),
+                    'can_publish' => $channel->canPublish(),
+                    'problem' => PostPreconditions::channelProblem($channel),
+                    'max_body_length' => $capabilities?->maxBodyLength,
+                    // Set when the platform shows a link only as the card
+                    // the author types: the editor then asks for one.
+                    'link_title_length' => $capabilities?->linkTitleLength,
+                    'link_description_length' => $capabilities?->linkDescriptionLength,
+                ];
+            })
             ->all());
     }
 
@@ -181,9 +190,11 @@ final class PostPresenter
             'channel_id' => $variant->channel_id,
             'channel_name' => $channel->display_name ?? '',
             'platform_label' => $channel !== null ? $this->platformLabel($channel->platform) : '',
-            'max_body_length' => $channel !== null ? $this->maxBodyLength($channel) : null,
+            'max_body_length' => $channel !== null ? $this->capabilities($channel)?->maxBodyLength : null,
             'body' => $variant->body,
             'link' => $variant->link,
+            'link_title' => $variant->link_title,
+            'link_description' => $variant->link_description,
             'published' => $variant->isPublished(),
             'permalink' => $variant->permalink,
             'published_at' => $variant->published_at?->toIso8601String(),
@@ -191,10 +202,10 @@ final class PostPresenter
         ];
     }
 
-    private function maxBodyLength(Channel $channel): ?int
+    private function capabilities(Channel $channel): ?ChannelCapabilities
     {
         try {
-            return $this->channels->for($channel)->capabilities()->maxBodyLength;
+            return $this->channels->for($channel)->capabilities();
         } catch (ChannelAdapterNotAvailable) {
             return null;
         }
