@@ -128,9 +128,10 @@ Four things to know when operating it:
 - `REDIS_QUEUE_RETRY_AFTER` (and `DB_QUEUE_RETRY_AFTER` for the database
   queue) must be greater than the longest time limit of a publishing job,
   which is `NOONGUN_PUBLISH_TIMEOUT` x `NOONGUN_PUBLISH_CALLS_PER_JOB` + 15
-  seconds. The defaults are 180 against 105. If it is lower, the queue hands
-  a job that is still running to a second worker; that copy does nothing, but
-  it is listed as a failed job.
+  seconds, and of a drafting job (see "Proposing a week"). The defaults are
+  300 against 105 for publishing and 255 for drafting. If it is lower, the
+  queue hands a job that is still running to a second worker; that copy does
+  nothing, but it is listed as a failed job.
 - If a worker dies in the middle of a platform call, or the platform does
   not answer, the post may be public without the app knowing. The variant is
   marked for that before the call is made, and the post ends as failed with
@@ -166,6 +167,299 @@ in Noon Gun never deletes anything from a platform. See
 `docs/adr/0010-post-editing-and-deletion.md`.
 
 Owners and editors write, approve, schedule and delete. Viewers can look.
+
+## Brief, pillars and slots
+
+Posts are drafted from what a workspace keeps on these pages.
+
+- **Brief** (`/brief`) holds the title, the brief itself, the voice rules and
+  the calls to action. The brief is plain text or markdown and is kept exactly
+  as it is typed. Voice rules are lists: one for every channel and one for each
+  platform. A new workspace is offered a set of house rules to start from.
+  They are put in the form and are not saved until the brief is saved.
+- Saving the brief always adds a version. Earlier versions are listed, can be
+  read, and are never changed. There is no restore: to go back to an earlier
+  version, copy its text into the brief and save it as a new version.
+- **Pillars** (`/brief/pillars`) are the themes of the workspace, each with a
+  number of posts per week. Deleting a pillar keeps its ideas and posts and
+  leaves them without a pillar. The page says how many before it happens.
+- **Slots** (`/brief/slots`) are the preferred posting times of a channel: a
+  weekday and a time on the clock of the workspace. A slot stays at the same
+  time of day when the clocks change. It proposes a planned time for a draft
+  and schedules nothing. Channels that are disconnected or not yet confirmed
+  cannot be given slots.
+- **Ideas** (`/ideas`) is a list of topics: a title, and optionally a pillar,
+  a source and notes. The source is stored as an address and is given to a
+  draft as text. Noon Gun never opens it.
+
+Do not put passwords or private data about other people in the brief, an idea
+or a pillar. This text is what is sent to the drafting service.
+
+Owners and editors change these pages. Viewers can read them. See
+`docs/adr/0011-drafting-contract.md`.
+
+## Drafting with an LLM
+
+Noon Gun can write drafts from the brief of a workspace with a language model.
+A generated post is a draft like one you typed: nothing is approved, scheduled
+or published until a person does so. Drafting is optional. Without an API key
+the rest of the application works as before.
+
+### The key
+
+Drafting needs an API key of the provider, which is Anthropic unless you
+configure another one. There are two places for a key:
+
+- **The instance key** is set by the operator as `ANTHROPIC_API_KEY` in `.env`.
+  Every workspace that has no key of its own uses it, and the operator's
+  account is billed.
+- **A workspace key** is stored by an owner of the workspace under Settings,
+  Drafting. It goes before the instance key, and the account it belongs to is
+  billed. Removing it puts the workspace back on the instance key.
+
+A workspace key is stored encrypted with `APP_KEY` and is write-only: after it
+is saved, the page shows the provider, the last four characters, when it was
+stored and whose key drafting uses, and never the key. Editors and viewers see
+whether drafting is available and nothing about keys. Storing, replacing
+and removing the key needs a recently confirmed password, like the security
+settings, so a session that someone else got hold of cannot swap the key. Each
+draft run records whether the instance key or the workspace key paid for it.
+
+To create a key, sign in to the Claude Console at `platform.claude.com`, add
+credit to the account and create an API key. Set a spending limit for the
+account there: Noon Gun estimates cost, it does not cap what the provider
+charges.
+
+### Settings
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | empty | The instance key. |
+| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The provider. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The model. |
+| `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
+| `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
+| `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | The folder under `resources/prompts/draft/` that holds the prompt. |
+| `NOONGUN_DRAFT_PRICES`, `NOONGUN_DRAFT_PRICE_CURRENCY` | empty, `USD` | The price table for the cost estimate. |
+
+### What is sent to the provider
+
+One request is sent for each post. It holds the prompt and the format the
+answer must have, and nothing else: no tools, no files, no earlier
+conversation. The prompt is built in one place
+(`App\Domain\Drafting\PromptRenderer`) from:
+
+- the title and text of the brief, its voice rules and its calls to action;
+- the name and description of the pillar, and the title and notes of the idea,
+  when the draft is asked for from one;
+- a source address, when one is given. The address is sent as text. Noon Gun
+  does not open it, and neither does the model;
+- for each target channel its number, its platform and the limits of that
+  platform, such as the longest text.
+
+Never sent: platform tokens, API keys, the names of your Pages and profiles,
+the name of the workspace, names or email addresses of users, and anything
+that belongs to another workspace. The API
+key travels in a request header to the provider and nowhere else. It is not
+written to logs, error messages, the queue or the draft run.
+
+What the provider does with a request is set by its own terms. Do not put into
+the brief what you would not send to it.
+
+### What comes back
+
+The model answers in a fixed format: one text for each channel, at most one
+link, a suggestion for alternative text and one line on why the post fits. The
+answer is treated as data. It is checked (a text for each channel that was
+asked for and for no other, no text over the limit of its platform), stored as
+plain text and shown as plain text. Nothing in it is followed, opened or run.
+
+A draft only ever carries a link that you gave: the source address of the
+request, or the address of a call to action in the brief. If the model
+suggests any other address, the draft is created without a link and the draft
+run records that a link was left out. Text that is pasted into an idea can
+therefore not make a post point somewhere you did not choose. Add the link by
+hand in the editor when you do want another one.
+
+When an answer does not pass the check, the model is asked once more. After a
+second answer that cannot be used the run fails and says why. A run also fails,
+without a second request, when the model declines to write the post or the
+answer is cut off at `NOONGUN_DRAFT_MAX_TOKENS`. A rate limit, an overloaded
+provider, a provider error and a timeout are reported as failures that can be
+tried again.
+
+### Cost
+
+Each draft run stores the tokens the provider reported and a cost estimate:
+tokens times the price per million tokens in `drafting.prices` of
+`config/noongun.php`, in `NOONGUN_DRAFT_PRICE_CURRENCY`. A run that needed a
+second request counts both. A failed run keeps the tokens it used.
+
+It is an estimate, not an invoice. It leaves out anything the provider bills
+that is not an input or output token, and it is as good as the price table.
+The built-in prices were checked against Anthropic's price list on 2026-11-25.
+Prices change: check them when you change the model, and add or replace
+entries with `NOONGUN_DRAFT_PRICES`. A model without a price gives runs with
+tokens and no estimate.
+
+### Changing the model
+
+Set `NOONGUN_DRAFT_ANTHROPIC_MODEL` to the identifier of another Claude model
+and restart the containers. If the model is not in the price table, add its
+price with `NOONGUN_DRAFT_PRICES`:
+
+```
+NOONGUN_DRAFT_ANTHROPIC_MODEL=claude-sonnet-5-5
+NOONGUN_DRAFT_PRICES={"anthropic":{"claude-sonnet-5-5":{"input":2,"output":10}}}
+```
+
+The model must support structured outputs. A smaller model is cheaper and
+faster and writes plainer drafts. Thinking counts against
+`NOONGUN_DRAFT_MAX_TOKENS`, so if answers are cut off, raise that limit or set
+a lower `NOONGUN_DRAFT_ANTHROPIC_EFFORT`. To change what the model is told,
+copy `resources/prompts/draft/v1` to a new folder, edit it and point
+`NOONGUN_DRAFT_PROMPT_VERSION` at it. Details are in
+`docs/platform-notes/llm.md` and `docs/adr/0011-drafting-contract.md`.
+
+## Proposing a week
+
+"Propose a week" on the queue drafts the posts of one week from the brief,
+the pillars and the slots. It needs a brief, a channel that can publish with
+at least one slot, and an API key for the LLM provider. When one is missing,
+the page says which and links to where it is set.
+
+What it makes are drafts. Each one arrives in the queue like a post written
+by hand, with its slot time as planned time, and is approved or rejected by a
+person, one post at a time. There is no "approve all", and nothing a proposal
+creates is ever published by itself. See `docs/adr/0012-proposing-a-week.md`.
+
+Before anything starts, the page shows the week, every post that would be
+drafted with its time, channels, pillar and idea, the model, and what it is
+expected to cost. The plan is worked out by these rules, in this order:
+
+1. Every slot of a channel that can publish gives one time in the week, on
+   the clock of the workspace. A time is left out when it has passed, when it
+   is less than `NOONGUN_DRAFT_LEAD_MINUTES` away (a draft could not be read
+   and approved before then), or when that channel already has a post at that
+   time that is not rejected. A slot that an earlier proposal for the week
+   already drafted a post for is left out as well, also when that post was
+   moved to another time since. Proposing a week twice therefore fills the
+   gaps and repeats nothing. Rejecting or deleting a draft opens its slot
+   again.
+2. Channels whose slots fall on the same time share one post, with a text for
+   each channel, because a post is what you approve.
+3. Each pillar needs its weekly target, minus the posts the week already holds
+   for it. The pillars take turns, the largest target first and then by name,
+   one post per turn, until every need is met. That sequence is laid over the
+   posts in time order. If the targets ask for more posts than the week has
+   times, the end of the sequence is dropped and the page says which pillars
+   come up short. If they ask for fewer, the remaining posts are drafted from
+   the brief alone, without a pillar. When no pillar has a target, every post
+   is, and the page says so.
+4. A post takes the oldest unused idea of its pillar, then the oldest unused
+   idea without a pillar. An idea counts as used while a post that is not
+   rejected was drafted from it; rejecting that post frees the idea. An idea
+   of another pillar is never borrowed.
+
+The same brief, pillars, slots and posts always give the same plan. If the
+plan changes between looking at it and starting it, the start is refused and
+the new plan is shown.
+
+Starting opens one draft run for each post and queues one job for each run.
+The queue page shows every run as waiting, being drafted, drafted or failed,
+and asks the server for that every five seconds until all are settled. A run
+that failed says why in plain words; what the person who runs the instance
+needs to know beyond that is in the log.
+
+A run is opened for one provider, model and prompt version, and for one payer:
+the key of the workspace or the key of the instance. If any of these is
+different when its job runs, because a key was added or removed or the model
+was changed in between, the run fails with that reason and nothing is spent.
+
+### What a proposal may spend
+
+- One proposal drafts at most `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` posts.
+  The earliest times are kept; the rest are left for a second proposal.
+- A workspace drafts at most `NOONGUN_DRAFT_MAX_RUNS_PER_DAY` posts in 24
+  hours. A run counts when it reached the provider, whether it succeeded or
+  failed, or is still waiting or at work. A run that spent nothing does not
+  count: one that could not be queued, one no worker picked up, one the
+  provider turned away for a wrong key or an unknown model.
+- All workspaces together draft at most
+  `NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY` posts in 24 hours on the key of the
+  instance, counted the same way. A workspace with a key of its own is not
+  held by this limit.
+- A workspace has one proposal at work at a time. A second one is refused
+  until every run of the first is settled, also when two people press the
+  button at the same moment and while a run waits for its retry.
+- Starting and stopping are each throttled to six requests a minute for a
+  user. A request over that gets a sentence on the page.
+- A post is asked for at most `NOONGUN_DRAFT_MAX_ATTEMPTS` times, and a second
+  time only when the provider failed in a way worth trying again (a rate
+  limit, an overloaded provider, a timeout), after the wait in
+  `NOONGUN_DRAFT_BACKOFF`. An answer that cannot be used is asked for once
+  more by the generator and then fails the run. Each attempt is a draft run of
+  its own, so that what every attempt used stays on record.
+
+### What it costs
+
+Before the start the page shows two figures from the price table:
+
+- **Expected, about**: one answer for each post. The prompt each post would
+  be sent is rendered and measured, at one token for three bytes, and the
+  answer is taken as `NOONGUN_DRAFT_EXPECTED_OUTPUT_TOKENS` tokens.
+- **Worst case**: every post uses every attempt, every attempt asks twice,
+  and every answer runs to `NOONGUN_DRAFT_MAX_TOKENS`. The prompt is counted
+  at one token for every byte, plus an allowance for what the provider wraps
+  around it. A token is never shorter than a byte, so a proposal cannot cost
+  more than this, however long the brief is.
+
+While a proposal is at work and after it, the queue shows what its runs used
+so far, failed attempts included. The editor shows on a drafted post what
+that one draft used. All of these are estimates from the price table, not an
+invoice, and without a price for the model only tokens are shown.
+
+### When drafts do not arrive
+
+The `scheduler` container runs one command for drafting:
+
+| Command | Runs | What it does |
+|---|---|---|
+| `noongun:recover-stuck-draft-runs` | every five minutes | Marks a draft run as failed when it has been running for longer than `NOONGUN_DRAFT_STUCK_AFTER_MINUTES` (its worker died), or has been waiting longer than that plus the largest backoff (its job was lost). It never asks a provider again: a run whose worker died may already have been paid for, so a person decides whether to propose the week again. |
+
+With the defaults a run is given up after 6 minutes at work or 8 minutes of
+waiting, found at the next run of the command. Until then the workspace
+cannot start another proposal.
+
+The queue page does not wait for that in silence. Once a draft has waited two
+minutes for a worker, it says "Waiting longer than expected. Check that the
+queue is running." and offers "Stop waiting" to owners and editors. Stopping
+marks every run of the workspace that is still open as failed, after a
+confirmation. It asks nothing of the provider, and the week can be proposed
+again at once. It also works when the scheduler is down. A draft that is with
+the provider at that moment is discarded and may still be charged for; its
+tokens are not recorded. A job that arrives later for a stopped run does
+nothing.
+
+Three things to know when operating it:
+
+- `GenerateDraftJob` runs in the `horizon` container on the default queue.
+  Running it again by hand, with `queue:retry` or the retry button in Horizon,
+  does nothing: a draft run is started once, by one conditional update in the
+  database.
+- The time limit of the job is `NOONGUN_DRAFT_TIMEOUT` x 2 + 15 seconds, which
+  is 255 with the defaults. `REDIS_QUEUE_RETRY_AFTER` (and
+  `DB_QUEUE_RETRY_AFTER` for the database queue) must stay above it; the
+  default is 300. If you raise `NOONGUN_DRAFT_TIMEOUT`, raise those too.
+  When a draft takes longer than `REDIS_QUEUE_RETRY_AFTER`, the queue hands
+  the job to a second worker; that copy does nothing, but it is listed as a
+  failed job.
+- Every failed run is logged as "A draft run failed." with the class of the
+  failure, its message and, where the provider gave one, a detail for the
+  operator. Keys are removed before anything is logged. When the page says
+  that drafting is not set up on this instance, the log line "Drafting is not
+  set up, so a week cannot be proposed." names the setting that is missing.
 
 ## Running on a home server
 
@@ -244,8 +538,11 @@ fills in:
   by the containers belong to you
 
 Keep `.env` private and back it up together with the database: without the
-`APP_KEY` encrypted values (such as platform tokens, later) cannot be read.
-Do not change `APP_KEY` on an instance that has data.
+`APP_KEY` encrypted values (platform tokens and LLM keys) cannot be read.
+Do not change `APP_KEY` on an instance that has data. If it was changed, a
+stored LLM key can no longer be read: drafting stops for that workspace, the
+Drafting settings page says so, and an owner enters the key again or removes
+it there.
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -268,16 +565,37 @@ Do not change `APP_KEY` on an instance that has data.
 | `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
 | `NOONGUN_PUBLISH_CALLS_PER_JOB` | `3` | How many variants one run of the publishing job sends before it hands the rest to a successor. Bounds the time limit of a job; see "Publishing" for what the queue needs. |
 | `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Shortest lifetime of the lock on one variant. The lock always lives at least 30 seconds longer than the longest job. |
-| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `180` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of a publishing job. |
+| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `300` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of any job: 255 seconds for a drafting job with the defaults, 105 for a publishing job. Raise it when you raise `NOONGUN_DRAFT_TIMEOUT`. |
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
+| `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
+| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider drafts are generated with. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The Claude model drafts are generated with. |
+| `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
+| `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
+| `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call to the provider. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
+| `NOONGUN_DRAFT_PRICES` | empty | Prices per million tokens, as JSON, added to the table in `config/noongun.php`: `{"anthropic":{"model-name":{"input":4,"output":20}}}`. Only used to estimate what a draft run cost. |
+| `NOONGUN_DRAFT_PRICE_CURRENCY` | `USD` | Currency of the price table. |
+| `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` | `14` | Most posts one "Propose a week" drafts. |
+| `NOONGUN_DRAFT_MAX_RUNS_PER_DAY` | `50` | Most posts a workspace may draft in 24 hours. A draft run counts when it reached the provider or is still open; one that spent nothing does not. |
+| `NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY` | `200` | Most posts all workspaces together may draft in 24 hours on the key of the instance, counted the same way. Runs on a key a workspace brought do not count. |
+| `NOONGUN_DRAFT_MAX_ATTEMPTS` | `3` | How many times one planned post is asked for at most. Only failures the provider marks as worth trying again are retried. |
+| `NOONGUN_DRAFT_BACKOFF` | `30,120` | Seconds to wait before each retry of a draft, comma separated. The last value repeats. |
+| `NOONGUN_DRAFT_STUCK_AFTER_MINUTES` | `6` | How long a draft run may be running before it is marked as failed. Never less than the time limit of the job plus a minute. A waiting run is given this plus the largest backoff. |
+| `NOONGUN_DRAFT_LEAD_MINUTES` | `60` | How far ahead a slot time must be to get a draft, so that the draft can be read and approved before its time. |
+| `NOONGUN_DRAFT_EXPECTED_OUTPUT_TOKENS` | `1500` | Size of a usual answer, thinking included, for the expected cost shown before a proposal starts. Lower it when you set a low effort, raise it for a model that thinks at length. |
 
 Times are stored in UTC. Each workspace has its own timezone for display and
 scheduling. The application timezone is fixed to UTC in `config/app.php` and
 is not an environment setting.
 
 Other settings (timezone list, locales, plan limits, feature flags, the list
-of platforms and their adapters) live in `config/noongun.php`.
+of platforms and their adapters, the LLM providers and their price table) live
+in `config/noongun.php`.
+
+The cost on a draft run is an estimate from that price table, not an invoice.
+Check the prices against the provider's price list when you change the model.
 
 ## Connecting a Facebook Page
 

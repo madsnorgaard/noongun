@@ -13,7 +13,9 @@ defineProps<{
     items: NavItem[];
 }>();
 
-const { isCurrentUrl } = useCurrentUrl();
+// An entry is also the current one on the pages under it, for example
+// Brief on /brief/pillars.
+const { isCurrentOrParentUrl } = useCurrentUrl();
 </script>
 
 <template>
@@ -23,13 +25,15 @@ const { isCurrentUrl } = useCurrentUrl();
                 <SidebarMenuItem v-for="item in items" :key="item.title">
                     <SidebarMenuButton
                         as-child
-                        :is-active="isCurrentUrl(item.href)"
+                        :is-active="isCurrentOrParentUrl(item.href)"
                         class="h-11 rounded-[10px] px-3 text-base data-[active=true]:bg-card data-[active=true]:font-semibold data-[active=true]:shadow-xs"
                     >
                         <Link
                             :href="item.href"
                             :aria-current="
-                                isCurrentUrl(item.href) ? 'page' : undefined
+                                isCurrentOrParentUrl(item.href)
+                                    ? 'page'
+                                    : undefined
                             "
                         >
                             <span>{{ item.title }}</span>

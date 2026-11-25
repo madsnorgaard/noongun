@@ -1,0 +1,134 @@
+<?php
+
+namespace App\Http\Controllers\Settings;
+
+use App\Domain\Drafting\DraftGenerators;
+use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
+use App\Domain\Drafting\Exceptions\LlmCredentialMissing;
+use App\Domain\Drafting\LlmCredentialResolver;
+use App\Domain\Drafting\Models\LlmCredential;
+use App\Domain\Workspaces\CurrentWorkspace;
+use App\Domain\Workspaces\Models\Workspace;
+use App\Http\Controllers\Controller;
+use App\Http\Requests\Settings\LlmKeyRequest;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
+use Inertia\Inertia;
+use Inertia\Response;
+
+/**
+ * The workspace's own API key for the drafting provider: store it, replace
+ * it, remove it. The key is write-only. Nothing here returns it, and the
+ * page gets the provider, the last four characters, when it was set and
+ * whose key drafting uses.
+ *
+ * Owners manage the key. Editors and viewers learn whether drafting is
+ * available and nothing about keys.
+ */
+class LlmKeyController extends Controller
+{
+    public function edit(Request $request, CurrentWorkspace $current, DraftGenerators $generators, LlmCredentialResolver $keys): Response
+    {
+        $workspace = $current->get();
+
+        abort_if($workspace === null, 403);
+
+        $provider = $this->providerOf($workspace, $generators);
+        $canManage = $request->user()?->can('viewAny', LlmCredential::class) ?? false;
+        $credential = $canManage && $provider !== null ? $this->credentialFor($provider) : null;
+
+        return Inertia::render('settings/Drafting', [
+            'provider' => $provider === null ? null : [
+                'name' => $provider,
+                'label' => Str::headline($provider),
+            ],
+            'available' => $generators->availableFor($workspace),
+            'key_source' => $canManage && $provider !== null ? $this->keySource($workspace, $provider, $keys) : null,
+            'credential' => $credential === null ? null : [
+                'unreadable' => ! $credential->isReadable(),
+                'last_four' => $credential->lastFour(),
+                'set_at' => $credential->updated_at?->toIso8601String(),
+            ],
+            'can' => [
+                'manage' => $canManage,
+            ],
+        ]);
+    }
+
+    public function update(LlmKeyRequest $request, CurrentWorkspace $current, DraftGenerators $generators): RedirectResponse
+    {
+        $provider = $this->providerOf($current->getOrFail(), $generators);
+
+        if ($provider === null) {
+            throw ValidationException::withMessages([
+                'api_key' => 'No drafting provider is configured on this instance, so there is nothing to store a key for.',
+            ]);
+        }
+
+        $existing = $this->credentialFor($provider);
+
+        if ($existing !== null) {
+            Gate::authorize('update', $existing);
+        }
+
+        LlmCredential::store($provider, $request->key());
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => $existing === null
+            ? __('The API key is stored. Drafting uses it from now on.')
+            : __('The API key is replaced.')]);
+
+        return to_route('llm-key.edit');
+    }
+
+    public function destroy(CurrentWorkspace $current, DraftGenerators $generators): RedirectResponse
+    {
+        Gate::authorize('viewAny', LlmCredential::class);
+
+        $provider = $this->providerOf($current->getOrFail(), $generators);
+        $credential = $provider !== null ? $this->credentialFor($provider) : null;
+
+        if ($credential !== null) {
+            Gate::authorize('delete', $credential);
+
+            $credential->delete();
+
+            Inertia::flash('toast', ['type' => 'success', 'message' => __('The API key is removed.')]);
+        }
+
+        return to_route('llm-key.edit');
+    }
+
+    private function providerOf(Workspace $workspace, DraftGenerators $generators): ?string
+    {
+        try {
+            $provider = $generators->providerFor($workspace);
+        } catch (DraftGeneratorNotAvailable) {
+            return null;
+        }
+
+        return in_array($provider, $generators->providers(), true) ? $provider : null;
+    }
+
+    /**
+     * Looked up inside the current workspace: the model is scoped to it.
+     */
+    private function credentialFor(string $provider): ?LlmCredential
+    {
+        return LlmCredential::query()->where('provider', $provider)->first();
+    }
+
+    /**
+     * @return 'workspace'|'instance'|null
+     */
+    private function keySource(Workspace $workspace, string $provider, LlmCredentialResolver $keys): ?string
+    {
+        try {
+            return $keys->resolve($workspace, $provider)->scope->value;
+        } catch (LlmCredentialMissing) {
+            return null;
+        }
+    }
+}

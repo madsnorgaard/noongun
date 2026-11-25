@@ -1,0 +1,8 @@
+{
+  "type": "SessionStartedEvent",
+  "aggregateId": "36b0a92c-f389-453a-9e5c-a56c45de5941",
+  "version": 1,
+  "timestamp": "2026-11-25T14:38:57.169Z",
+  "payload": {},
+  "seq": 1
+}

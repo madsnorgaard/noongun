@@ -655,7 +655,7 @@ const locked = computed(() => {
                     class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
                 >
                     <Label for="scheduled_at">
-                        Firing time, {{ timezone }}
+                        Planned time, {{ timezone }}
                     </Label>
                     <Input
                         id="scheduled_at"
@@ -665,7 +665,7 @@ const locked = computed(() => {
                     />
                     <p class="text-sm text-muted-foreground">
                         Leave it empty to decide after approval. A post with a
-                        firing time is scheduled the moment it is approved.
+                        planned time is scheduled the moment it is approved.
                     </p>
                     <InputError
                         :message="
@@ -915,6 +915,105 @@ const locked = computed(() => {
                 >
                     Owners and editors of this workspace can change posts.
                 </p>
+
+                <!-- What a model wrote about its own draft. Shown as text
+                     only, never as markup or a link. -->
+                <section
+                    v-if="post?.origin"
+                    class="grid gap-3 rounded-xl bg-card p-5.5 shadow-xs"
+                    data-test="post-origin"
+                >
+                    <div class="grid gap-1">
+                        <h2 class="text-sm text-muted-foreground">
+                            Where this draft came from
+                        </h2>
+                        <p class="text-base">
+                            Drafted from your brief
+                            <template v-if="post.origin.drafted_at">
+                                on
+                                <span class="font-mono">{{
+                                    formatDateTime(
+                                        post.origin.drafted_at,
+                                        timezone,
+                                    )
+                                }}</span>
+                            </template>
+                            by
+                            <span class="font-mono">{{
+                                post.origin.model
+                            }}</span>
+                            ({{ post.origin.provider }}). Nobody has checked it
+                            yet: read it before you approve it.
+                        </p>
+                    </div>
+                    <dl class="grid gap-3 text-base">
+                        <div v-if="post.origin.pillar" class="grid gap-0.5">
+                            <dt class="text-sm text-muted-foreground">
+                                Pillar
+                            </dt>
+                            <dd>{{ post.origin.pillar }}</dd>
+                        </div>
+                        <div v-if="post.origin.idea" class="grid gap-0.5">
+                            <dt class="text-sm text-muted-foreground">Idea</dt>
+                            <dd class="break-words">{{ post.origin.idea }}</dd>
+                        </div>
+                        <div v-if="post.origin.rationale" class="grid gap-0.5">
+                            <dt class="text-sm text-muted-foreground">
+                                Why it was drafted this way, in the words of the
+                                model
+                            </dt>
+                            <dd class="break-words whitespace-pre-line">
+                                {{ post.origin.rationale }}
+                            </dd>
+                        </div>
+                        <div v-if="post.origin.alt_text" class="grid gap-0.5">
+                            <dt class="text-sm text-muted-foreground">
+                                Suggested alternative text for an image
+                            </dt>
+                            <dd class="break-words whitespace-pre-line">
+                                {{ post.origin.alt_text }}
+                            </dd>
+                        </div>
+                        <div
+                            v-if="post.origin.link_dropped"
+                            class="grid gap-0.5"
+                            data-test="post-origin-link-dropped"
+                        >
+                            <dt class="text-sm text-muted-foreground">Link</dt>
+                            <dd>
+                                The draft suggested a link that was not in the
+                                idea or the brief. It was left out.
+                            </dd>
+                        </div>
+                        <div
+                            v-if="post.origin.input_tokens !== null"
+                            class="grid gap-0.5"
+                            data-test="post-origin-cost"
+                        >
+                            <dt class="text-sm text-muted-foreground">
+                                What this draft used
+                            </dt>
+                            <dd>
+                                <template v-if="post.origin.cost">
+                                    About
+                                    <span class="font-mono">
+                                        {{ post.origin.currency }}
+                                        {{ post.origin.cost }}
+                                    </span>
+                                    by the price table,
+                                </template>
+                                <span class="font-mono">{{
+                                    post.origin.input_tokens
+                                }}</span>
+                                tokens in and
+                                <span class="font-mono">{{
+                                    post.origin.output_tokens
+                                }}</span>
+                                out.
+                            </dd>
+                        </div>
+                    </dl>
+                </section>
 
                 <p v-if="post" class="px-1 text-base">
                     <Link

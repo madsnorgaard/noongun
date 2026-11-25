@@ -107,4 +107,84 @@ return [
         'stuck_after_minutes' => (int) env('NOONGUN_PUBLISH_STUCK_AFTER_MINUTES', 30),
     ],
 
+    /*
+    | Drafting with an LLM. "provider" is the provider every workspace uses
+    | unless it is given another one. Each entry under "providers" names the
+    | DraftGenerator class, the instance API key and the model; adding a
+    | provider means one entry here. Model names, limits and prices are set
+    | here and nowhere else.
+    |
+    | "api_key" is the instance key, set by the operator. A key stored for
+    | the instance in the database goes before it, and a workspace's own key
+    | goes before both. See docs/adr/0011-drafting-contract.md.
+    |
+    | "max_tokens" limits one answer, including the tokens a model spends on
+    | thinking. "timeout" is the limit in seconds for one call.
+    | "prompt_version" names a folder under resources/prompts/draft/ and is
+    | stored on every draft run. "effort" of a provider is how much work the
+    | model puts into one answer (low, medium, high and so on); empty leaves
+    | it to the provider's default.
+    |
+    | "prices" is in "currency" per million tokens, per provider and model,
+    | and is only used to estimate the cost of a run. NOONGUN_DRAFT_PRICES
+    | adds or replaces entries, as JSON in the same shape:
+    | {"anthropic":{"some-model":{"input":1.5,"output":7.5}}}
+    | A model without a price gives a run without a cost estimate.
+    |
+    | "limits" bounds what "Propose a week" may spend. "posts_per_proposal"
+    | is the most posts one proposal drafts, "runs_per_day" the most draft
+    | runs a workspace may open in 24 hours, and "instance_runs_per_day" the
+    | most all workspaces together may open on the instance key. Only runs
+    | that reached a provider or are still open count. "max_attempts" is how many times
+    | one planned post is asked for when the provider fails in a way worth
+    | trying again, and "backoff" the wait in seconds before each retry,
+    | comma separated; the last value repeats. "stuck_after_minutes" is how
+    | long a draft run may stay unfinished before it is marked as failed.
+    | "expected_output_tokens" is the size of a usual answer, thinking
+    | included, for the expected cost shown before a proposal starts.
+    | "lead_minutes" is how far ahead a slot time must be to get a draft, so
+    | that it can be read and approved in time. "weeks_ahead" is how far
+    | ahead a week can be proposed.
+    */
+
+    'drafting' => [
+        'provider' => env('NOONGUN_DRAFT_PROVIDER', 'anthropic'),
+        'max_tokens' => (int) env('NOONGUN_DRAFT_MAX_TOKENS', 16000),
+        'timeout' => (int) env('NOONGUN_DRAFT_TIMEOUT', 120),
+        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v1'),
+        'currency' => env('NOONGUN_DRAFT_PRICE_CURRENCY', 'USD'),
+
+        'providers' => [
+            'anthropic' => [
+                'generator' => 'App\\Domain\\Drafting\\Generators\\PrismDraftGenerator',
+                'api_key' => env('ANTHROPIC_API_KEY'),
+                'model' => env('NOONGUN_DRAFT_ANTHROPIC_MODEL', 'claude-opus-5-5'),
+                'effort' => env('NOONGUN_DRAFT_ANTHROPIC_EFFORT'),
+            ],
+        ],
+
+        'prices' => array_replace_recursive(
+            [
+                'anthropic' => [
+                    'claude-opus-5-5' => ['input' => 4.00, 'output' => 20.00],
+                    'claude-sonnet-5-5' => ['input' => 2.00, 'output' => 10.00],
+                    'claude-haiku-5-5' => ['input' => 0.10, 'output' => 0.50],
+                ],
+            ],
+            (array) json_decode((string) env('NOONGUN_DRAFT_PRICES', '{}'), true),
+        ),
+
+        'limits' => [
+            'posts_per_proposal' => (int) env('NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL', 14),
+            'runs_per_day' => (int) env('NOONGUN_DRAFT_MAX_RUNS_PER_DAY', 50),
+            'instance_runs_per_day' => (int) env('NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY', 200),
+            'max_attempts' => (int) env('NOONGUN_DRAFT_MAX_ATTEMPTS', 3),
+            'backoff' => array_map(intval(...), explode(',', (string) env('NOONGUN_DRAFT_BACKOFF', '30,120'))),
+            'stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 6),
+            'expected_output_tokens' => (int) env('NOONGUN_DRAFT_EXPECTED_OUTPUT_TOKENS', 1500),
+            'lead_minutes' => (int) env('NOONGUN_DRAFT_LEAD_MINUTES', 60),
+            'weeks_ahead' => 8,
+        ],
+    ],
+
 ];

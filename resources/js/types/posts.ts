@@ -46,7 +46,31 @@ export type Post = {
     variants: PostVariant[];
     /** Why the post cannot go out as it stands, keyed by field. */
     problems: Record<string, string[]>;
+    /** Where a drafted post came from. Null for one written by hand. */
+    origin: PostOrigin | null;
     can: PostAbilities;
+};
+
+/**
+ * What the draft run of a drafted post recorded. The rationale and the
+ * alternative text are what a model wrote: show them as text only.
+ */
+export type PostOrigin = {
+    pillar: string | null;
+    idea: string | null;
+    provider: string;
+    model: string;
+    rationale: string | null;
+    alt_text: string | null;
+    /** The model suggested a link the author never gave, and it was left out. */
+    link_dropped: boolean;
+    drafted_at: string | null;
+    /** Tokens the draft used, as the provider reported them. */
+    input_tokens: number | null;
+    output_tokens: number | null;
+    /** Estimated cost by the price table, to four places, or null without a price. */
+    cost: string | null;
+    currency: string | null;
 };
 
 export type ChannelOption = {

@@ -4,8 +4,10 @@ namespace App\Domain\Content\Models;
 
 use App\Domain\Content\Exceptions\ApprovalNotAllowed;
 use App\Domain\Content\Exceptions\IllegalPostTransition;
+use App\Domain\Content\Exceptions\PostNotEditable;
 use App\Domain\Content\Policies\PostPolicy;
 use App\Domain\Content\PostState;
+use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Workspaces\Concerns\BelongsToWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Models\User;
@@ -40,9 +42,15 @@ use Illuminate\Support\Facades\DB;
  * @property CarbonImmutable|null $approved_at
  * @property int $publish_round
  * @property int $publish_step
+ * @property int|null $draft_run_id
+ * @property int|null $pillar_id
+ * @property int|null $idea_id
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  * @property-read Workspace|null $workspace
+ * @property-read DraftRun|null $draftRun
+ * @property-read Pillar|null $pillar
+ * @property-read Idea|null $idea
  */
 #[Fillable(['scheduled_at'])]
 #[UseFactory(PostFactory::class)]
@@ -112,6 +120,32 @@ class Post extends Model
     }
 
     /**
+     * The generation this post came from, or none for a post written by hand.
+     *
+     * @return BelongsTo<DraftRun, $this>
+     */
+    public function draftRun(): BelongsTo
+    {
+        return $this->belongsTo(DraftRun::class);
+    }
+
+    /**
+     * @return BelongsTo<Pillar, $this>
+     */
+    public function pillar(): BelongsTo
+    {
+        return $this->belongsTo(Pillar::class);
+    }
+
+    /**
+     * @return BelongsTo<Idea, $this>
+     */
+    public function idea(): BelongsTo
+    {
+        return $this->belongsTo(Idea::class);
+    }
+
+    /**
      * Posts the scheduler must dispatch: scheduled, with a time that has
      * come. Runs inside a workspace like every other query.
      *
@@ -138,6 +172,36 @@ class Post extends Model
     public function isEditable(): bool
     {
         return $this->state->isEditable();
+    }
+
+    /**
+     * Records which draft run produced this post, with the pillar and the
+     * idea the run was asked for. Only for a draft that has no origin yet,
+     * and it changes nothing else: the post stays a draft.
+     *
+     * @throws PostNotEditable when the post is not a draft or already has an origin
+     */
+    public function attributeTo(DraftRun $run): static
+    {
+        static::guardWorkspace($this);
+
+        $recorded = static::query()
+            ->whereKey($this->getKey())
+            ->where('state', PostState::Draft)
+            ->whereNull('draft_run_id')
+            ->update([
+                'draft_run_id' => $run->id,
+                'pillar_id' => $run->pillar_id,
+                'idea_id' => $run->idea_id,
+            ]) === 1;
+
+        $this->refresh();
+
+        if (! $recorded) {
+            throw PostNotEditable::originAlreadySet($this);
+        }
+
+        return $this;
     }
 
     /**

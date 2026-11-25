@@ -17,9 +17,9 @@ use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
-use Symfony\Component\Finder\Finder;
 
 require_once __DIR__.'/../../Support/publishing.php';
+require_once __DIR__.'/../../Support/sources.php';
 
 beforeEach(function () {
     $this->travelTo('2026-11-24 10:00:00');
@@ -27,37 +27,6 @@ beforeEach(function () {
     $this->fake = fakeChannelAdapter();
     $this->workspace = Workspace::factory()->create();
 });
-
-/**
- * Every PHP file of the application with its source, keyed by path relative
- * to app/.
- *
- * @return array<string, string>
- */
-function applicationSources(): array
-{
-    $sources = [];
-
-    foreach (Finder::create()->files()->in(app_path())->name('*.php') as $file) {
-        $sources[str_replace('\\', '/', $file->getRelativePathname())] = $file->getContents();
-    }
-
-    return $sources;
-}
-
-/**
- * The files whose source matches the pattern.
- *
- * @return list<string>
- */
-function sourcesMatching(string $pattern, ?string $under = null): array
-{
-    return array_keys(array_filter(
-        applicationSources(),
-        fn (string $source, string $path) => ($under === null || str_starts_with($path, $under)) && preg_match($pattern, $source) === 1,
-        ARRAY_FILTER_USE_BOTH,
-    ));
-}
 
 /**
  * Runs everything that works without a human: the scheduler commands, a

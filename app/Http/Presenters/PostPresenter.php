@@ -54,6 +54,7 @@ final class PostPresenter
             'version' => $this->version($post),
             'variants' => $post->variants->sortBy('id')->values()->map($this->variant(...))->all(),
             'problems' => (object) $this->problems($post),
+            'origin' => $this->origin($post),
             'can' => [
                 'update' => $mayChange && $state === PostState::Draft,
                 'approve' => $mayChange && $state === PostState::Draft,
@@ -64,6 +65,40 @@ final class PostPresenter
                 'retry' => $mayChange && $state === PostState::Failed,
                 'delete' => $mayChange && DeletePost::allows($post),
             ],
+        ];
+    }
+
+    /**
+     * Where a drafted post came from, read from its draft run, or null
+     * for a post written by hand. The rationale and the alternative text
+     * are what a model wrote: the pages show them as plain text.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function origin(Post $post): ?array
+    {
+        $run = $post->draftRun;
+
+        if ($run === null) {
+            return null;
+        }
+
+        return [
+            'pillar' => $run->pillar?->name,
+            'idea' => $run->idea?->title,
+            'provider' => Str::headline($run->provider),
+            'model' => $run->model,
+            'rationale' => $run->rationale,
+            'alt_text' => $run->alt_text,
+            // The model suggested a link the author never gave. It was left out.
+            'link_dropped' => $run->link_dropped,
+            'drafted_at' => $run->finished_at?->toIso8601String(),
+            // What this one draft used: tokens as the provider reported
+            // them, and the estimate of the price table when there is one.
+            'input_tokens' => $run->input_tokens,
+            'output_tokens' => $run->output_tokens,
+            'cost' => $run->cost_estimate !== null ? Money::used($run->cost_estimate) : null,
+            'currency' => $run->cost_currency,
         ];
     }
 
@@ -167,6 +202,6 @@ final class PostPresenter
 
     private function platformLabel(string $platform): string
     {
-        return Str::headline($platform);
+        return PlatformLabel::for($platform);
     }
 }

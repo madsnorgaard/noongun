@@ -4,9 +4,11 @@ namespace App\Http\Controllers\Posts;
 
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\PostState;
+use App\Domain\Drafting\Models\DraftRun;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Posts\Concerns\ActsOnPosts;
 use App\Http\Presenters\PostPresenter;
+use App\Http\Presenters\ProposalPresenter;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
@@ -27,7 +29,10 @@ class QueueController extends Controller
 
     private const HISTORY_PER_PAGE = 50;
 
-    public function __construct(private readonly PostPresenter $presenter) {}
+    public function __construct(
+        private readonly PostPresenter $presenter,
+        private readonly ProposalPresenter $proposals,
+    ) {}
 
     public function index(Request $request): Response
     {
@@ -53,6 +58,7 @@ class QueueController extends Controller
                     'next' => $history->nextPageUrl(),
                 ],
                 'can' => ['manage' => $mayChange],
+                'drafting' => null,
             ]);
         }
 
@@ -62,22 +68,28 @@ class QueueController extends Controller
         $upcoming = $this->posts(PostState::Approved, PostState::Scheduled, PostState::Publishing)->orderByRaw('scheduled_at asc nulls last')->orderBy('id');
         $failed = $this->posts(PostState::Failed)->orderByDesc('updated_at')->orderByDesc('id');
 
+        // The lists are closures so that the page can ask for the progress
+        // of a proposal alone, every few seconds, without loading them.
         return Inertia::render('queue/Index', [
             'view' => 'working',
-            'sections' => [
+            'sections' => fn (): array => [
                 'drafts' => $drafts->limit(self::SECTION_LIMIT)->get()->map($present)->all(),
                 'upcoming' => $upcoming->limit(self::SECTION_LIMIT)->get()->map($present)->all(),
                 'failed' => $failed->limit(self::SECTION_LIMIT)->get()->map($present)->all(),
             ],
             // How many posts each section really has. A section shows at
             // most SECTION_LIMIT of them, and the page says when it is cut.
-            'totals' => [
+            'totals' => fn (): array => [
                 'drafts' => Post::query()->inState(PostState::Draft)->count(),
                 'upcoming' => Post::query()->inState(PostState::Approved, PostState::Scheduled, PostState::Publishing)->count(),
                 'failed' => Post::query()->inState(PostState::Failed)->count(),
             ],
             'history' => null,
             'can' => ['manage' => $mayChange],
+            'drafting' => fn (): array => [
+                'can_propose' => $request->user()?->can('create', DraftRun::class) ?? false,
+                'proposal' => $this->proposals->progress(),
+            ],
         ]);
     }
 
@@ -86,6 +98,6 @@ class QueueController extends Controller
      */
     private function posts(PostState ...$states): Builder
     {
-        return Post::query()->with(['variants.channel', 'approver'])->inState(...$states);
+        return Post::query()->with(['variants.channel', 'approver', 'draftRun.pillar', 'draftRun.idea'])->inState(...$states);
     }
 }

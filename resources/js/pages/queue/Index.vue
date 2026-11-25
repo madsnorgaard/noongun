@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue';
 import NextFiring from '@/components/posts/NextFiring.vue';
 import PostStateBadge from '@/components/posts/PostStateBadge.vue';
 import PostTexts from '@/components/posts/PostTexts.vue';
+import ProposalProgress from '@/components/posts/ProposalProgress.vue';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { usePostActions } from '@/composables/usePostActions';
@@ -14,8 +15,10 @@ import {
     useWorkspaceTimezone,
 } from '@/lib/posts';
 import { approve, create, reject, show, unschedule } from '@/routes/posts';
+import { create as propose } from '@/routes/proposals';
 import { approve as approveSelection, index } from '@/routes/queue';
 import type { Post } from '@/types/posts';
+import type { QueueDrafting } from '@/types/proposals';
 
 defineOptions({
     layout: {
@@ -39,10 +42,21 @@ const props = defineProps<{
         next: string | null;
     } | null;
     can: { manage: boolean };
+    /** The latest week proposal and whether the viewer may start one. */
+    drafting: QueueDrafting | null;
 }>();
 
 const timezone = useWorkspaceTimezone();
 const { busy, errors, run } = usePostActions();
+
+// Proposing a week is the red action only while there is no draft to
+// approve and none on its way: then it is what moves the week forward.
+const proposeLeads = computed(
+    () =>
+        props.sections !== null &&
+        props.sections.drafts.length === 0 &&
+        !(props.drafting?.proposal?.active ?? false),
+);
 
 // Where a refusal is shown. The server keys what it refused for one post of
 // a selection as "posts.{id}"; everything else belongs to the request. The
@@ -196,9 +210,20 @@ function failedHeadline(post: Post): string {
                 </p>
             </div>
 
-            <Button v-if="can.manage" variant="outline" as-child>
-                <Link :href="create()" data-test="new-post">New post</Link>
-            </Button>
+            <div v-if="can.manage" class="flex flex-wrap gap-2">
+                <Button
+                    v-if="drafting?.can_propose"
+                    :variant="proposeLeads ? 'signal' : 'outline'"
+                    as-child
+                >
+                    <Link :href="propose()" data-test="propose-week">
+                        Propose a week
+                    </Link>
+                </Button>
+                <Button variant="outline" as-child>
+                    <Link :href="create()" data-test="new-post">New post</Link>
+                </Button>
+            </div>
         </header>
 
         <nav
@@ -242,6 +267,12 @@ function failedHeadline(post: Post): string {
         </ul>
 
         <template v-if="sections">
+            <ProposalProgress
+                v-if="drafting?.proposal"
+                :proposal="drafting.proposal"
+                :can-propose="drafting.can_propose"
+            />
+
             <section
                 v-if="isEmpty"
                 class="rounded-xl bg-card p-6 shadow-xs"
@@ -410,6 +441,17 @@ function failedHeadline(post: Post): string {
                             </span>
                             <span v-else class="text-muted-foreground">
                                 No firing time
+                            </span>
+
+                            <span
+                                v-if="post.origin"
+                                class="rounded-sm bg-secondary px-2.5 py-1 text-sm"
+                                :data-test="`generated-${post.id}`"
+                            >
+                                Drafted from the brief
+                                <template v-if="post.origin.pillar">
+                                    - {{ post.origin.pillar }}
+                                </template>
                             </span>
 
                             <PostStateBadge
