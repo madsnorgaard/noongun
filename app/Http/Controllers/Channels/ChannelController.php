@@ -41,6 +41,7 @@ class ChannelController extends Controller
                     'name' => $platform,
                     'label' => $this->platformLabel($platform),
                     'missing_settings' => $setup?->missingSettings() ?? [],
+                    'setup_steps' => $setup?->setupSteps() ?? [],
                     'redirect_uri' => $setup?->redirectUri(),
                 ];
             }, $manager->available()),

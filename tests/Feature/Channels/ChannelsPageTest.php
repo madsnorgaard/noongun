@@ -59,11 +59,13 @@ describe('list', function () {
                 'name' => 'facebook',
                 'label' => 'Facebook',
                 'missing_settings' => [],
+                'setup_steps' => [],
                 'redirect_uri' => 'https://noongun.test/auth/facebook/callback',
             ], [
                 'name' => 'linkedin',
                 'label' => 'LinkedIn',
                 'missing_settings' => [],
+                'setup_steps' => ['In the LinkedIn app, on the Products tab, add both "Share on LinkedIn" and "Sign In with LinkedIn using OpenID Connect". Without the first Noon Gun may not post, and without the second it cannot tell whose profile it is.'],
                 'redirect_uri' => 'https://noongun.test/auth/linkedin/callback',
             ]]));
 
@@ -93,6 +95,9 @@ describe('list', function () {
                 ->where('platforms.1.name', 'linkedin')
                 ->where('platforms.1.label', 'LinkedIn')
                 ->where('platforms.1.missing_settings', ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET'])
+                // The setup card names the two products the LinkedIn app needs.
+                ->where('platforms.1.setup_steps.0', fn (string $step) => str_contains($step, 'Share on LinkedIn') && str_contains($step, 'Sign In with LinkedIn using OpenID Connect'))
+                ->where('platforms.0.setup_steps', [])
                 ->where('platforms.1.redirect_uri', 'https://noongun.test/auth/linkedin/callback'));
 
         expect($response->getContent())->not->toContain(LINKEDIN_TEST_SECRET);

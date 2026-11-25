@@ -171,7 +171,7 @@ describe('ApprovePost', function () {
         'needs reconnect' => [fn () => Channel::factory()->needsReconnect(), 'Harbour News must be connected again before it can publish.'],
         'disconnected' => [fn () => Channel::factory()->disconnected(), 'Harbour News is disconnected.'],
         'token expired' => [fn () => Channel::factory()->expired(), 'The access to Harbour News has expired. Connect it again.'],
-        'no adapter for the platform' => [fn () => Channel::factory()->platform('telegraph'), 'Publishing to telegraph is not available on this instance.'],
+        'no adapter for the platform' => [fn () => Channel::factory()->platform('telegraph'), 'Publishing to Telegraph is not available on this instance.'],
     ]);
 
     it('refuses a text that is longer than the platform accepts', function () {

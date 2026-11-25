@@ -116,6 +116,13 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
         );
     }
 
+    public function setupSteps(): array
+    {
+        return [
+            'In the LinkedIn app, on the Products tab, add both "Share on LinkedIn" and "Sign In with LinkedIn using OpenID Connect". Without the first Noon Gun may not post, and without the second it cannot tell whose profile it is.',
+        ];
+    }
+
     public function missingSettings(): array
     {
         return array_values(array_filter([
@@ -164,13 +171,15 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
             'redirect_uri' => $this->redirectUri(),
         ]));
 
-        $missing = array_values(array_diff($this->scopes(), $grant['scopes']));
-
-        if ($missing !== []) {
+        // Only the permission to post is asked of this answer, and only
+        // when the answer names scopes at all: it is not known whether
+        // LinkedIn lists openid and profile here, and the userinfo call
+        // below proves those two by working.
+        if ($this->lacksPublishScope($grant['scopes'])) {
             throw ChannelException::permanent(
                 self::PLATFORM,
-                'LinkedIn did not grant every permission that is needed ('.implode(', ', $missing).'). Check that the LinkedIn app has both products added, then connect again.',
-                ['missing_scopes' => $missing],
+                'LinkedIn did not give Noon Gun permission to post. In the LinkedIn app, check that the product "Share on LinkedIn" is added, then connect again.',
+                ['missing_scope' => $this->setting('publish_scope'), 'granted_scopes' => $grant['scopes']],
             );
         }
 
@@ -184,7 +193,7 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
                 'access_token' => $grant['access_token'],
                 'refresh_token' => $grant['refresh_token'],
                 'token_expires_at' => $grant['expires_at'],
-                'scopes' => $grant['scopes'],
+                'scopes' => $grant['scopes'] ?? [],
             ])]),
         ));
     }
@@ -203,8 +212,12 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
             throw PublishFailed::reconnectRequired(self::PLATFORM, 'The profile is not connected. Connect it again.');
         }
 
-        if (preg_match('/^'.self::ID.'$/', $channel->external_id) !== 1) {
-            throw PublishFailed::permanent(self::PLATFORM, 'The stored LinkedIn member id is not valid. Disconnect the profile and connect it again.');
+        if (preg_match('/^'.self::ID.'\z/', $channel->external_id) !== 1) {
+            throw PublishFailed::permanent(self::PLATFORM, 'The connection to this profile is damaged. Disconnect it on the Channels page and connect it again.');
+        }
+
+        if (! mb_check_encoding($variant->body, 'UTF-8')) {
+            throw PublishFailed::permanent(self::PLATFORM, 'The text holds characters that cannot be read. Return the post to draft and type the text again.');
         }
 
         $post = [
@@ -231,11 +244,11 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
 
         $urn = $response['id'];
 
-        if ($urn === null || preg_match('/^urn:li:[A-Za-z]{1,40}:'.self::ID.'$/', $urn) !== 1) {
+        if ($urn === null || preg_match('/^urn:li:[A-Za-z]{1,40}:'.self::ID.'\z/', $urn) !== 1) {
             // Not retryable: the post may be public, and a second call would duplicate it.
             throw $this->client->outcomeUnknown(
                 PublishFailed::class,
-                'LinkedIn accepted the post but returned no id for it that can be read.',
+                'LinkedIn accepted the post but did not say where it is.',
                 ['endpoint' => 'POST /rest/posts', 'http_status' => $response['status']],
             );
         }
@@ -305,12 +318,12 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
         $expiresAt = is_numeric($report['expires_at'] ?? null) ? (int) $report['expires_at'] : 0;
         // The scope is documented as optional in this answer. Without it
         // the scopes recorded at the sign-in stand.
-        $scopes = isset($report['scope']) ? $this->scopeList($report['scope']) : $channel->scopes;
+        $scopes = $this->scopeList($report['scope'] ?? null);
 
         $channel->token_expires_at = $expiresAt > 0 ? CarbonImmutable::createFromTimestampUTC($expiresAt) : $channel->token_expires_at;
-        $channel->scopes = $scopes;
+        $channel->scopes = $scopes ?? $channel->scopes;
 
-        if ($channel->tokenExpired() || array_diff($this->scopes(), $scopes) !== []) {
+        if ($channel->tokenExpired() || $this->lacksPublishScope($scopes)) {
             return $channel->markNeedsReconnect();
         }
 
@@ -337,12 +350,18 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
             return $channel->markNeedsReconnect();
         }
 
+        // A renewed token that may no longer post is no use: the same rule
+        // as for a token that is only inspected.
+        if ($this->lacksPublishScope($grant['scopes'])) {
+            return $channel->markNeedsReconnect();
+        }
+
         $channel->forceFill([
             'access_token' => $grant['access_token'],
             // LinkedIn may or may not send the refresh token again.
             'refresh_token' => $grant['refresh_token'] ?? $channel->refresh_token,
             'token_expires_at' => $grant['expires_at'],
-            'scopes' => $grant['scopes'] !== [] ? $grant['scopes'] : $channel->scopes,
+            'scopes' => $grant['scopes'] ?? $channel->scopes,
             'status' => ChannelStatus::Active,
         ])->save();
 
@@ -353,14 +372,14 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
      * What the token endpoint returned.
      *
      * @param  array<string, mixed>  $response
-     * @return array{access_token: string, refresh_token: string|null, expires_at: CarbonImmutable|null, scopes: list<string>}
+     * @return array{access_token: string, refresh_token: string|null, expires_at: CarbonImmutable|null, scopes: list<string>|null} scopes is null when the answer names none
      */
     private function grantFrom(#[SensitiveParameter] array $response): array
     {
         $token = $response['access_token'] ?? null;
 
         if (! is_string($token) || $token === '') {
-            throw ChannelException::permanent(self::PLATFORM, 'LinkedIn answered the sign-in without an access token. Connect again.');
+            throw ChannelException::permanent(self::PLATFORM, 'LinkedIn answered the sign-in without giving access. Connect again from the Channels page.');
         }
 
         $refreshToken = $response['refresh_token'] ?? null;
@@ -387,8 +406,8 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
 
         $id = $profile['sub'] ?? null;
 
-        if (! is_string($id) || preg_match('/^'.self::ID.'$/', $id) !== 1) {
-            throw ChannelException::permanent(self::PLATFORM, 'LinkedIn did not say which member signed in. Connect again.');
+        if (! is_string($id) || preg_match('/^'.self::ID.'\z/', $id) !== 1) {
+            throw ChannelException::permanent(self::PLATFORM, 'LinkedIn did not say who signed in. Connect again from the Channels page.');
         }
 
         $name = $this->text($profile['name'] ?? null)
@@ -412,7 +431,7 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
         if ($title === null) {
             throw PublishFailed::permanent(
                 self::PLATFORM,
-                'The link has no title. LinkedIn shows a link only with the title given for it. Return the post to draft and add one.',
+                'The link has no title. LinkedIn shows a link only with the title given for it. Return the post to draft, open it and type a title under the link.',
             );
         }
 
@@ -436,16 +455,37 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
     }
 
     /**
-     * The token endpoint documents the granted scopes as separated by
-     * spaces, the introspection endpoint as separated by commas.
+     * The scopes an answer names, or null when it names none. The token
+     * endpoint documents them as separated by spaces, the introspection
+     * endpoint as separated by commas.
      *
-     * @return list<string>
+     * @return list<string>|null
      */
-    private function scopeList(mixed $scope): array
+    private function scopeList(mixed $scope): ?array
     {
-        $parts = is_string($scope) ? preg_split('/[\s,]+/', $scope, -1, PREG_SPLIT_NO_EMPTY) : [];
+        if (! is_string($scope) || trim($scope) === '') {
+            return null;
+        }
 
-        return $parts === false ? [] : $parts;
+        $parts = preg_split('/[\s,]+/', $scope, -1, PREG_SPLIT_NO_EMPTY);
+
+        return $parts === false ? null : $parts;
+    }
+
+    /**
+     * True when an answer names its scopes and the one that allows posting
+     * (`publish_scope` in the settings) is not among them. An answer that
+     * names no scopes proves nothing either way and is let through: a token
+     * that cannot post is then found out by the first publish, which answers
+     * 403 and marks the channel.
+     *
+     * @param  list<string>|null  $granted
+     */
+    private function lacksPublishScope(?array $granted): bool
+    {
+        $needed = $this->setting('publish_scope');
+
+        return $granted !== null && $needed !== '' && ! in_array($needed, $granted, true);
     }
 
     /**
@@ -501,7 +541,7 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
             }
         }
 
-        if (preg_match('/^\d{6}$/', $this->setting('api_version')) !== 1) {
+        if (preg_match('/^\d{6}\z/', $this->setting('api_version')) !== 1) {
             throw $failure::permanent(self::PLATFORM, 'LinkedIn is not configured correctly on this instance: LINKEDIN_API_VERSION must be a version in the form YYYYMM.');
         }
     }

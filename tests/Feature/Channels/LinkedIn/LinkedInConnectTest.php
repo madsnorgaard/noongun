@@ -40,7 +40,8 @@ it('is configured in the shipped configuration, next to facebook', function () {
     expect(array_keys($shipped['channels']))->toBe(['facebook', 'linkedin'])
         ->and($shipped['channels']['linkedin']['adapter'])->toBe(LinkedInAdapter::class)
         ->and($shipped['channels']['linkedin']['scopes'])->toBe(['openid', 'profile', 'w_member_social'])
-        ->and($shipped['channels']['linkedin']['scopes'])->not->toContain('email');
+        ->and($shipped['channels']['linkedin']['scopes'])->not->toContain('email')
+        ->and($shipped['channels']['linkedin']['publish_scope'])->toBe('w_member_social');
 });
 
 it('describes what a LinkedIn post accepts', function () {
@@ -281,22 +282,69 @@ describe('connect', function () {
             expect($exception->retryable)->toBeFalse()
                 // A refused sign-in says nothing about a stored token.
                 ->and($exception->requiresReconnect)->toBeFalse()
-                ->and($exception->getMessage())->toContain('LinkedIn refused the sign-in.')->toContain('authorization code not found')
-                ->and($exception->context())->toMatchArray(['endpoint' => 'POST /oauth/v2/accessToken', 'http_status' => 401, 'code' => 'invalid_request']);
+                // In plain words with a next step. What LinkedIn said is
+                // kept for the log and is not in the message.
+                ->and($exception->getMessage())->toContain('LinkedIn refused the sign-in.')->toContain('Start again from the Channels page')
+                ->and($exception->getMessage())->not->toContain('authorization code')->not->toContain('invalid_request')
+                ->and($exception->context())->toMatchArray([
+                    'endpoint' => 'POST /oauth/v2/accessToken',
+                    'http_status' => 401,
+                    'code' => 'invalid_request',
+                    'platform_message' => 'Unable to retrieve access token: authorization code not found',
+                ]);
         }
 
         Http::assertSentCount(1);
         expect(DB::table('channels')->count())->toBe(0);
     });
 
-    it('saves nothing when a needed permission was not granted, and says which', function () {
+    it('saves nothing when the answer names its scopes and the one for posting is not among them', function () {
         fakeLinkedIn(['token' => 'oauth_token_missing_scope']);
 
-        expect(fn () => ($this->connect)())->toThrow(ChannelException::class, 'w_member_social');
+        try {
+            ($this->connect)();
+            $this->fail('Expected a ChannelException.');
+        } catch (ChannelException $exception) {
+            // Says what to do, without the name of a scope.
+            expect($exception->getMessage())->toContain('permission to post')->toContain('Share on LinkedIn')
+                ->not->toContain('w_member_social')
+                ->and($exception->context())->toMatchArray(['missing_scope' => 'w_member_social', 'granted_scopes' => ['openid', 'profile']]);
+        }
 
         // The member is not even asked for: the token is dropped.
         Http::assertSentCount(1);
         expect(DB::table('channels')->count())->toBe(0);
+    });
+
+    it('connects when the answer lists only the scope for posting, because userinfo proves the other two', function () {
+        fakeLinkedIn(['token' => Http::response([...linkedInFixture('oauth_token'), 'scope' => 'w_member_social'])]);
+
+        $channel = ($this->connect)()->sole();
+
+        expect($channel->scopes)->toBe(['w_member_social'])
+            ->and($channel->external_id)->toBe(LINKEDIN_TEST_MEMBER);
+
+        Http::assertSentCount(2);
+    });
+
+    it('connects when the answer names no scopes at all', function (array $answer) {
+        fakeLinkedIn(['token' => Http::response(['access_token' => LINKEDIN_TEST_TOKEN, 'expires_in' => 5184000, ...$answer])]);
+
+        $channel = ($this->connect)()->sole();
+
+        expect($channel->scopes)->toBe([])
+            ->and($channel->access_token)->toBe(LINKEDIN_TEST_TOKEN);
+    })->with([
+        'no scope field' => [[]],
+        'an empty scope field' => [['scope' => '']],
+        'a scope field that is not text' => [['scope' => ['w_member_social']]],
+    ]);
+
+    it('takes the scope for posting from the settings', function () {
+        configureLinkedIn(['publish_scope' => 'w_something_else']);
+        fakeLinkedIn();
+
+        expect(fn () => ($this->connect)())->toThrow(ChannelException::class, 'permission to post');
     });
 
     it('reads granted scopes whether they are separated by spaces or commas', function () {
@@ -308,7 +356,7 @@ describe('connect', function () {
     it('saves nothing when the answer holds no access token', function () {
         fakeLinkedIn(['token' => Http::response(['expires_in' => 5184000, 'scope' => 'openid profile w_member_social'])]);
 
-        expect(fn () => ($this->connect)())->toThrow(ChannelException::class, 'without an access token');
+        expect(fn () => ($this->connect)())->toThrow(ChannelException::class, 'without giving access');
         expect(DB::table('channels')->count())->toBe(0);
     });
 
@@ -316,7 +364,7 @@ describe('connect', function () {
         fakeLinkedIn(['userinfo' => Http::response($profile)]);
 
         if ($name === null) {
-            expect(fn () => ($this->connect)())->toThrow(ChannelException::class, 'did not say which member');
+            expect(fn () => ($this->connect)())->toThrow(ChannelException::class, 'did not say who signed in');
             expect(DB::table('channels')->count())->toBe(0);
 
             return;
@@ -327,6 +375,7 @@ describe('connect', function () {
         'no sub' => [['name' => 'Someone'], null],
         'a sub that would change the URN' => [['sub' => 'abc:def)', 'name' => 'Someone'], null],
         'a sub that is not text' => [['sub' => ['abc'], 'name' => 'Someone'], null],
+        'a sub that ends in a line break' => [['sub' => "abc123\n", 'name' => 'Someone'], null],
         'no name: built from its parts' => [['sub' => 'abc123', 'given_name' => 'Thandi', 'family_name' => 'Mokoena'], 'Thandi Mokoena'],
         'no name at all' => [['sub' => 'abc123'], 'LinkedIn member'],
         'a name that is not text' => [['sub' => 'abc123', 'name' => ['<script>']], 'LinkedIn member'],

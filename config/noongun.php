@@ -111,6 +111,9 @@ return [
                 trim(...),
                 explode(',', (string) env('LINKEDIN_SCOPES', 'openid,profile,w_member_social')),
             ))),
+            // The one scope that allows posting. A sign-in whose answer
+            // names its scopes without this one is refused.
+            'publish_scope' => 'w_member_social',
             // Longest post text in characters. The Posts API documentation
             // names no number; this is the limit of the LinkedIn composer.
             'max_body_length' => 3000,
