@@ -10,7 +10,8 @@ use Illuminate\Validation\Rule;
 
 /**
  * One time of day on one or more weekdays for one channel. The time is on
- * the clock of the workspace and is stored as it is given (ADR 0011).
+ * the clock of the workspace and is stored as it is given (ADR 0011). What
+ * happens to a time the clocks skip or repeat is in ADR 0010.
  */
 class StoreSlotRequest extends FormRequest
 {

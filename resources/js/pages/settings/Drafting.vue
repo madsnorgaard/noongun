@@ -5,6 +5,7 @@ import LlmKeyController from '@/actions/App/Http/Controllers/Settings/LlmKeyCont
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
 import PasswordInput from '@/components/PasswordInput.vue';
+import TextLink from '@/components/TextLink.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -16,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { formatDateTime } from '@/lib/posts';
+import { create as proposeWeek } from '@/routes/proposals';
 
 defineOptions({
     layout: {
@@ -113,6 +115,12 @@ function remove(): void {
                 {{ available ? 'Available' : 'Not available' }}
             </span>
             <p class="max-w-[72ch] text-base">{{ explanation }}</p>
+            <p v-if="available" class="max-w-[72ch] text-base">
+                With a brief and slots in place, owners and editors can
+                <TextLink :href="proposeWeek()" data-test="propose-week"
+                    >propose a week</TextLink
+                >.
+            </p>
         </div>
 
         <dl

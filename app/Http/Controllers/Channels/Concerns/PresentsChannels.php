@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Channels\Concerns;
 
 use App\Domain\Channels\Models\Channel;
-use Illuminate\Support\Str;
+use App\Http\Presenters\PlatformLabel;
 use Inertia\Inertia;
 
 trait PresentsChannels
@@ -33,7 +33,7 @@ trait PresentsChannels
 
     protected function platformLabel(string $platform): string
     {
-        return Str::headline($platform);
+        return PlatformLabel::for($platform);
     }
 
     /**

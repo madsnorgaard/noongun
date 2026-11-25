@@ -27,7 +27,7 @@ use InvalidArgumentException;
  * wall-clock time in the workspace timezone, "09:00", and is the one time
  * in the application that is not stored in UTC: a slot is a habit ("Tuesdays
  * at nine"), not an instant, and it must stay at nine when the clocks
- * change. occurrenceInWeekOf() and nextOccurrence() turn it into the UTC
+ * change (ADR 0011). occurrenceInWeekOf() and nextOccurrence() turn it into the UTC
  * instant that goes into posts.scheduled_at, through Workspace::toUtc(), so
  * a time the clocks skip or repeat is handled as described in ADR 0010.
  *

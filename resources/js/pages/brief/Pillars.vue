@@ -158,7 +158,7 @@ const consequence = computed(() => {
                     one gets when a week is proposed.
                 </p>
             </div>
-            <BriefTabs current="pillars" />
+            <BriefTabs current="pillars" :can-propose="can.manage" />
         </header>
 
         <section

@@ -56,27 +56,22 @@ class BriefController extends Controller
 
     public function update(SaveBriefRequest $request, SaveBrief $save): RedirectResponse
     {
-        $title = $request->briefTitle();
-        $body = $request->briefBody();
-        $voiceRules = $request->voiceRules();
-        $callsToAction = $request->callsToAction();
-
-        $current = Brief::current();
-
         // A save that changes nothing would only add a copy to the history.
-        if ($current !== null
-            && $current->title === $title
-            && $current->body === $body
-            && $current->voice_rules->toArray() === $voiceRules->toArray()
-            && $current->calls_to_action === $callsToAction) {
-            $this->toast('info', __('Nothing changed. Version :version is still the current one.', ['version' => $current->version]));
+        // SaveBrief decides that under the lock it saves under.
+        $brief = $save->handle(
+            $this->actor($request),
+            $request->briefTitle(),
+            $request->briefBody(),
+            $request->voiceRules(),
+            $request->callsToAction(),
+            onlyIfChanged: true,
+        );
 
-            return to_route('brief.edit');
+        if ($brief->wasRecentlyCreated) {
+            $this->toast('success', __('The brief is saved as version :version. The next posts are drafted from it.', ['version' => $brief->version]));
+        } else {
+            $this->toast('info', __('Nothing changed. Version :version is still the current one.', ['version' => $brief->version]));
         }
-
-        $brief = $save->handle($this->actor($request), $title, $body, $voiceRules, $callsToAction);
-
-        $this->toast('success', __('The brief is saved as version :version. The next drafts are written from it.', ['version' => $brief->version]));
 
         return to_route('brief.edit');
     }

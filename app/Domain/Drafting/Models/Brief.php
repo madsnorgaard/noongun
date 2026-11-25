@@ -6,6 +6,8 @@ use App\Domain\Drafting\Casts\AsVoiceRules;
 use App\Domain\Drafting\Exceptions\DraftingStateConflict;
 use App\Domain\Drafting\VoiceRules;
 use App\Domain\Workspaces\Concerns\BelongsToWorkspace;
+use App\Domain\Workspaces\CurrentWorkspace;
+use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Policies\ContentPolicy;
 use App\Models\User;
 use Carbon\CarbonImmutable;
@@ -108,15 +110,31 @@ class Brief extends Model
 
     /**
      * Saves the brief as a new version and makes it the current one. The
-     * rows of the workspace are locked first, so two saves at the same time
-     * get two version numbers, one after the other.
+     * row of the workspace is locked first, so two saves at the same time
+     * get two version numbers, one after the other, also when they are the
+     * first two: there is no brief row to lock before the first save.
+     *
+     * With $onlyIfChanged, a save that is the same as the current version
+     * adds nothing and returns that version. The comparison is made under
+     * the lock, so of two identical saves at the same time one adds a
+     * version and the other finds it. wasRecentlyCreated tells them apart.
      *
      * @param  array<array-key, mixed>  $callsToAction  entries of ['text' => ..., 'url' => ...]; entries without a text are dropped
      */
-    public static function saveNewVersion(string $title, string $body, VoiceRules $voiceRules, array $callsToAction = [], ?User $author = null): self
+    public static function saveNewVersion(string $title, string $body, VoiceRules $voiceRules, array $callsToAction = [], ?User $author = null, bool $onlyIfChanged = false): self
     {
-        return DB::transaction(function () use ($title, $body, $voiceRules, $callsToAction, $author): self {
-            static::query()->lockForUpdate()->pluck('id');
+        return DB::transaction(function () use ($title, $body, $voiceRules, $callsToAction, $author, $onlyIfChanged): self {
+            Workspace::query()->lockForUpdate()->findOrFail(app(CurrentWorkspace::class)->getOrFail()->id);
+
+            $current = $onlyIfChanged ? static::current() : null;
+
+            if ($current !== null
+                && $current->title === $title
+                && $current->body === $body
+                && $current->voice_rules->toArray() === $voiceRules->toArray()
+                && $current->calls_to_action === self::cleanCallsToAction($callsToAction)) {
+                return $current;
+            }
 
             $brief = new self([
                 'title' => $title,
