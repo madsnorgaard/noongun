@@ -48,3 +48,9 @@ The development stack no longer publishes the web port on every interface.
 bare port in an existing `.env` is still published on every interface, because
 Compose cannot tell a port from an address and a port inside one variable.
 Change it to `127.0.0.1:<port>` by hand.
+
+A trusted proxy is now trusted for `X-Forwarded-For` and `X-Forwarded-Proto`
+only. The host comes from the `Host` header, which the proxy must pass on, and
+outside the `local` environment it must be the host of `APP_URL` or a loopback
+name. A proxy that could set the host through `X-Forwarded-Host` could point
+password reset links and OAuth redirect addresses at another site.

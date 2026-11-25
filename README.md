@@ -228,11 +228,23 @@ proxy works the same way.
 
 5. Open `APP_URL` and complete the setup screen.
 
-`NOONGUN_TRUSTED_PROXIES` lists the proxies whose `X-Forwarded-*` headers the app
-trusts. Without it the app sees plain HTTP behind the proxy and builds `http://`
-links and redirects. A request from a proxy on the host arrives from the Docker
-network gateway, which is why the value above names the private ranges Docker
-uses. Leave it empty when no proxy is in front of the app.
+`NOONGUN_TRUSTED_PROXIES` lists the proxies whose `X-Forwarded-For` and
+`X-Forwarded-Proto` headers the app trusts. Without it the app sees plain HTTP
+behind the proxy and builds `http://` links and redirects. A request from a
+proxy on the host arrives from the Docker network gateway, which is why the
+value above names the private ranges Docker uses. Leave it empty when no proxy
+is in front of the app.
+
+The app never reads the host name from `X-Forwarded-Host` or the port from
+`X-Forwarded-Port`. It uses the `Host` header, so the proxy must pass that
+header on unchanged. `tailscale serve` and Caddy do. nginx needs
+`proxy_set_header Host $host;`.
+
+Outside the `local` environment the app only answers requests whose host is the
+host of `APP_URL`, or `localhost`, `127.0.0.1` or `[::1]`, which the container
+health check uses. A request for any other host gets a 400 response. If every
+page answers 400 after an update, `APP_URL` does not match the address in the
+browser, or the proxy rewrites the `Host` header.
 
 To update, pull and rebuild. Migrations run when the `app` container starts.
 
@@ -261,11 +273,11 @@ Do not change `APP_KEY` on an instance that has data.
 | `NOONGUN_HTTP_PORT` | `127.0.0.1:8080` | Where the web app is published on the host, as `address:port`. Keep the port of `APP_URL` in step. A bare port, for example `8080`, is published on every network interface; an `.env` from before this default still has that form. |
 | `NOONGUN_VITE_PORT` | `5173` | Host port for `./dev vite`. |
 | `NOONGUN_AUTO_MIGRATE` | `true` | Run migrations when the `app` container starts. |
-| `NOONGUN_TRUSTED_PROXIES` | empty | Reverse proxies whose forwarded headers are trusted: comma separated addresses or CIDR ranges, or `*`. |
+| `NOONGUN_TRUSTED_PROXIES` | empty | Reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are trusted: comma separated addresses or CIDR ranges, or `*`. |
 | `NOONGUN_OPERATOR_EMAILS` | empty | Who may open the Horizon dashboard at `/horizon`: email addresses of accounts with a verified address, comma separated. Empty: the owners of the first workspace in `self_hosted` mode, nobody in `saas` mode. The rule applies in every environment, including `local`. |
 | `NOONGUN_DEFAULT_TIMEZONE` | `Europe/Copenhagen` | Preselected timezone on the setup screen if the browser timezone is unknown. |
 | `NOONGUN_UID`, `NOONGUN_GID` | `1000` | User and group the containers run as. |
-| `APP_URL` | `http://localhost:8080` | Public address of the app. |
+| `APP_URL` | `http://localhost:8080` | Public address of the app. Outside the `local` environment its host is the only one the app answers to, besides the loopback names. |
 | `DB_*` | `pgsql`, host `postgres` | Database connection. The compose file uses the same values to create the database. |
 | `REDIS_HOST` | `redis` | Redis host. |
 | `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` | empty | Credentials of the Meta app this instance connects Pages with. |

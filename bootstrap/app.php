@@ -4,6 +4,7 @@ use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RedirectToFirstRunSetup;
 use App\Http\Middleware\ResolveCurrentWorkspace;
+use App\Support\TrustedHosts;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -26,6 +27,9 @@ return Application::configure(basePath: dirname(__DIR__))
             before: AuthenticatesRequests::class,
             prepend: RedirectToFirstRunSetup::class,
         );
+
+        $middleware->trustProxies(headers: Request::HEADER_X_FORWARDED_FOR | Request::HEADER_X_FORWARDED_PROTO);
+        $middleware->trustHosts(at: TrustedHosts::patterns(...), subdomains: false);
 
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
