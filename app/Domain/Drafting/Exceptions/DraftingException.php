@@ -29,6 +29,14 @@ class DraftingException extends RuntimeException
 {
     public const REDACTED = ChannelException::REDACTED;
 
+    /**
+     * Context key for what the operator of the instance needs to put the
+     * failure right: a setting to change, what the provider said. It is
+     * redacted like all context and goes to the log. It is never part of
+     * the message, which every member of the workspace reads.
+     */
+    public const OPERATOR_DETAIL = 'operator_detail';
+
     private const SENSITIVE_KEY = '/token(?!s)|secret|password|authorization|cookie|signature|api[_-]?key|credential/i';
 
     /** A key header as an HTTP client prints it. */
@@ -92,6 +100,13 @@ class DraftingException extends RuntimeException
             'usage' => $this->usage?->toArray(),
             ...$this->context,
         ];
+    }
+
+    public function operatorDetail(): ?string
+    {
+        $detail = $this->context[self::OPERATOR_DETAIL] ?? null;
+
+        return is_string($detail) && $detail !== '' ? $detail : null;
     }
 
     /**

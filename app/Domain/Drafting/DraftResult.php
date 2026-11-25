@@ -3,6 +3,7 @@
 namespace App\Domain\Drafting;
 
 use App\Domain\Drafting\Exceptions\InvalidDraftOutput;
+use Illuminate\Support\Str;
 
 /**
  * One generated post: a text for each requested channel, a link, alternative
@@ -62,15 +63,16 @@ final readonly class DraftResult
         foreach ($data['variants'] as $variant) {
             $channel = $request->channel($variant['channel_id']);
             $body = trim($variant['body']);
+            $name = $channel === null ? '' : self::nameOf($channel);
 
             if ($channel === null) {
                 $problems[] = 'There is a text for a channel that was not asked for.';
             } elseif (isset($bodies[$channel->channelId])) {
-                $problems[] = "There is more than one text for channel {$channel->channelId}.";
+                $problems[] = "There is more than one text for {$name}.";
             } elseif ($body === '') {
-                $problems[] = "The text for channel {$channel->channelId} is empty.";
+                $problems[] = "The text for {$name} is empty.";
             } elseif (! $channel->capabilities->fits($body)) {
-                $problems[] = "The text for channel {$channel->channelId} is ".mb_strlen($body)." characters long. The limit is {$channel->capabilities->maxBodyLength}.";
+                $problems[] = "The text for {$name} is ".mb_strlen($body)." characters long. The limit is {$channel->capabilities->maxBodyLength}.";
             }
 
             if ($channel !== null) {
@@ -78,9 +80,9 @@ final readonly class DraftResult
             }
         }
 
-        foreach ($request->channelIds() as $channelId) {
-            if (! isset($bodies[$channelId])) {
-                $problems[] = "There is no text for channel {$channelId}.";
+        foreach ($request->channels as $channel) {
+            if (! isset($bodies[$channel->channelId])) {
+                $problems[] = 'There is no text for '.self::nameOf($channel).'.';
             }
         }
 
@@ -132,6 +134,15 @@ final readonly class DraftResult
         }
 
         return $variants;
+    }
+
+    /**
+     * A channel as a reader knows it: by its platform. The request holds no
+     * channel names by design, and an id means nothing to a person.
+     */
+    private static function nameOf(TargetChannel $channel): string
+    {
+        return Str::headline($channel->platform);
     }
 
     private static function optional(?string $value): ?string

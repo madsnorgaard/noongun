@@ -237,13 +237,22 @@ request can succeed later.
 |---|---|---|
 | `Stop`, `Other`, `Unknown` | `end_turn`, `stop_sequence`, one Prism does not know | validates the answer |
 | `Refusal`, `ContentFilter` | `refusal` | fails at once, permanent. The category from `stop_details` goes into the context, the explanation is not used |
-| `Length` | `max_tokens`, `model_context_window_exceeded` | fails at once, permanent, and names `NOONGUN_DRAFT_MAX_TOKENS` |
+| `Length` | `max_tokens`, `model_context_window_exceeded` | fails at once, permanent. The member reads a plain sentence; the limit and `NOONGUN_DRAFT_MAX_TOKENS` are in the operator detail |
 | `ToolCalls`, `Pause`, `Error` | `tool_use`, `pause_turn` | fails at once, permanent. Cannot happen without tools; handled so that it is visible if it does |
 
 A cut off answer is **not** asked for again, unlike what section 8 above says:
 the same request against the same limit ends the same way and costs a full
 answer. The second request is for answers that finished and do not pass
 `DraftResult::fromArray()`.
+
+The message of a failure is stored on the run and read by every member of the
+workspace, so it names no setting, model, status code or error type. What the
+operator needs (the setting to change, the model that was asked for, what the
+provider said) is in the context under `operator_detail`
+(`DraftingException::OPERATOR_DETAIL`, read with `operatorDetail()`). It is
+redacted like all context and is meant for the log, not for a page. Validation
+problems name a channel by its platform ("The text for Facebook is ..."),
+never by its id.
 
 Two answers in a row that are empty (`structured` is `null` or `[]`, which is
 also what broken JSON becomes) are reported as `DraftGenerationFailed` with a

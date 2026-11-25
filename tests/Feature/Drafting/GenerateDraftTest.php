@@ -297,7 +297,7 @@ describe('GenerateDraft', function () {
         });
 
         expect($run->status)->toBe(DraftRunStatus::Failed)
-            ->and($run->failure_reason)->toContain("There is no text for channel {$this->facebook->id}.")
+            ->and($run->failure_reason)->toContain('There is no text for Facebook.')
             ->and($run->input_tokens)->toBe(1200)
             ->and($run->cost_estimate)->toBe('0.005400')
             ->and(DB::table('posts')->count())->toBe(0);
@@ -329,7 +329,7 @@ describe('GenerateDraft', function () {
         });
 
         expect($run->status)->toBe(DraftRunStatus::Failed)
-            ->and($run->failure_reason)->toContain('No API key is set for [fake]');
+            ->and($run->failure_reason)->toContain('No API key is set for Fake.');
 
         $this->generator->assertNothingGenerated();
     });

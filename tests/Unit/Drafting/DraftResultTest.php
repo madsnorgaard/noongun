@@ -109,11 +109,11 @@ describe('the result', function () {
                 expect($failure->problems())->toContain($problem);
             });
     })->with([
-        'a channel is missing' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => 'Text.']]], 'There is no text for channel 2.'],
+        'a channel is missing' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => 'Text.']]], 'There is no text for Facebook.'],
         'a channel that was not asked for' => [[...validOutput(), 'variants' => [...validOutput()['variants'], ['channel_id' => 9, 'body' => 'Text.']]], 'There is a text for a channel that was not asked for.'],
-        'a channel twice' => [[...validOutput(), 'variants' => [...validOutput()['variants'], ['channel_id' => 1, 'body' => 'Again.']]], 'There is more than one text for channel 1.'],
-        'an empty text' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => "  \n"], ['channel_id' => 2, 'body' => 'Text.']]], 'The text for channel 1 is empty.'],
-        'a text that is too long' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => str_repeat('a', 41)], ['channel_id' => 2, 'body' => 'Text.']]], 'The text for channel 1 is 41 characters long. The limit is 40.'],
+        'a channel twice' => [[...validOutput(), 'variants' => [...validOutput()['variants'], ['channel_id' => 1, 'body' => 'Again.']]], 'There is more than one text for Facebook.'],
+        'an empty text' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => "  \n"], ['channel_id' => 2, 'body' => 'Text.']]], 'The text for Facebook is empty.'],
+        'a text that is too long' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => str_repeat('a', 41)], ['channel_id' => 2, 'body' => 'Text.']]], 'The text for Facebook is 41 characters long. The limit is 40.'],
         'an empty rationale' => [[...validOutput(), 'rationale' => '  '], 'The rationale is empty.'],
     ]);
 
@@ -183,6 +183,16 @@ describe('the result', function () {
 
         expect($result->link)->toBeNull()->and($result->linkDropped)->toBeTrue();
     })->with(['none' => [null], 'a script' => ['javascript:alert(1)'], 'a file' => ['file:///etc/passwd']]);
+
+    it('names a channel by its platform, never by its id', function () {
+        $request = plainDraftRequest(1, maxBodyLength: 40, platform: 'linkedin');
+        $output = ['variants' => [['channel_id' => 1, 'body' => str_repeat('a', 41)]], 'link' => null, 'alt_text' => null, 'rationale' => 'Why.'];
+
+        expect(fn () => DraftResult::fromArray($output, $request, new DraftUsage('fake', 'fake-model', 1, 1)))
+            ->toThrow(function (InvalidDraftOutput $failure) {
+                expect($failure->getMessage())->toContain('The text for Linkedin is 41 characters long.')->not->toContain('channel 1');
+            });
+    });
 
     it('counts characters, not bytes, against the limit', function () {
         $request = plainDraftRequest(1, maxBodyLength: 5);
