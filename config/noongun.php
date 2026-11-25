@@ -121,7 +121,9 @@ return [
     | "max_tokens" limits one answer, including the tokens a model spends on
     | thinking. "timeout" is the limit in seconds for one call.
     | "prompt_version" names a folder under resources/prompts/draft/ and is
-    | stored on every draft run.
+    | stored on every draft run. "effort" of a provider is how much work the
+    | model puts into one answer (low, medium, high and so on); empty leaves
+    | it to the provider's default.
     |
     | "prices" is in "currency" per million tokens, per provider and model,
     | and is only used to estimate the cost of a run. NOONGUN_DRAFT_PRICES
@@ -142,6 +144,7 @@ return [
                 'generator' => 'App\\Domain\\Drafting\\Generators\\PrismDraftGenerator',
                 'api_key' => env('ANTHROPIC_API_KEY'),
                 'model' => env('NOONGUN_DRAFT_ANTHROPIC_MODEL', 'claude-opus-5-5'),
+                'effort' => env('NOONGUN_DRAFT_ANTHROPIC_EFFORT'),
             ],
         ],
 

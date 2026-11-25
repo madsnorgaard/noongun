@@ -167,6 +167,122 @@ in Noon Gun never deletes anything from a platform. See
 
 Owners and editors write, approve, schedule and delete. Viewers can look.
 
+## Drafting with an LLM
+
+Noon Gun can write drafts from the brief of a workspace with a language model.
+A generated post is a draft like one you typed: nothing is approved, scheduled
+or published until a person does so. Drafting is optional. Without an API key
+the rest of the application works as before.
+
+### The key
+
+Drafting needs an API key of the provider, which is Anthropic unless you
+configure another one. There are two places for a key:
+
+- **The instance key** is set by the operator as `ANTHROPIC_API_KEY` in `.env`.
+  Every workspace that has no key of its own uses it, and the operator's
+  account is billed.
+- **A workspace key** is stored by an owner of the workspace under Settings,
+  Drafting. It goes before the instance key, and the account it belongs to is
+  billed. Removing it puts the workspace back on the instance key.
+
+A workspace key is stored encrypted with `APP_KEY` and is write-only: after it
+is saved, the page shows the provider, the last four characters, when it was
+stored and whose key drafting uses, and never the key. Editors and viewers see
+whether drafting is available and nothing about keys. Each draft run records
+whether the instance key or the workspace key paid for it.
+
+To create a key, sign in to the Claude Console at `platform.claude.com`, add
+credit to the account and create an API key. Set a spending limit for the
+account there: Noon Gun estimates cost, it does not cap what the provider
+charges.
+
+### Settings
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `ANTHROPIC_API_KEY` | empty | The instance key. |
+| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The provider. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The model. |
+| `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
+| `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
+| `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | The folder under `resources/prompts/draft/` that holds the prompt. |
+| `NOONGUN_DRAFT_PRICES`, `NOONGUN_DRAFT_PRICE_CURRENCY` | empty, `USD` | The price table for the cost estimate. |
+
+### What is sent to the provider
+
+One request is sent for each post. It holds the prompt and the format the
+answer must have, and nothing else: no tools, no files, no earlier
+conversation. The prompt is built in one place
+(`App\Domain\Drafting\PromptRenderer`) from:
+
+- the title and text of the brief, its voice rules and its calls to action;
+- the name and description of the pillar, and the title and notes of the idea,
+  when the draft is asked for from one;
+- a source address, when one is given. The address is sent as text. Noon Gun
+  does not open it, and neither does the model;
+- for each target channel its number, its platform and the limits of that
+  platform, such as the longest text.
+
+Never sent: platform tokens, API keys, the names of your Pages and profiles,
+the name of the workspace, names or email addresses of users, and anything
+that belongs to another workspace. The API
+key travels in a request header to the provider and nowhere else. It is not
+written to logs, error messages, the queue or the draft run.
+
+What the provider does with a request is set by its own terms. Do not put into
+the brief what you would not send to it.
+
+### What comes back
+
+The model answers in a fixed format: one text for each channel, at most one
+link, a suggestion for alternative text and one line on why the post fits. The
+answer is treated as data. It is checked (a text for each channel that was
+asked for and for no other, no text over the limit of its platform, a link
+that is an http or https address), stored as plain text and shown as plain
+text. Nothing in it is followed, opened or run.
+
+When an answer does not pass the check, the model is asked once more. After a
+second answer that cannot be used the run fails and says why. A run also fails,
+without a second request, when the model declines to write the post or the
+answer is cut off at `NOONGUN_DRAFT_MAX_TOKENS`. A rate limit, an overloaded
+provider, a provider error and a timeout are reported as failures that can be
+tried again.
+
+### Cost
+
+Each draft run stores the tokens the provider reported and a cost estimate:
+tokens times the price per million tokens in `drafting.prices` of
+`config/noongun.php`, in `NOONGUN_DRAFT_PRICE_CURRENCY`. A run that needed a
+second request counts both. A failed run keeps the tokens it used.
+
+It is an estimate, not an invoice. It leaves out anything the provider bills
+that is not an input or output token, and it is as good as the price table.
+The built-in prices were checked against Anthropic's price list on 2026-11-25.
+Prices change: check them when you change the model, and add or replace
+entries with `NOONGUN_DRAFT_PRICES`. A model without a price gives runs with
+tokens and no estimate.
+
+### Changing the model
+
+Set `NOONGUN_DRAFT_ANTHROPIC_MODEL` to the identifier of another Claude model
+and restart the containers. If the model is not in the price table, add its
+price with `NOONGUN_DRAFT_PRICES`:
+
+```
+NOONGUN_DRAFT_ANTHROPIC_MODEL=claude-sonnet-5-5
+NOONGUN_DRAFT_PRICES={"anthropic":{"claude-sonnet-5-5":{"input":2,"output":10}}}
+```
+
+The model must support structured outputs. A smaller model is cheaper and
+faster and writes plainer drafts. Thinking counts against
+`NOONGUN_DRAFT_MAX_TOKENS`, so if answers are cut off, raise that limit or set
+a lower `NOONGUN_DRAFT_ANTHROPIC_EFFORT`. To change what the model is told,
+copy `resources/prompts/draft/v1` to a new folder, edit it and point
+`NOONGUN_DRAFT_PROMPT_VERSION` at it. Details are in
+`docs/platform-notes/llm.md` and `docs/adr/0011-drafting-contract.md`.
+
 ## Running on a home server
 
 `./setup` gives a development stack: it mounts the source code and runs in debug
@@ -274,6 +390,7 @@ Do not change `APP_KEY` on an instance that has data.
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
 | `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider drafts are generated with. Must be listed under `drafting.providers` in `config/noongun.php`. |
 | `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The Claude model drafts are generated with. |
+| `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call to the provider. |
 | `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |

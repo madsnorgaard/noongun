@@ -49,6 +49,17 @@ final class DraftingConfig
         return self::string("providers.{$provider}.api_key");
     }
 
+    /**
+     * How much effort the model spends on one answer, for providers that
+     * take such a setting. Null leaves it to the provider's default.
+     */
+    public static function effort(string $provider): ?string
+    {
+        $effort = self::string("providers.{$provider}.effort");
+
+        return $effort !== null && preg_match('/^[a-z]{1,16}$/', $effort) === 1 ? $effort : null;
+    }
+
     public static function maxTokens(): int
     {
         return self::int('max_tokens', 16000, 256);

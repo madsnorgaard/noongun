@@ -173,3 +173,159 @@ Model behaviour that affects the generator (Anthropic documentation):
   `DraftSchema` before it is offered. Only `anthropic` is configured.
 - Nothing in the brief conflicts with Prism's licence (MIT) or with how keys are
   passed.
+
+## 2026-11-25 - building `PrismDraftGenerator`
+
+Read from the installed package (v0.103.0) while writing the generator, and
+checked against Anthropic's documentation on platform.claude.com the same day.
+Where this differs from the entry above, this is the newer finding.
+
+### 1. The call as built
+
+```php
+Prism::structured()
+    ->using($context->provider, $context->model, ['api_key' => $context->key->reveal()])
+    ->withSchema(new RawSchema(DraftSchema::NAME, DraftSchema::definition()))
+    ->withSystemPrompt($prompt->system)
+    ->withPrompt($prompt->user)
+    ->withMaxTokens($context->maxTokens)
+    ->withClientOptions(['timeout' => $context->timeoutSeconds])
+    ->withProviderOptions(['effort' => $effort])   // only when an effort is configured
+    ->asStructured();
+```
+
+Read from the response: `structured`, `finishReason`, `usage->promptTokens`,
+`usage->completionTokens`, `meta->model` and
+`additionalContent['stop_details']['category']`.
+
+- `using()` resolves the provider at once, so it can throw
+  (`InvalidArgumentException` for a provider Prism does not know). It is inside
+  the same `try` as the call.
+- Prism does not retry by itself: `clientRetry` is `[0]` unless
+  `withClientRetry()` is called. We do not call it. Trying again later is the
+  caller's decision, from `DraftGenerationFailed::retryable`.
+- Nothing else is set: no tools, no provider tools, no messages besides the one
+  user prompt, no temperature. A test asserts the whole request.
+
+### 2. Errors, corrected
+
+The table in section 5 above is incomplete. What the Anthropic provider throws
+(`src/Providers/Anthropic/Anthropic.php`, `Concerns/HandlesHttpRequests.php`):
+
+| What happens | What Prism throws | How the generator reports it |
+|---|---|---|
+| HTTP 429 | `PrismRateLimitedException`, `retryAfter` from the header | retryable |
+| HTTP 529 | `PrismProviderOverloadedException` | retryable |
+| HTTP 413 | `PrismRequestTooLargeException` | permanent |
+| Any other HTTP error | `PrismException`, message `Anthropic Error [status]: type - message`, the status as `getCode()`, **the HTTP exception as `$previous`** | 5xx retryable; 401, 403, 404 and billing with a message of our own; other 4xx permanent with the provider's message |
+| HTTP 200 with an error body | `PrismException`, message `Anthropic Error: [type] message`, no status | `overloaded_error`, `rate_limit_error`, `api_error` and `timeout_error` retryable, others permanent |
+| Timeout, connection failure | Laravel's `ConnectionException` | retryable |
+| Anything else | any `Throwable` | permanent, with the class name only |
+
+The fourth row is why a vendor exception is never passed on: its `$previous`
+holds the request, and the request holds the `x-api-key` header. The provider's
+message is kept for a 4xx, passed through `DraftingException::redact()` with the
+key as a secret, and cut to 300 characters.
+
+A 5xx and a connection failure are reported as retryable, next to the rate limit
+and the overload. They are faults of the provider or the network, and the same
+request can succeed later.
+
+### 3. Answers that are not a draft
+
+| `finishReason` | Anthropic `stop_reason` | What the generator does |
+|---|---|---|
+| `Stop`, `Other`, `Unknown` | `end_turn`, `stop_sequence`, one Prism does not know | validates the answer |
+| `Refusal`, `ContentFilter` | `refusal` | fails at once, permanent. The category from `stop_details` goes into the context, the explanation is not used |
+| `Length` | `max_tokens`, `model_context_window_exceeded` | fails at once, permanent, and names `NOONGUN_DRAFT_MAX_TOKENS` |
+| `ToolCalls`, `Pause`, `Error` | `tool_use`, `pause_turn` | fails at once, permanent. Cannot happen without tools; handled so that it is visible if it does |
+
+A cut off answer is **not** asked for again, unlike what section 8 above says:
+the same request against the same limit ends the same way and costs a full
+answer. The second request is for answers that finished and do not pass
+`DraftResult::fromArray()`.
+
+Two answers in a row that are empty (`structured` is `null` or `[]`, which is
+also what broken JSON becomes) are reported as `DraftGenerationFailed` with a
+message of their own, not as `InvalidDraftOutput` with a list of missing fields.
+
+Usage is summed over both attempts whatever the outcome, and a failure of the
+second call keeps the usage of the first.
+
+### 4. What the answer can reach
+
+The output is untrusted. Followed through the code on 2026-11-25:
+
+- `variants[].body`, `alt_text`, `rationale`: stored as text. No page prints
+  post text with `v-html`; Vue's text interpolation escapes it. A page that
+  shows the rationale or the alternative text must do the same.
+- `link`: must be http or https (`DraftResult`), and the page builds the `href`
+  through `webAddress()`, which checks the scheme again. The server never opens
+  the address; the Facebook adapter passes it to the Graph API as a parameter.
+- `variants[].channel_id`: an integer that must be one of the requested
+  channels, and those were read from the current workspace when the request
+  was built. An id the model makes up fails validation before anything is
+  saved.
+- `meta->model` (set by the provider, not by the model): stored on the run and
+  used as a key in the price table. The generator keeps it only when it looks
+  like a model name (128 characters of letters, digits and `._:/@-`), and
+  records the model that was asked for otherwise.
+- A NUL character in any text cannot be stored by PostgreSQL. The generator
+  treats such an answer as invalid, so it is asked for again instead of failing
+  the run with a database error.
+
+Nothing from the output reaches a header, a file path or a query that is not
+parameterised.
+
+One thing was open on our side and is closed: an API key goes into the
+`x-api-key` header, so a stored key with a line break in it could split the
+header. The key form accepts printable ASCII without spaces only.
+
+### 5. Effort
+
+`NOONGUN_DRAFT_ANTHROPIC_EFFORT` (`drafting.providers.anthropic.effort`) is
+passed as the `effort` provider option, which Prism sends as
+`output_config.effort` next to the format. Empty sends nothing, and the default
+of the model applies (`medium` on Opus 5.5, see section 7 of the entry above).
+Only a single lower case word is accepted from configuration.
+
+### 6. Not used
+
+- **Server-side fallbacks.** Prism supports
+  `->withProviderOptions(['fallbacks' => 'default'])`, which lets Anthropic
+  answer a declined request with another model in the same call (it adds a beta
+  header). It is not used: a refusal is reported to the person who asked. If it
+  is added later, `meta->model` is the model that answered, and the cost
+  estimate already looks its price up first.
+- **Prompt caching, streaming, tools.** Not needed for one short answer.
+
+### 7. Testing
+
+`Prism::fake()` swaps `PrismManager` for one that returns the fake for every
+provider name, so the provider name is not checked and no provider class is
+built. `assertProviderConfig()` sees the per-call config, which is how the test
+proves the key was passed per call. The fake cannot throw, so the tests of
+failed calls swap `PrismManager` the same way for a provider that throws what
+Prism would throw.
+
+### 8. Model and prices, checked
+
+Checked on 2026-11-25 against Anthropic's pricing page
+(`platform.claude.com/docs/en/about-claude/pricing`) and model pages:
+
+| Model | Identifier | Input | Output | `config/noongun.php` |
+|---|---|---|---|---|
+| Claude Opus 5.5 | `claude-opus-5-5` | 4.00 | 20.00 | same |
+| Claude Sonnet 5.5 | `claude-sonnet-5-5` | 2.00 | 10.00 | same |
+| Claude Haiku 5.5 | `claude-haiku-5-5` | 0.10 | 0.50 | same |
+
+USD per million tokens. No default was changed. Two things the table does not
+express:
+
+- Haiku 5.5 costs 0.50 in and 2.50 out for a request whose prompt is over
+  100,000 tokens. A draft prompt is a few thousand tokens, so the lower price
+  is the right one here.
+- Models from Claude 4.7 on use a tokenizer that counts roughly 30 percent more
+  tokens for the same text than earlier models. The estimate uses the tokens
+  the provider reports, so it is not affected, but a comparison of prices per
+  token across model generations is.
