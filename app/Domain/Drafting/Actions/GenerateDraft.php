@@ -38,6 +38,8 @@ use Throwable;
  */
 final class GenerateDraft
 {
+    public const NOT_SAVED = 'The provider answered, but the post could not be saved from the answer, so no draft was created. The answer was paid for. Propose the week again to draft this post.';
+
     public function __construct(
         private readonly DraftGenerators $generators,
         private readonly CreateDraftFromResult $createDraft,
@@ -58,6 +60,8 @@ final class GenerateDraft
         if (! $run->markRunning()) {
             return null;
         }
+
+        $result = null;
 
         try {
             $workspace = $this->currentWorkspace->getOrFail();
@@ -82,9 +86,19 @@ final class GenerateDraft
 
             throw $failure;
         } catch (Throwable $failure) {
-            $run->markFailed($failure instanceof DraftGeneratorNotAvailable || $failure instanceof DraftingNotAllowed
-                ? $failure->getMessage()
-                : 'The draft could not be generated because of an unexpected error.');
+            // An answer that arrived was paid for, also when the post could
+            // not be saved from it: the run keeps what it used.
+            $used = $result?->usage;
+
+            $run->markFailed(
+                match (true) {
+                    $failure instanceof DraftGeneratorNotAvailable, $failure instanceof DraftingNotAllowed => $failure->getMessage(),
+                    $used !== null => self::NOT_SAVED,
+                    default => 'The draft could not be generated because of an unexpected error.',
+                },
+                $used,
+                $used !== null ? $this->costs->estimate($used, $run->model) : null,
+            );
 
             throw $failure;
         }

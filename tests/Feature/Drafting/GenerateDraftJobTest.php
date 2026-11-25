@@ -2,9 +2,12 @@
 
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Content\Exceptions\PostActionNotAllowed;
+use App\Domain\Drafting\Actions\GenerateDraft;
 use App\Domain\Drafting\Actions\ProposeWeek;
 use App\Domain\Drafting\Console\RecoverStuckDraftRuns;
 use App\Domain\Drafting\CredentialScope;
+use App\Domain\Drafting\DraftBudget;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
@@ -18,6 +21,7 @@ use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Tests\Fakes\FakeDraftGenerator;
 
 require_once __DIR__.'/../../Support/publishing.php';
 require_once __DIR__.'/../../Support/posts.php';
@@ -539,6 +543,32 @@ describe('failures', function () {
 
         expect(DB::table('post_variants')->pluck('channel_id')->all())->toBe([$this->channel->id])
             ->and(freshRun($run)->status)->toBe('succeeded');
+    });
+
+    it('keeps what a paid answer used when the post cannot be saved from it', function () {
+        $run = proposedRun();
+
+        // The provider answers. Meanwhile the person who asked loses the right to write posts.
+        $this->generator->returnsOutput(function ($request) {
+            DB::table('memberships')->where('user_id', $this->owner->id)->update(['role' => Role::Viewer->value]);
+
+            return FakeDraftGenerator::outputFor($request);
+        });
+
+        expect(fn () => runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id)))->toThrow(PostActionNotAllowed::class);
+
+        $stored = freshRun($run);
+
+        expect($stored->status)->toBe('failed')
+            ->and($stored->failure_reason)->toBe(GenerateDraft::NOT_SAVED)
+            ->and($stored->attempts)->toBe(1)
+            ->and($stored->input_tokens)->toBe(1200)
+            ->and($stored->output_tokens)->toBe(300)
+            ->and($stored->cost_estimate)->toBe('0.005400')
+            ->and($stored->cost_currency)->toBe('USD')
+            ->and(DB::table('posts')->count())->toBe(0)
+            // It was paid for, so it counts towards the day.
+            ->and(inWorkspace($this->workspace, fn () => app(DraftBudget::class)->usedByWorkspace()))->toBe(1);
     });
 
     it('fails the run and reports the error when something unexpected happens', function () {

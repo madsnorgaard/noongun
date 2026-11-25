@@ -167,7 +167,7 @@ describe('what was used', function () {
         $this->generator->failInvalid()->failRetryable();
         runQueuedDraftJobs();
 
-        expect(DB::table('draft_runs')->pluck('status')->all())->toBe(['failed', 'failed', 'succeeded', 'succeeded']);
+        expect(DB::table('draft_runs')->orderBy('id')->pluck('status')->all())->toBe(['failed', 'failed', 'succeeded', 'succeeded']);
 
         // 2400 + 1200 + 1200 tokens in, 600 + 300 + 300 out: 0.0108 + 0.0054 + 0.0054.
         $this->get(route('queue.index'))
