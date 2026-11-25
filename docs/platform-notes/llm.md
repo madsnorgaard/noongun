@@ -389,7 +389,9 @@ asserts the whole body and the headers.
   `OPENAI_URL`, `OPENAI_ORGANIZATION` and `OPENAI_PROJECT` from the
   environment; the per-call key replaces the first. The organization and
   project headers are sent only when those variables are set, and they then
-  apply to every workspace, also one with its own key. Leave them unset.
+  apply to every workspace, also one with its own key. (Changed after the
+  review: they are now taken out for a key a workspace brought. See the
+  last entry.)
 - **Strict.** Prism sends `strict` only when the provider option
   `schema.strict` is given. We give `true`.
 - **Store.** The Responses API keeps a response as conversation state for 30
@@ -563,3 +565,36 @@ The tests of the OpenAI path fake the HTTP client, not Prism, so Prism's own
 OpenAI provider runs: the request body, the headers and the reading of each
 kind of answer are real. The answers are written by hand in the shape of the
 Responses API. No answer was recorded from the live API.
+
+## 2026-11-25 - after the review of M5 (issue #5)
+
+- **Organization and project headers.** `PrismManager::resolve()` merges the
+  per-call config over the configured one with `array_merge`, and
+  `OpenAI::client()` drops a header whose value is null. So
+  `using('openai', $model, ['organization' => null, 'project' => null, ...])`
+  suppresses `OpenAI-Organization` and `OpenAI-Project` for that call. The
+  generator does this when the key is one a workspace brought, and leaves
+  them for the key of the instance. A test reads the outgoing headers for
+  both. This replaces the advice in section 1 above to leave the variables
+  unset.
+- **A timeout counts as a run.** A `ConnectionException` whose message says
+  "timed out" or "cURL error 28" is recorded with a usage of zero tokens, so
+  the run counts towards the daily limits (ADR 0012). Other connection
+  failures record nothing.
+- **Cut off answers of Anthropic.** `ProviderReply` reads the usage of a cut
+  off answer in the shape of the OpenAI Responses API only, because only
+  Prism's OpenAI handler throws for one. Prism's Anthropic handler returns a
+  cut off answer as a response with `FinishReason::Length` and its usage, and
+  the generator takes the usage from there, cache figures included. If Prism
+  ever throws for Anthropic as well, `ProviderReply` would read
+  `input_tokens` and `output_tokens` and miss
+  `cache_creation_input_tokens` and `cache_read_input_tokens`, which
+  Anthropic reports apart from `input_tokens`: with prompt caching turned on
+  the input of such an answer would then be under-counted. Caching is not
+  asked for today.
+- **Patterns.** Every pattern that checks a value from a provider or from
+  configuration ends in `\z`, not `$`, which also matches before a final
+  line break.
+- **Unexpected errors.** The message of an exception that is none of
+  Prism's is redacted first and cut to 300 characters after, so a key that
+  the cut would have split is removed whole.

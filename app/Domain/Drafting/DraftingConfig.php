@@ -120,7 +120,7 @@ final class DraftingConfig
     {
         $effort = self::string("providers.{$provider}.effort");
 
-        return $effort !== null && preg_match('/^[a-z]{1,16}$/', $effort) === 1 ? $effort : null;
+        return $effort !== null && preg_match('/\A[a-z]{1,16}\z/', $effort) === 1 ? $effort : null;
     }
 
     public static function maxTokens(): int

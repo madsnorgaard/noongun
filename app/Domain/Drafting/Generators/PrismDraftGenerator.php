@@ -91,7 +91,10 @@ class PrismDraftGenerator implements DraftGenerator
     {
         try {
             return $this->replies->watch(fn (): Response => Prism::structured()
-                ->using($context->provider, $context->model, ['api_key' => $context->key->revealFor($context->provider)])
+                ->using($context->provider, $context->model, [
+                    ...PrismDialect::connectionOptions($context->provider, $context->key->scope),
+                    'api_key' => $context->key->revealFor($context->provider),
+                ])
                 ->withSchema(new RawSchema(DraftSchema::NAME, DraftSchema::definition()))
                 ->withSystemPrompt($prompt->system)
                 ->withPrompt($prompt->user)
@@ -165,7 +168,13 @@ class PrismDraftGenerator implements DraftGenerator
             return DraftGenerationFailed::retryable(
                 $provider,
                 "The provider could not be reached or did not answer within {$context->timeoutSeconds} seconds. The draft can be requested again.",
-                $usage,
+                // A request that timed out may have been received and
+                // billed. Nothing says what it used, so it is recorded as
+                // an attempt with no known tokens: the run then counts
+                // towards the daily limits like any run that reached a
+                // provider. A provider that could not be reached at all
+                // records nothing.
+                $usage ?? (self::timedOut($failure) ? new DraftUsage($provider, $context->model, 0, 0) : null),
                 ['error' => 'connection'],
                 $secrets,
             );
@@ -185,10 +194,15 @@ class PrismDraftGenerator implements DraftGenerator
             $usage,
             [
                 'error' => class_basename($failure),
-                DraftingException::OPERATOR_DETAIL => class_basename($failure).': '.Str::limit($failure->getMessage(), 300),
+                DraftingException::OPERATOR_DETAIL => class_basename($failure).': '.Str::limit(DraftingException::redact($failure->getMessage(), ...$secrets), 300),
             ],
             $secrets,
         );
+    }
+
+    private static function timedOut(ConnectionException $failure): bool
+    {
+        return preg_match('/\bcURL error 28\b|timed out|timeout/i', $failure->getMessage()) === 1;
     }
 
     /**
@@ -248,7 +262,7 @@ class PrismDraftGenerator implements DraftGenerator
 
         $attempt = new DraftUsage(
             $context->provider,
-            preg_match('/^[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,127}$/', $answeredBy) === 1 ? $answeredBy : $context->model,
+            preg_match('/\A[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,127}\z/', $answeredBy) === 1 ? $answeredBy : $context->model,
             max(0, $response->usage->promptTokens) + $read + $written,
             max(0, $response->usage->completionTokens),
             1,
@@ -287,7 +301,7 @@ class PrismDraftGenerator implements DraftGenerator
                 $context->provider,
                 'The model declined to write this draft. Nothing was created. Change the brief, the pillar or the idea and ask again.',
                 $usage,
-                [...$details, 'category' => is_string($category) && preg_match('/^[a-z_]{1,40}$/', $category) === 1 ? $category : null],
+                [...$details, 'category' => is_string($category) && preg_match('/\A[a-z_]{1,40}\z/', $category) === 1 ? $category : null],
                 $secrets,
             );
         }

@@ -85,7 +85,7 @@ final readonly class ProviderReply
 
     private static function word(mixed $value): ?string
     {
-        return is_string($value) && preg_match('/^[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,127}$/', $value) === 1 ? $value : null;
+        return is_string($value) && preg_match('/\A[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,127}\z/', $value) === 1 ? $value : null;
     }
 
     private static function count(mixed $value): ?int
