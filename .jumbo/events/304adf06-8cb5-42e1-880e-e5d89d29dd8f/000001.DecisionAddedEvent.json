@@ -1,0 +1,17 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "304adf06-8cb5-42e1-880e-e5d89d29dd8f",
+  "version": 1,
+  "timestamp": "2026-11-25T18:26:59.211Z",
+  "payload": {
+    "title": "ADR 0013: Drafting provider per workspace",
+    "context": "M5 (#5): OpenAI becomes a second drafting provider next to Anthropic, selectable per workspace through PrismDraftGenerator.",
+    "rationale": "The choice is a nullable column on workspaces; null follows the instance default. The operator opts in to offering a provider with NOONGUN_DRAFT_PROVIDERS. Keys are bound to their provider in code, so a key for one vendor can never be sent to the other. A choice that is no longer offered stops drafting instead of falling back, because the brief would go to a vendor the workspace did not choose. Caps ignore the provider, so switching opens no new allowance.",
+    "alternatives": [
+      "Instance-wide provider only",
+      "Fall back to the default provider when the choice is not offered"
+    ],
+    "consequences": "Input tokens now include cached input, with optional cache prices. OpenAI requests send store false. Provider HTTP answers are read through ProviderReplies to classify 429 and to count cut-off answers."
+  },
+  "seq": 1
+}
