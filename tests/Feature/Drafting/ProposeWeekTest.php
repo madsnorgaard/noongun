@@ -5,6 +5,7 @@ use App\Domain\Content\PostState;
 use App\Domain\Drafting\Actions\ProposeWeek;
 use App\Domain\Drafting\Console\RecoverStuckDraftRuns;
 use App\Domain\Drafting\DraftBudget;
+use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
 use App\Domain\Drafting\Exceptions\DraftingNotAllowed;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\GenerateDraftJob;
@@ -16,6 +17,7 @@ use App\Domain\Workspaces\Role;
 use App\Models\User;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 
 require_once __DIR__.'/../../Support/publishing.php';
@@ -189,11 +191,25 @@ describe('what must be in place first', function () {
         expect(expectRefused(ProposalRefused::NO_KEY)->getMessage())->toContain('No API key is set');
     });
 
-    it('refuses when no provider is configured, and says it is for the operator', function () {
-        config(['noongun.drafting.provider' => 'nobody']);
+    it('refuses when drafting is not set up, with a fixed sentence for members and the detail in the log', function (array $config, string $detail) {
+        config($config);
+        Log::spy();
 
-        expect(expectRefused(ProposalRefused::NOT_CONFIGURED)->getMessage())->toContain('For the operator');
-    });
+        $message = expectRefused(ProposalRefused::NOT_CONFIGURED)->getMessage();
+
+        expect($message)->toBe(DraftGeneratorNotAvailable::FOR_MEMBERS);
+
+        foreach (['config/', 'NOONGUN_', 'App\\', '[', 'drafting.providers'] as $operatorOnly) {
+            expect($message)->not->toContain($operatorOnly);
+        }
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $line, array $context): bool => str_contains($context['detail'] ?? '', $detail)
+            && $context['workspace_id'] === $this->workspace->id);
+    })->with([
+        'an unknown provider' => [['noongun.drafting.provider' => 'nobody'], 'No draft generator is configured for provider [nobody]'],
+        'no provider' => [['noongun.drafting.provider' => ''], 'NOONGUN_DRAFT_PROVIDER'],
+        'no model' => [['noongun.drafting.providers.'.DRAFT_TEST_PROVIDER.'.model' => null], 'No model is configured'],
+    ]);
 
     it('refuses a week in which every slot time has passed or has a post', function () {
         // Friday at nine in Copenhagen: the last of the three slots is now.

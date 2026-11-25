@@ -349,7 +349,9 @@ describe('GenerateDraft', function () {
         });
 
         expect($run->status)->toBe(DraftRunStatus::Failed)
-            ->and($run->failure_reason)->toContain('No draft generator is configured for provider [nobody]');
+            // Members read the reason: it names no class, path or setting.
+            ->and($run->failure_reason)->toBe(DraftGeneratorNotAvailable::FOR_MEMBERS)
+            ->and($run->failure_reason)->not->toContain('config/');
     });
 
     it('fails the run without leaking anything when something unexpected is thrown', function () {
@@ -376,7 +378,8 @@ describe('GenerateDraft', function () {
         });
 
         expect($run->status)->toBe(DraftRunStatus::Failed)
-            ->and($run->failure_reason)->toContain('may not')
+            ->and($run->failure_reason)->toBe(GenerateDraft::NOT_ALLOWED)
+            ->and($run->failure_reason)->not->toContain('#')
             ->and(DB::table('posts')->count())->toBe(0);
 
         $this->generator->assertNothingGenerated();

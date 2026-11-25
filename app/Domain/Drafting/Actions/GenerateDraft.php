@@ -38,6 +38,8 @@ use Throwable;
  */
 final class GenerateDraft
 {
+    public const NOT_ALLOWED = 'The person who asked for this draft may no longer write posts in this workspace, so it was not drafted. Nothing was spent.';
+
     public const NOT_SAVED = 'The provider answered, but the post could not be saved from the answer, so no draft was created. The answer was paid for. Propose the week again to draft this post.';
 
     public function __construct(
@@ -92,7 +94,11 @@ final class GenerateDraft
 
             $run->markFailed(
                 match (true) {
-                    $failure instanceof DraftGeneratorNotAvailable, $failure instanceof DraftingNotAllowed => $failure->getMessage(),
+                    // The messages of these two name classes, settings and
+                    // user ids. Members read the reason, so it is a fixed
+                    // sentence; the caller logs the detail.
+                    $failure instanceof DraftGeneratorNotAvailable => DraftGeneratorNotAvailable::FOR_MEMBERS,
+                    $failure instanceof DraftingNotAllowed => self::NOT_ALLOWED,
                     $used !== null => self::NOT_SAVED,
                     default => 'The draft could not be generated because of an unexpected error.',
                 },

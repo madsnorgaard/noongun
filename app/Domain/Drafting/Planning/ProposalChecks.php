@@ -17,6 +17,7 @@ use App\Domain\Drafting\Models\Brief;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Scheduling\Models\Slot;
 use App\Domain\Workspaces\Models\Workspace;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Everything that can stand in the way of proposing a week, each as a
@@ -162,12 +163,24 @@ final class ProposalChecks
         try {
             $this->generators->for($this->generators->contextFor($workspace));
         } catch (LlmCredentialMissing $missing) {
+            if ($missing->operatorDetail() !== null) {
+                Log::warning('No API key resolves for drafting in a workspace.', [
+                    'workspace_id' => $workspace->id,
+                    'operator_detail' => $missing->operatorDetail(),
+                ]);
+            }
+
             return ProposalRefused::because(ProposalRefused::NO_KEY, $missing->getMessage());
         } catch (DraftGeneratorNotAvailable $unavailable) {
-            return ProposalRefused::because(
-                ProposalRefused::NOT_CONFIGURED,
-                (string) __('Drafting is not set up on this instance. For the operator: :detail', ['detail' => $unavailable->getMessage()]),
-            );
+            // The message names classes, configuration paths and
+            // environment variables, and holds no secret. It goes to the
+            // log; members read a fixed sentence.
+            Log::warning('Drafting is not set up, so a week cannot be proposed.', [
+                'workspace_id' => $workspace->id,
+                'detail' => $unavailable->getMessage(),
+            ]);
+
+            return ProposalRefused::because(ProposalRefused::NOT_CONFIGURED, (string) __(DraftGeneratorNotAvailable::FOR_MEMBERS));
         }
 
         return ProposalRefused::because(ProposalRefused::NOT_CONFIGURED, (string) __('Drafting is not available right now.'));

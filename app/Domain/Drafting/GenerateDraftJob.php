@@ -21,6 +21,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -61,6 +62,8 @@ final class GenerateDraftJob implements ShouldQueue
     public const BRIEF_GONE = 'The brief this draft was asked from no longer exists, so it was not generated.';
 
     public const CHANNELS_GONE = 'None of the channels this draft was planned for can publish any more, so it was not generated.';
+
+    private const LOGGED_MESSAGE_LENGTH = 500;
 
     public int $tries = 1;
 
@@ -249,7 +252,10 @@ final class GenerateDraftJob implements ShouldQueue
     }
 
     /**
-     * The messages of these exceptions are made safe by their classes.
+     * Writes down for the operator why the run failed: the class of the
+     * failure, its message, and the detail a drafting exception keeps for
+     * the operator and does not show to members. The message is cleaned of
+     * anything shaped like a credential and cut short before it is logged.
      */
     private function note(DraftRun $run, Throwable $failure): void
     {
@@ -257,8 +263,10 @@ final class GenerateDraftJob implements ShouldQueue
             'workspace_id' => $this->workspaceId,
             'draft_run_id' => $run->id,
             'attempt' => $this->attempt,
+            'exception' => $failure::class,
             'retryable' => $failure instanceof DraftingException && $failure->retryable,
-            'message' => $failure instanceof DraftingException ? $failure->getMessage() : $failure::class,
+            'message' => Str::limit(DraftingException::redact($failure->getMessage()), self::LOGGED_MESSAGE_LENGTH),
+            'operator_detail' => $failure instanceof DraftingException ? $failure->operatorDetail() : null,
         ]);
     }
 

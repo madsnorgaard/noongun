@@ -11,6 +11,8 @@ use App\Domain\Drafting\DraftBudget;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
+use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
+use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\GenerateDraftJob;
 use App\Domain\Drafting\Models\DraftRun;
@@ -20,6 +22,7 @@ use App\Domain\Workspaces\Role;
 use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Tests\Fakes\FakeDraftGenerator;
 
@@ -515,7 +518,58 @@ describe('failures', function () {
         $this->generator->assertNothingGenerated();
 
         expect(freshRun($run)->status)->toBe('failed')
+            ->and(freshRun($run)->failure_reason)->toBe(GenerateDraft::NOT_ALLOWED)
             ->and(DB::table('posts')->count())->toBe(0);
+    });
+
+    it('shows members a fixed sentence when drafting is not set up any more, and logs the detail', function () {
+        $run = proposedRun();
+        config(['noongun.drafting.provider' => 'nobody']);
+        Log::spy();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        expect(freshRun($run)->failure_reason)->toBe(DraftGeneratorNotAvailable::FOR_MEMBERS);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $line, array $context): bool => $line === 'A draft run failed.'
+            && $context['exception'] === DraftGeneratorNotAvailable::class
+            && str_contains($context['message'], 'No draft generator is configured for provider [nobody]')
+            && $context['draft_run_id'] === $run->id);
+    });
+
+    it('logs the class, a cleaned and shortened message and the detail for the operator of every failure', function () {
+        $run = proposedRun();
+        $this->generator->failNext(DraftGenerationFailed::permanent(
+            DRAFT_TEST_PROVIDER,
+            'The provider did not accept the API key.',
+            null,
+            [DraftingException::OPERATOR_DETAIL => 'HTTP 401 authentication_error for model '.DRAFT_TEST_MODEL.' '.str_repeat('x', 900)],
+        ));
+        Log::spy();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        // Members read the plain sentence only.
+        expect(freshRun($run)->failure_reason)->toBe('The provider did not accept the API key.');
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $line, array $context): bool => $line === 'A draft run failed.'
+            && $context['exception'] === DraftGenerationFailed::class
+            && $context['message'] === 'The provider did not accept the API key.'
+            && str_starts_with((string) $context['operator_detail'], 'HTTP 401 authentication_error')
+            && $context['retryable'] === false
+            && $context['workspace_id'] === $this->workspace->id);
+    });
+
+    it('never logs a key, also when a failure carries one', function () {
+        $run = proposedRun();
+        $this->generator->returnsOutput(fn () => throw new DraftGeneratorNotAvailable('Broken: x-api-key: sk-ant-abcdefghijklmnopqrstuvwxyz '.str_repeat('y', 900)));
+        Log::spy();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $line, array $context): bool => $line === 'A draft run failed.'
+            && ! str_contains($context['message'], 'sk-ant-abcdefghijklmnopqrstuvwxyz')
+            && mb_strlen($context['message']) <= 503);
     });
 
     it('fails the run without calling a provider when what it needs is gone', function (Closure $remove, string $reason) {
