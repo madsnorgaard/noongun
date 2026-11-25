@@ -16,6 +16,7 @@ use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingConfig;
 use App\Domain\Drafting\DraftingContext;
 use App\Domain\Drafting\DraftSchema;
+use App\Domain\Drafting\DraftUsage;
 use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
 use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\Exceptions\InvalidDraftOutput;
@@ -26,6 +27,7 @@ use App\Domain\Drafting\LlmKey;
 use App\Domain\Drafting\Models\Brief;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Drafting\Models\LlmCredential;
+use App\Domain\Drafting\Planning\ProposalCost;
 use App\Domain\Drafting\PromptRenderer;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
@@ -73,14 +75,24 @@ beforeEach(function () {
     $this->context = openAiContext();
 });
 
-function openAiContext(int $maxTokens = 2000, int $timeout = 20): DraftingContext
+/**
+ * Every prompt version in resources/prompts/draft.
+ *
+ * @return list<string>
+ */
+function draftPromptVersions(): array
+{
+    return array_map(basename(...), (array) glob(__DIR__.'/../../../resources/prompts/draft/*', GLOB_ONLYDIR));
+}
+
+function openAiContext(int $maxTokens = 2000, int $timeout = 20, string $promptVersion = 'v1'): DraftingContext
 {
     return new DraftingContext(
         provider: 'openai',
         model: OPENAI_TEST_MODEL,
         maxTokens: $maxTokens,
         timeoutSeconds: $timeout,
-        promptVersion: 'v1',
+        promptVersion: $promptVersion,
         key: new LlmKey('openai', OPENAI_TEST_KEY, CredentialScope::Workspace),
     );
 }
@@ -158,11 +170,13 @@ function everythingOfOpenAiFailure(Throwable $failure): string
 }
 
 describe('the request', function () {
-    it('sends the rendered prompt, the strict schema and the limits, and nothing else', function () {
+    it('sends the rendered prompt, the strict schema and the limits, and nothing else, for every prompt version', function (string $version) {
         Http::fake([OPENAI_URL => Http::response(openAiAnswer())]);
-        $prompt = app(PromptRenderer::class)->render($this->request, 'v1');
+        $prompt = app(PromptRenderer::class)->render($this->request, $version);
 
-        $this->generator->generate($this->request, $this->context);
+        $result = $this->generator->generate($this->request, openAiContext(promptVersion: $version));
+
+        expect($result->bodies)->toHaveCount(2);
 
         Http::assertSentCount(1);
         Http::assertSent(function (Request $sent) use ($prompt) {
@@ -195,6 +209,10 @@ describe('the request', function () {
 
             return true;
         });
+    })->with(draftPromptVersions());
+
+    it('has more than one prompt version to send', function () {
+        expect(draftPromptVersions())->toContain('v1')->toContain(DraftingConfig::promptVersion());
     });
 
     it('sends the configured effort as reasoning effort, and none when it is not set', function (mixed $configured, ?array $expected) {
@@ -686,6 +704,34 @@ describe('two providers side by side', function () {
             ->and(array_keys($body))->toEqualCanonicalizing(['model', 'input', 'max_output_tokens', 'tools', 'parallel_tool_calls', 'store', 'text'])
             ->and((string) json_encode($body))->not->toContain($this->owner->email)
             ->not->toContain($this->workspace->name);
+    });
+
+    it('shows the cost of a week by the OpenAI prices, with the prompt version in use', function () {
+        slotIn($this->workspace, $this->channel, 1, '09:00');
+        app(DraftGenerators::class)->choose($this->workspace, 'openai');
+
+        $cost = inWorkspace($this->workspace, function (): ?array {
+            $context = app(DraftGenerators::class)->contextFor($this->workspace->refresh());
+            $plan = planFor($this->workspace, '2026-11-30');
+            $prompt = app(PromptRenderer::class)->render(draftRequestIn($this->workspace, [$this->channel]), $context->promptVersion);
+            $bytes = strlen($prompt->system) + strlen($prompt->user) + strlen((string) json_encode(DraftSchema::definition()));
+
+            expect($context->promptVersion)->toBe(DraftingConfig::promptVersion())
+                ->and($plan->posts)->toHaveCount(1);
+
+            // One post, 3 attempts of 2 answers each, every answer to the limit of
+            // the context; input at the cache write price of 2.50, the dearest.
+            $worst = app(CostEstimator::class)->atMost(new DraftUsage('openai', OPENAI_TEST_MODEL, ($bytes + 1024) * 6, 6 * $context->maxTokens));
+            $cost = app(ProposalCost::class)->of($plan, Brief::current(), $context);
+
+            expect($cost['worst']->amount ?? null)->toBe($worst?->amount);
+
+            return $cost;
+        });
+
+        expect($cost)->not->toBeNull()
+            ->and((float) $cost['expected']->amount)->toBeGreaterThan(0.0)
+            ->and((float) $cost['worst']->amount)->toBeGreaterThan((float) $cost['expected']->amount);
     });
 
     it('queues nothing that holds a key when a week is proposed', function () {
