@@ -48,6 +48,7 @@ class LlmKeyController extends Controller
             'available' => $generators->availableFor($workspace),
             'key_source' => $canManage && $provider !== null ? $this->keySource($workspace, $provider, $keys) : null,
             'credential' => $credential === null ? null : [
+                'unreadable' => ! $credential->isReadable(),
                 'last_four' => $credential->lastFour(),
                 'set_at' => $credential->updated_at?->toIso8601String(),
             ],

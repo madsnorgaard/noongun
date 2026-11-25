@@ -67,9 +67,19 @@ attempts when the provider reported them, because they were paid for.
 `DraftSchema::definition()` is the one JSON schema. The generator sends it to
 the provider, and `DraftResult::fromArray()` checks the answer against the same
 definition and then against the request: one text for each requested channel and
-no other, no empty text, no text over the platform's limit, a link that is an
-http or https address. A `DraftResult` can only be built this way, so one that
-exists is valid.
+no other, no empty text, no text over the platform's limit. A `DraftResult` can
+only be built this way, so one that exists is valid.
+
+The link is the one part of the answer that is not checked but replaced. A link
+is kept only when it is the source URL of the request or the URL of one of the
+brief's calls to action, compared after trimming, with scheme and host in lower
+case and an empty path read as `/`, and everything else exactly as written. The
+result then carries the address in the author's spelling. Any other link is
+dropped and the draft is created without one; `draft_runs.link_dropped` records
+that it happened. A run does not fail for it. The reason: an idea or a source
+can hold text that someone else wrote, that text is sent to the model, and a
+model that follows it must not be able to put an address of that someone's
+choosing on a post that may then be approved in a batch.
 
 Invalid output throws `InvalidDraftOutput`. The generator asks once more and
 then lets the exception out with the usage of both attempts; `GenerateDraft`

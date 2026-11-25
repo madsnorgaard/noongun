@@ -24,6 +24,7 @@ use Prism\Prism\Exceptions\PrismRequestTooLargeException;
 use Prism\Prism\Facades\Prism;
 use Prism\Prism\Schema\RawSchema;
 use Prism\Prism\Structured\Response;
+use SensitiveParameter;
 use Throwable;
 
 /**
@@ -149,7 +150,10 @@ class PrismDraftGenerator implements DraftGenerator
             $provider,
             'The draft could not be requested because of an unexpected error. The operator of this instance can find it in the log.',
             $usage,
-            ['error' => class_basename($failure)],
+            [
+                'error' => class_basename($failure),
+                DraftingException::OPERATOR_DETAIL => class_basename($failure).': '.Str::limit($failure->getMessage(), 300),
+            ],
             $secrets,
         );
     }
@@ -157,12 +161,16 @@ class PrismDraftGenerator implements DraftGenerator
     /**
      * @param  list<string>  $secrets
      */
-    private function providerError(PrismException $failure, DraftingContext $context, ?DraftUsage $usage, array $secrets): DraftGenerationFailed
+    private function providerError(PrismException $failure, DraftingContext $context, ?DraftUsage $usage, #[SensitiveParameter] array $secrets): DraftGenerationFailed
     {
         $status = $failure->httpStatus ?? ($failure->getCode() >= 400 && $failure->getCode() <= 599 ? $failure->getCode() : null);
         $type = preg_match('/\b([a-z]+(?:_[a-z]+)*_error)\b/', $failure->getMessage(), $match) === 1 ? $match[1] : null;
-        $details = ['status' => $status, 'error' => $type];
         $said = Str::limit(DraftingException::redact($failure->getMessage(), ...$secrets), 300);
+        $details = [
+            'status' => $status,
+            'error' => $type,
+            DraftingException::OPERATOR_DETAIL => "Asked for model [{$context->model}]. The provider said: {$said}",
+        ];
 
         if (($status !== null && $status >= 500) || in_array($type, self::TRANSIENT_ERROR_TYPES, true)) {
             return DraftGenerationFailed::retryable(
@@ -175,11 +183,11 @@ class PrismDraftGenerator implements DraftGenerator
         }
 
         $message = match (true) {
-            $status === 401 || $type === 'authentication_error' => 'The provider did not accept the API key. Check the key under Settings, Drafting.',
-            $status === 403 || $type === 'permission_error' => "The API key may not use the model [{$context->model}]. Check the key and what it is allowed to do with the provider.",
-            $status === 404 || $type === 'not_found_error' => "The provider does not know the model [{$context->model}]. Check the configured model name.",
-            $type === 'billing_error' => 'The provider refused the request because of the billing of the account the API key belongs to.',
-            default => "The provider refused the request: {$said}",
+            $status === 401 || $type === 'authentication_error' => 'The provider did not accept the API key. An owner of this workspace can check the key under Settings, Drafting.',
+            $status === 403 || $type === 'permission_error' => 'The API key is not allowed to do this with the provider. An owner of this workspace can check the key under Settings, Drafting.',
+            $status === 404 || $type === 'not_found_error' => 'The provider does not know the model this instance is set up to use. The operator of this instance can correct it.',
+            $type === 'billing_error' || str_contains(strtolower($said), 'credit balance') => 'The provider refused the request because the account the API key belongs to has no credit left or has a billing problem.',
+            default => 'The provider refused the request. The operator of this instance can find the reason in the log.',
         };
 
         return DraftGenerationFailed::permanent($context->provider, $message, $usage, $details, $secrets);
@@ -223,9 +231,9 @@ class PrismDraftGenerator implements DraftGenerator
         if ($response->finishReason === FinishReason::Length) {
             throw DraftGenerationFailed::permanent(
                 $context->provider,
-                "The answer was cut off at the limit of {$context->maxTokens} tokens, so there is no draft. Raise NOONGUN_DRAFT_MAX_TOKENS, or shorten the brief.",
+                'The answer was longer than this instance allows and was cut off, so there is no draft. Ask again; if it keeps happening, the operator of this instance can raise the limit.',
                 $usage,
-                $details,
+                [...$details, DraftingException::OPERATOR_DETAIL => "The answer reached the limit of {$context->maxTokens} tokens, which includes the tokens the model spends on thinking. Raise NOONGUN_DRAFT_MAX_TOKENS, or lower the effort of the provider."],
                 $secrets,
             );
         }
@@ -266,9 +274,13 @@ class PrismDraftGenerator implements DraftGenerator
         if ($response->structured === null || $response->structured === []) {
             return DraftGenerationFailed::permanent(
                 $context->provider,
-                "The provider answered {$usage->attempts} times without a draft that could be read. Nothing was created. Ask again; if it keeps happening, check that the model [{$context->model}] supports structured output.",
+                "The provider answered {$usage->attempts} times without a draft that could be read. Nothing was created. Ask again; if it keeps happening, tell the operator of this instance.",
                 $usage,
-                ['finish_reason' => $response->finishReason->value, 'error' => 'empty_output'],
+                [
+                    'finish_reason' => $response->finishReason->value,
+                    'error' => 'empty_output',
+                    DraftingException::OPERATOR_DETAIL => "Check that the model [{$context->model}] supports structured output.",
+                ],
                 [$context->key->reveal()],
             );
         }

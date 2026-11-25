@@ -219,8 +219,10 @@ configure another one. There are two places for a key:
 A workspace key is stored encrypted with `APP_KEY` and is write-only: after it
 is saved, the page shows the provider, the last four characters, when it was
 stored and whose key drafting uses, and never the key. Editors and viewers see
-whether drafting is available and nothing about keys. Each draft run records
-whether the instance key or the workspace key paid for it.
+whether drafting is available and nothing about keys. Storing, replacing
+and removing the key needs a recently confirmed password, like the security
+settings, so a session that someone else got hold of cannot swap the key. Each
+draft run records whether the instance key or the workspace key paid for it.
 
 To create a key, sign in to the Claude Console at `platform.claude.com`, add
 credit to the account and create an API key. Set a spending limit for the
@@ -269,9 +271,15 @@ the brief what you would not send to it.
 The model answers in a fixed format: one text for each channel, at most one
 link, a suggestion for alternative text and one line on why the post fits. The
 answer is treated as data. It is checked (a text for each channel that was
-asked for and for no other, no text over the limit of its platform, a link
-that is an http or https address), stored as plain text and shown as plain
-text. Nothing in it is followed, opened or run.
+asked for and for no other, no text over the limit of its platform), stored as
+plain text and shown as plain text. Nothing in it is followed, opened or run.
+
+A draft only ever carries a link that you gave: the source address of the
+request, or the address of a call to action in the brief. If the model
+suggests any other address, the draft is created without a link and the draft
+run records that a link was left out. Text that is pasted into an idea can
+therefore not make a post point somewhere you did not choose. Add the link by
+hand in the editor when you do want another one.
 
 When an answer does not pass the check, the model is asked once more. After a
 second answer that cannot be used the run fails and says why. A run also fails,
@@ -476,7 +484,10 @@ fills in:
 
 Keep `.env` private and back it up together with the database: without the
 `APP_KEY` encrypted values (platform tokens and LLM keys) cannot be read.
-Do not change `APP_KEY` on an instance that has data.
+Do not change `APP_KEY` on an instance that has data. If it was changed, a
+stored LLM key can no longer be read: drafting stops for that workspace, the
+Drafting settings page says so, and an owner enters the key again or removes
+it there.
 
 | Variable | Default | Meaning |
 |---|---|---|
