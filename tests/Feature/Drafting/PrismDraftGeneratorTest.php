@@ -309,7 +309,7 @@ describe('the answer', function () {
             ]);
     });
 
-    it('does not count thinking or cache tokens twice', function () {
+    it('counts input that went through the prompt cache as input, and thinking once', function () {
         Prism::fake([new StructuredResponse(
             steps: collect([]),
             text: '',
@@ -321,7 +321,10 @@ describe('the answer', function () {
 
         $usage = $this->generator->generate($this->request, $this->context)->usage;
 
-        expect($usage->inputTokens)->toBe(100)->and($usage->outputTokens)->toBe(400);
+        expect($usage->inputTokens)->toBe(116)
+            ->and($usage->cacheWriteTokens)->toBe(7)
+            ->and($usage->cacheReadTokens)->toBe(9)
+            ->and($usage->outputTokens)->toBe(400);
     });
 
     it('records the model that was asked for when the answer names none that can be stored', function (string $answeredBy) {

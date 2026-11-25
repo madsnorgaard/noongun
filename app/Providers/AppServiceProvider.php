@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Drafting\DraftGenerators;
+use App\Domain\Drafting\Generators\ProviderReplies;
 use App\Domain\Drafting\PromptRenderer;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Support\Health\CheckBackingServices;
@@ -30,6 +31,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(CurrentWorkspace::class);
         $this->app->singleton(ChannelManager::class);
         $this->app->scoped(DraftGenerators::class);
+        $this->app->singleton(ProviderReplies::class);
     }
 
     /**
