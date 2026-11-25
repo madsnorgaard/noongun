@@ -167,8 +167,10 @@ final class PostPresenter
                     'display_name' => $channel->display_name,
                     'platform_label' => $this->platformLabel($channel->platform),
                     'can_publish' => $channel->canPublish(),
-                    'problem' => PostPreconditions::channelProblem($channel),
+                    'problem' => PostPreconditions::channelProblem($channel)
+                        ?? ($capabilities === null ? PostPreconditions::platformUnavailable($channel) : null),
                     'max_body_length' => $capabilities?->maxBodyLength,
+                    'link_previews' => $capabilities?->linkPreviews,
                     // Set when the platform shows a link only as the card
                     // the author types: the editor then asks for one.
                     'link_title_length' => $capabilities?->linkTitleLength,

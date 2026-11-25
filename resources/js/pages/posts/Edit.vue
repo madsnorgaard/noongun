@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import InputError from '@/components/InputError.vue';
 import PostStateBadge from '@/components/posts/PostStateBadge.vue';
 import PostTexts from '@/components/posts/PostTexts.vue';
+import VariantColumn from '@/components/posts/VariantColumn.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -18,12 +19,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { usePostActions } from '@/composables/usePostActions';
-import {
-    formatDateTime,
-    problemList,
-    textLength,
-    useWorkspaceTimezone,
-} from '@/lib/posts';
+import { formatDateTime, problemList, useWorkspaceTimezone } from '@/lib/posts';
 import { index as channelsIndex } from '@/routes/channels';
 import {
     approve,
@@ -192,20 +188,35 @@ function fieldError(key: string): string | undefined {
     return (form.errors as Record<string, string | undefined>)[key];
 }
 
-// A platform that reads nothing from the linked page shows the link as the
-// card typed here.
-function needsLinkCard(variant: VariantFields): boolean {
-    return (
-        variant.link.trim() !== '' &&
-        (channel(variant.channel_id)?.link_title_length ?? null) !== null
-    );
+// One column per chosen channel, in the order the channels were chosen.
+const columns = computed(() =>
+    form.variants.flatMap((variant, position) => {
+        const option = channel(variant.channel_id);
+
+        return option ? [{ variant, position, option }] : [];
+    }),
+);
+
+function othersFor(
+    channelId: number,
+): { channel_id: number; name: string; body: string }[] {
+    return columns.value
+        .filter((column) => column.variant.channel_id !== channelId)
+        .map((column) => ({
+            channel_id: column.variant.channel_id,
+            name: column.option.display_name,
+            body: column.variant.body,
+        }));
 }
 
-function remaining(variant: VariantFields): number | null {
-    const limit = channel(variant.channel_id)?.max_body_length ?? null;
-
-    return limit === null ? null : limit - textLength(variant.body);
-}
+// With more than one text the columns take the width of the page, and the
+// status and the actions follow below them until the screen is very wide.
+const sideBySide = computed(
+    () =>
+        (editable.value
+            ? form.variants.length
+            : (props.post?.variants.length ?? 0)) > 1,
+);
 
 function save(): void {
     if (!editable.value) {
@@ -407,7 +418,12 @@ const locked = computed(() => {
         </header>
 
         <div
-            class="grid items-start gap-5.5 lg:grid-cols-[minmax(0,1fr)_22rem]"
+            class="grid items-start gap-5.5"
+            :class="
+                sideBySide
+                    ? '2xl:grid-cols-[minmax(0,1fr)_22rem]'
+                    : 'lg:grid-cols-[minmax(0,1fr)_22rem]'
+            "
         >
             <div class="grid content-start gap-4">
                 <template v-if="editable">
@@ -482,156 +498,57 @@ const locked = computed(() => {
                                 </span>
                             </label>
                         </div>
+                        <p
+                            v-if="offered.length > 1"
+                            class="text-sm text-muted-foreground"
+                            data-test="channels-hint"
+                        >
+                            One post, a text for each channel you tick. A
+                            channel you add starts from the first text, and each
+                            text is then changed by itself.
+                        </p>
                         <InputError :message="fieldError('variants')" />
                     </fieldset>
 
-                    <section
-                        v-for="(variant, position) in form.variants"
-                        :key="variant.channel_id"
-                        class="grid gap-4 rounded-2xl bg-card p-5.5 shadow-xs"
-                        :data-test="`text-${variant.channel_id}`"
+                    <div
+                        v-if="columns.length"
+                        class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] items-start gap-4"
+                        data-test="variant-columns"
                     >
-                        <div class="grid gap-2">
-                            <Label :for="`body-${variant.channel_id}`">
-                                Post text for
-                                {{ channel(variant.channel_id)?.display_name }}
-                            </Label>
-                            <textarea
-                                :id="`body-${variant.channel_id}`"
-                                v-model="variant.body"
-                                rows="9"
-                                class="min-h-[220px] w-full resize-y rounded-lg border border-input bg-card p-4 text-lg leading-normal outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                            ></textarea>
-                            <div
-                                class="flex flex-wrap items-start justify-between gap-x-4 gap-y-1"
-                            >
-                                <div class="grid gap-1">
-                                    <InputError
-                                        :message="
-                                            fieldError(
-                                                `variants.${position}.body`,
-                                            )
-                                        "
-                                    />
-                                    <InputError
-                                        :message="
-                                            fieldError(
-                                                `variants.${position}.channel_id`,
-                                            )
-                                        "
-                                    />
-                                </div>
-                                <span
-                                    v-if="remaining(variant) !== null"
-                                    class="ml-auto font-mono text-sm"
-                                    :class="
-                                        (remaining(variant) ?? 0) < 0
-                                            ? 'text-destructive'
-                                            : 'text-muted-foreground'
-                                    "
-                                    :data-test="`remaining-${variant.channel_id}`"
-                                >
-                                    <template
-                                        v-if="(remaining(variant) ?? 0) < 0"
-                                    >
-                                        {{ -(remaining(variant) ?? 0) }} over
-                                        the limit of
-                                        {{
-                                            channel(variant.channel_id)
-                                                ?.max_body_length
-                                        }}
-                                    </template>
-                                    <template v-else>
-                                        <span class="sr-only">
-                                            {{ remaining(variant) }} characters
-                                            left:
-                                        </span>
-                                        {{ textLength(variant.body) }} /
-                                        {{
-                                            channel(variant.channel_id)
-                                                ?.max_body_length
-                                        }}
-                                    </template>
-                                </span>
-                            </div>
-                        </div>
-
-                        <div class="grid gap-1.5">
-                            <Label :for="`link-${variant.channel_id}`">
-                                Link (optional)
-                            </Label>
-                            <Input
-                                :id="`link-${variant.channel_id}`"
-                                v-model="variant.link"
-                                type="url"
-                                inputmode="url"
-                            />
-                            <InputError
-                                :message="
-                                    fieldError(`variants.${position}.link`)
-                                "
-                            />
-                        </div>
-
-                        <div
-                            v-if="needsLinkCard(variant)"
-                            class="grid gap-4"
-                            :data-test="`link-card-${variant.channel_id}`"
-                        >
-                            <p
-                                class="max-w-[72ch] text-sm text-muted-foreground"
-                            >
-                                {{
-                                    channel(variant.channel_id)?.platform_label
-                                }}
-                                does not read the linked page. It shows the link
-                                with the title and description you write here.
-                            </p>
-                            <div class="grid gap-1.5">
-                                <Label
-                                    :for="`link-title-${variant.channel_id}`"
-                                >
-                                    Link title
-                                </Label>
-                                <Input
-                                    :id="`link-title-${variant.channel_id}`"
-                                    v-model="variant.link_title"
-                                    type="text"
-                                    :maxlength="
-                                        channel(variant.channel_id)
-                                            ?.link_title_length ?? undefined
-                                    "
-                                />
-                                <InputError
-                                    :message="
-                                        fieldError(
-                                            `variants.${position}.link_title`,
-                                        )
-                                    "
-                                />
-                            </div>
-                            <div class="grid gap-1.5">
-                                <Label
-                                    :for="`link-description-${variant.channel_id}`"
-                                >
-                                    Link description (optional)
-                                </Label>
-                                <textarea
-                                    :id="`link-description-${variant.channel_id}`"
-                                    v-model="variant.link_description"
-                                    rows="2"
-                                    class="w-full resize-y rounded-lg border border-input bg-card px-3 py-2 text-base outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                                ></textarea>
-                                <InputError
-                                    :message="
-                                        fieldError(
-                                            `variants.${position}.link_description`,
-                                        )
-                                    "
-                                />
-                            </div>
-                        </div>
-                    </section>
+                        <VariantColumn
+                            v-for="column in columns"
+                            :key="column.variant.channel_id"
+                            v-model:body="column.variant.body"
+                            v-model:link="column.variant.link"
+                            v-model:link-title="column.variant.link_title"
+                            v-model:link-description="
+                                column.variant.link_description
+                            "
+                            :channel="column.option"
+                            :others="othersFor(column.variant.channel_id)"
+                            :errors="{
+                                body: fieldError(
+                                    `variants.${column.position}.body`,
+                                ),
+                                channel: fieldError(
+                                    `variants.${column.position}.channel_id`,
+                                ),
+                                link: fieldError(
+                                    `variants.${column.position}.link`,
+                                ),
+                                linkTitle: fieldError(
+                                    `variants.${column.position}.link_title`,
+                                ),
+                                linkDescription: fieldError(
+                                    `variants.${column.position}.link_description`,
+                                ),
+                            }"
+                            :data-test="`text-${column.variant.channel_id}`"
+                            @remove="
+                                toggleChannel(column.variant.channel_id, false)
+                            "
+                        />
+                    </div>
 
                     <section
                         v-if="post && lockedVariants.length"
@@ -645,6 +562,7 @@ const locked = computed(() => {
                         </div>
                         <PostTexts
                             :post="{ ...post, variants: lockedVariants }"
+                            side-by-side
                         />
                     </section>
                 </template>
@@ -671,12 +589,15 @@ const locked = computed(() => {
                     </section>
 
                     <section class="rounded-2xl bg-card p-5.5 shadow-xs">
-                        <PostTexts :post="post" />
+                        <PostTexts :post="post" side-by-side />
                     </section>
                 </template>
             </div>
 
-            <aside class="grid content-start gap-4">
+            <aside
+                class="grid content-start items-start gap-4"
+                :class="sideBySide ? 'md:grid-cols-2 2xl:grid-cols-1' : ''"
+            >
                 <section
                     class="grid gap-2 rounded-xl p-5.5"
                     :class="
@@ -895,6 +816,46 @@ const locked = computed(() => {
                     "
                     class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
                 >
+                    <!-- One approval covers every text that is still to
+                         be sent. This says which, and when they go. -->
+                    <div
+                        v-if="post?.can.approve && !form.isDirty"
+                        class="grid gap-1.5 pb-1 text-base"
+                        data-test="approval-covers"
+                    >
+                        <p>
+                            <template v-if="pending.length === 1">
+                                Approving covers the text for:
+                            </template>
+                            <template v-else>
+                                One approval covers all
+                                {{ pending.length }} texts of this post:
+                            </template>
+                        </p>
+                        <ul class="grid gap-1">
+                            <li v-for="variant in pending" :key="variant.id">
+                                {{ variant.channel_name }}
+                                <span class="text-muted-foreground">
+                                    - {{ variant.platform_label }}
+                                </span>
+                            </li>
+                        </ul>
+                        <p v-if="post.scheduled_at">
+                            {{
+                                pending.length === 1
+                                    ? 'Once approved it fires'
+                                    : 'Once approved they fire together,'
+                            }}
+                            <span class="font-mono">{{
+                                formatDateTime(post.scheduled_at, timezone)
+                            }}</span
+                            >.
+                        </p>
+                        <p v-else>
+                            Nothing is sent until the post has a firing time.
+                        </p>
+                    </div>
+
                     <!-- Approving is the one red action of this page. -->
                     <Button
                         v-if="post?.can.approve"

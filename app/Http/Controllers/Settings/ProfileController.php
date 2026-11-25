@@ -9,6 +9,8 @@ use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -50,9 +52,19 @@ class ProfileController extends Controller
     {
         $user = $request->user();
 
-        Auth::logout();
+        DB::transaction(function () use ($user): void {
+            $workspace = $user->workspaceWithNoOtherOwner();
 
-        $user->delete();
+            if ($workspace !== null) {
+                throw ValidationException::withMessages([
+                    'account' => __('You are the only owner of :workspace. A workspace must keep an owner, so this account cannot be deleted.', ['workspace' => $workspace->name]),
+                ]);
+            }
+
+            Auth::logout();
+
+            $user->delete();
+        });
 
         $request->session()->invalidate();
         $request->session()->regenerateToken();

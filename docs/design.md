@@ -273,6 +273,9 @@ decide. Until then the interface follows the system and borrows only the look.
 - **Slots.** The guide calls them firing time slots. A slot only proposes a time
   for a draft, so the pages say "planned time"; "firing time" stays for a post
   that is approved.
+- **Built in M5.** The texts of a post side by side, one column per channel,
+  with "Copy text from" between them (ADR 0014). The unit of approval is still
+  the post.
 - **Built in M4.** Brief, slots, idea and pillar, and "Why it was drafted this
   way".
 - **Not built yet.** Voice rule checks, photos and alt text, the platform

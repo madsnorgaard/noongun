@@ -57,7 +57,7 @@ describe('start', function () {
         Http::assertNothingSent();
     });
 
-    it('lets the same roles connect as for every platform and refuses viewers', function (Role $role, bool $allowed) {
+    it('lets only owners connect, as for every platform', function (Role $role, bool $allowed) {
         $response = $this->actingAs(workspaceMember($this->workspace, $role))->post(route('channels.connect', 'linkedin'));
 
         $allowed ? $response->assertRedirect() : $response->assertForbidden();
@@ -65,7 +65,7 @@ describe('start', function () {
         expect(session()->has(ConnectChannelController::PENDING))->toBe($allowed);
     })->with([
         'owner' => [Role::Owner, true],
-        'editor' => [Role::Editor, true],
+        'editor' => [Role::Editor, false],
         'viewer' => [Role::Viewer, false],
     ]);
 

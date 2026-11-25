@@ -72,10 +72,10 @@ const explanation = computed(() => {
     }
 
     if (props.key_source === 'instance') {
-        return `Drafts are written with the key of this instance, set by its operator. Store a key below to use an ${props.provider.label} account of your own.`;
+        return `Drafts are written with the key of this instance, set by its operator. Store a key below to use your own ${props.provider.label} account.`;
     }
 
-    return `There is no key, so drafts cannot be requested. Store a ${props.provider.label} API key below.`;
+    return `There is no key, so drafts cannot be requested. Store an API key for ${props.provider.label} below.`;
 });
 
 function remove(): void {

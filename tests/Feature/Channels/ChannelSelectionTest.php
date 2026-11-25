@@ -173,16 +173,16 @@ describe('two Pages that are new to the workspace', function () {
             ->and(($this->publishable)())->toBe(['555']);
     });
 
-    it('is closed to viewers', function () {
-        $viewer = workspaceMember($this->workspace, Role::Viewer);
+    it('is closed to editors and viewers', function (Role $role) {
+        $member = workspaceMember($this->workspace, $role);
         $coffee = ($this->channel)(COFFEE)->id;
 
-        $this->actingAs($viewer)->get(route('channels.selection.edit'))->assertForbidden();
-        $this->actingAs($viewer)->put(route('channels.selection.update'), ['keep' => [$coffee]])->assertForbidden();
-        $this->actingAs($viewer)->delete(route('channels.selection.destroy'))->assertForbidden();
+        $this->actingAs($member)->get(route('channels.selection.edit'))->assertForbidden();
+        $this->actingAs($member)->put(route('channels.selection.update'), ['keep' => [$coffee]])->assertForbidden();
+        $this->actingAs($member)->delete(route('channels.selection.destroy'))->assertForbidden();
 
         expect(DB::table('channels')->where('status', 'pending')->count())->toBe(2);
-    });
+    })->with(['editor' => Role::Editor, 'viewer' => Role::Viewer]);
 
     it('does not carry over to another workspace of the same user', function () {
         $other = Workspace::factory()->create();

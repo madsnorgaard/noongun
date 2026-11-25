@@ -16,11 +16,25 @@ it('ignores forwarded headers when no proxy is trusted', function () {
         ->assertJsonMissing(['url' => 'https://noongun.example.ts.net/next']);
 });
 
-it('builds https links behind a trusted proxy', function () {
+it('builds https links behind a trusted proxy, with the host the proxy passed on', function () {
     config()->set('trustedproxy.proxies', ['127.0.0.1']);
 
-    $this->withHeaders(['X-Forwarded-Proto' => 'https', 'X-Forwarded-Host' => 'noongun.example.ts.net'])
-        ->getJson('/_test/scheme')
+    $this->withHeaders(['X-Forwarded-Proto' => 'https'])
+        ->getJson('http://noongun.example.ts.net/_test/scheme')
+        ->assertOk()
+        ->assertJson(['secure' => true, 'url' => 'https://noongun.example.ts.net/next']);
+});
+
+it('ignores a forwarded host and port, even from a trusted proxy', function () {
+    config()->set('trustedproxy.proxies', ['127.0.0.1']);
+
+    $this->withHeaders([
+        'X-Forwarded-Proto' => 'https',
+        'X-Forwarded-Host' => 'evil.example',
+        'X-Forwarded-Port' => '8443',
+        'X-Forwarded-Prefix' => '/evil',
+    ])
+        ->getJson('http://noongun.example.ts.net/_test/scheme')
         ->assertOk()
         ->assertJson(['secure' => true, 'url' => 'https://noongun.example.ts.net/next']);
 });

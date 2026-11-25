@@ -83,6 +83,8 @@ export type ChannelOption = {
     can_publish: boolean;
     problem: string | null;
     max_body_length: number | null;
+    /** Whether the platform shows a link as a preview card. Null when unknown. */
+    link_previews: boolean | null;
     /** Set when the platform shows a link only as the card the author types. */
     link_title_length: number | null;
     link_description_length: number | null;

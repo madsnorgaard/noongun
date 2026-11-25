@@ -60,9 +60,22 @@ class User extends Authenticatable implements MustVerifyEmail, PasskeyUser
             ->withTimestamps();
     }
 
-    public function isOwnerOfAnyWorkspace(): bool
+    /**
+     * A workspace that would be left without an owner if this user went
+     * away. Locks the workspaces this user owns, so call it in a transaction
+     * together with the change it guards.
+     */
+    public function workspaceWithNoOtherOwner(): ?Workspace
     {
-        return $this->memberships()->where('role', Role::Owner)->exists();
+        return Workspace::query()
+            ->whereIn('id', $this->memberships()->where('role', Role::Owner)->select('workspace_id'))
+            ->orderBy('id')
+            ->lockForUpdate()
+            ->get()
+            ->first(fn (Workspace $workspace): bool => ! $workspace->memberships()
+                ->where('role', Role::Owner)
+                ->where('user_id', '!=', $this->id)
+                ->exists());
     }
 
     /**
