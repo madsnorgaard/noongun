@@ -205,17 +205,51 @@ A generated post is a draft like one you typed: nothing is approved, scheduled
 or published until a person does so. Drafting is optional. Without an API key
 the rest of the application works as before.
 
+### The provider
+
+Two providers are built in: Anthropic (`anthropic`) and OpenAI (`openai`).
+`NOONGUN_DRAFT_PROVIDER` names the one a workspace drafts with until its owner
+chooses another, and is `anthropic` unless you change it.
+
+An owner can choose another provider under Settings, Drafting, but only among
+those the operator offers. `NOONGUN_DRAFT_PROVIDERS` lists them, comma
+separated; the default provider is always offered, and with the variable empty
+it is the only one. To offer both:
+
+```
+NOONGUN_DRAFT_PROVIDERS=anthropic,openai
+```
+
+Offering a provider means that the brief, the voice rules, the pillar and the
+idea of a workspace that chooses it are sent to that company. Decide that as
+the operator before you list it. When a provider is taken off the list,
+workspaces that chose it stop drafting until an owner chooses again; they are
+not moved to the default provider, because their content would then go to a
+company they did not choose.
+
+Changing the provider opens no new allowance: the daily limits count draft
+runs whatever provider wrote them. A draft that was asked for before the
+change is not written with the new provider; it fails and says so, and
+nothing is spent.
+
 ### The key
 
-Drafting needs an API key of the provider, which is Anthropic unless you
-configure another one. There are two places for a key:
+Drafting needs an API key of the provider in use. Each provider has its own
+keys, and a key is only ever used with the provider it was stored for. There
+are two places for a key:
 
-- **The instance key** is set by the operator as `ANTHROPIC_API_KEY` in `.env`.
-  Every workspace that has no key of its own uses it, and the operator's
-  account is billed.
+- **The instance key** is set by the operator in `.env`: `ANTHROPIC_API_KEY`
+  for Anthropic, `OPENAI_API_KEY` for OpenAI. Every workspace that has no key
+  of its own for that provider uses it, and the operator's account is billed.
 - **A workspace key** is stored by an owner of the workspace under Settings,
-  Drafting. It goes before the instance key, and the account it belongs to is
-  billed. Removing it puts the workspace back on the instance key.
+  Drafting, for one provider. It goes before the instance key of that
+  provider, and the account it belongs to is billed. Removing it puts the
+  workspace back on the instance key of that provider. A workspace can hold a
+  key for each provider.
+
+The key form refuses a key that looks like the key of another provider (an
+Anthropic key pasted under OpenAI, or the reverse), so that it is not sent to
+the wrong company.
 
 A workspace key is stored encrypted with `APP_KEY` and is write-only: after it
 is saved, the page shows the provider, the last four characters, when it was
@@ -225,19 +259,24 @@ and removing the key needs a recently confirmed password, like the security
 settings, so a session that someone else got hold of cannot swap the key. Each
 draft run records whether the instance key or the workspace key paid for it.
 
-To create a key, sign in to the Claude Console at `platform.claude.com`, add
-credit to the account and create an API key. Set a spending limit for the
-account there: Noon Gun estimates cost, it does not cap what the provider
-charges.
+To create an Anthropic key, sign in to the Claude Console at
+`platform.claude.com`, add credit to the account and create an API key. To
+create an OpenAI key, sign in at `platform.openai.com`, add credit and create
+a key for a project. Set a spending limit for the account or the project
+there: Noon Gun estimates cost, it does not cap what the provider charges.
 
 ### Settings
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | empty | The instance key. |
-| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The provider. Must be listed under `drafting.providers` in `config/noongun.php`. |
-| `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The model. |
+| `ANTHROPIC_API_KEY` | empty | The instance key for Anthropic. |
+| `OPENAI_API_KEY` | empty | The instance key for OpenAI. |
+| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The default provider. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `NOONGUN_DRAFT_PROVIDERS` | empty | The providers an owner may choose from, comma separated. The default provider is always one of them. |
+| `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The Anthropic model. |
 | `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
+| `NOONGUN_DRAFT_OPENAI_MODEL` | `gpt-6.2-sol` | The OpenAI model. |
+| `NOONGUN_DRAFT_OPENAI_EFFORT` | empty | The reasoning effort for OpenAI: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`, as far as the model accepts it. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call. |
 | `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | The folder under `resources/prompts/draft/` that holds the prompt. |
@@ -296,9 +335,18 @@ tokens times the price per million tokens in `drafting.prices` of
 `config/noongun.php`, in `NOONGUN_DRAFT_PRICE_CURRENCY`. A run that needed a
 second request counts both. A failed run keeps the tokens it used.
 
+The price is that of the provider and model the run used, and both are stored
+on the run, so the estimate of an old run stays what it was when the workspace
+changes its provider or the operator changes a model. Input that a provider
+read from or wrote to its prompt cache is priced with `cached_input` and
+`cache_write` of the model when the table has them (OpenAI caches long prompts
+by itself), and as plain input otherwise. The worst case shown before a
+proposal counts all input at the dearest of these prices.
+
 It is an estimate, not an invoice. It leaves out anything the provider bills
 that is not an input or output token, and it is as good as the price table.
-The built-in prices were checked against Anthropic's price list on 2026-11-25.
+The built-in prices were checked against the price lists of Anthropic and
+OpenAI on 2026-11-25.
 Prices change: check them when you change the model, and add or replace
 entries with `NOONGUN_DRAFT_PRICES`. A model without a price gives runs with
 tokens and no estimate.
@@ -313,6 +361,13 @@ price with `NOONGUN_DRAFT_PRICES`:
 NOONGUN_DRAFT_ANTHROPIC_MODEL=claude-sonnet-5-5
 NOONGUN_DRAFT_PRICES={"anthropic":{"claude-sonnet-5-5":{"input":2,"output":10}}}
 ```
+
+For OpenAI the variables are `NOONGUN_DRAFT_OPENAI_MODEL` and
+`NOONGUN_DRAFT_OPENAI_EFFORT`, and the prices go under `"openai"`, with
+`cached_input` and `cache_write` when you know them. OpenAI recommends room
+for 25,000 tokens of reasoning and answer when you start with a reasoning
+model; with the default of 16,000 in `NOONGUN_DRAFT_MAX_TOKENS`, set a low
+effort or raise the limit if answers are cut off.
 
 The model must support structured outputs. A smaller model is cheaper and
 faster and writes plainer drafts. Thinking counts against
@@ -569,7 +624,11 @@ it there.
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
-| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider drafts are generated with. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `OPENAI_API_KEY` | empty | The instance key for drafting with OpenAI, used by every workspace that drafts with OpenAI and has no OpenAI key of its own. |
+| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider a workspace drafts with until its owner chooses another. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `NOONGUN_DRAFT_PROVIDERS` | empty | The providers an owner may choose from, comma separated, for example `anthropic,openai`. The default provider is always one of them. |
+| `NOONGUN_DRAFT_OPENAI_MODEL` | `gpt-6.2-sol` | The OpenAI model drafts are generated with. |
+| `NOONGUN_DRAFT_OPENAI_EFFORT` | empty | The reasoning effort for OpenAI. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The Claude model drafts are generated with. |
 | `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |

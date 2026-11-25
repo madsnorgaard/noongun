@@ -347,3 +347,219 @@ express:
   tokens for the same text than earlier models. The estimate uses the tokens
   the provider reports, so it is not affected, but a comparison of prices per
   token across model generations is.
+
+## 2026-11-25 - OpenAI as a second provider (issue #5)
+
+Read from the installed package (Prism v0.103.0,
+`vendor/prism-php/prism/src/Providers/OpenAI`) and from OpenAI's
+documentation on `developers.openai.com/api/docs` (where
+`platform.openai.com/docs` now redirects) on 2026-11-25: the pricing page,
+the models page, and the guides for structured outputs, reasoning, prompt
+caching, error codes and data controls. The API reference page for creating
+a response was too long to be read in full; what is said below about request
+fields comes from the guides and from Prism's source.
+
+### 1. The call
+
+Prism's OpenAI provider uses the **Responses API**: `POST /v1/responses` with
+`Authorization: Bearer <key>`. For our request it sends:
+
+```json
+{
+  "model": "...",
+  "input": [
+    {"role": "system", "content": "<system prompt>"},
+    {"role": "user", "content": [{"type": "input_text", "text": "<user prompt>"}]}
+  ],
+  "max_output_tokens": 16000,
+  "tools": [],
+  "parallel_tool_calls": false,
+  "store": false,
+  "text": {"format": {"type": "json_schema", "name": "post_draft", "schema": {}, "strict": true}}
+}
+```
+
+and `"reasoning": {"effort": "..."}` when an effort is configured. A test
+asserts the whole body and the headers.
+
+- **Token limit.** `withMaxTokens()` becomes `max_output_tokens`. It includes
+  reasoning tokens.
+- **Key.** The per-call `api_key` of `using()` becomes the bearer token, as
+  for Anthropic. Prism's own configuration also reads `OPENAI_API_KEY`,
+  `OPENAI_URL`, `OPENAI_ORGANIZATION` and `OPENAI_PROJECT` from the
+  environment; the per-call key replaces the first. The organization and
+  project headers are sent only when those variables are set, and they then
+  apply to every workspace, also one with its own key. Leave them unset.
+- **Strict.** Prism sends `strict` only when the provider option
+  `schema.strict` is given. We give `true`.
+- **Store.** The Responses API keeps a response as conversation state for 30
+  days unless told otherwise. We never continue a conversation, so `store` is
+  `false`. Abuse monitoring logs are a separate matter and are kept for up to
+  30 days by default; API data is not used for training unless the account
+  opts in (data controls guide).
+- **Temperature.** Not sent, as for Anthropic.
+- **Structured mode.** Prism picks JSON mode for `gpt-3.5-turbo`, `gpt-4`
+  and `gpt-4-*`, and refuses `o1-mini` and `o1-preview`. Every other model
+  name gets `json_schema`. Do not configure one of the old ones.
+
+Everything that differs from the Anthropic call is in
+`App\Domain\Drafting\Generators\PrismDialect`.
+
+### 2. The strict schema
+
+The rules for a strict schema (structured outputs guide, "Supported
+schemas"), and how `DraftSchema::definition()` stands:
+
+| Rule | `DraftSchema` |
+|---|---|
+| The root is an object and not an `anyOf` | yes |
+| Every object has `additionalProperties: false` | yes, both objects |
+| Every property is listed in `required` | yes |
+| An optional value is a union with `null` | `link` and `alt_text` are `anyOf` of string and null |
+| Types: string, number, boolean, integer, object, array, enum, `anyOf` | only these |
+| Not supported: `allOf`, `not`, `dependentRequired`, `dependentSchemas`, `if`, `then`, `else` | none used |
+| At most 5000 properties and 10 levels of nesting | 6 properties, 3 levels |
+
+The guide's example of an optional value uses `"type": ["string", "null"]`;
+`anyOf` with a null branch appears in its example of a recursive schema and
+`anyOf` is a supported type, so the schema is left as it is. It was not sent
+to the live API. `tests/Feature/Drafting/OpenAiDraftingTest.php` walks the
+schema against these rules, so a change that breaks one fails a test.
+
+The schema is the same one for both providers. Strict mode holds a finished
+answer to it; it does not replace our check. The answer of either provider
+goes through `DraftSchema::problems()` and `DraftResult::fromArray()`, and
+what the schema cannot say (which channels, how long) is checked there.
+Output keys come in the order of the schema.
+
+### 3. Answers that are not a draft
+
+| What OpenAI answers | What Prism gives | What the generator does |
+|---|---|---|
+| `status: completed`, a message with `output_text` | `FinishReason::Stop`, `structured` decoded | validates |
+| a message part of type `refusal` | `FinishReason::Refusal`, `structured` empty | fails at once, permanent. The text of the refusal is not used |
+| `status: incomplete`, reason `content_filter` | `FinishReason::ContentFilter` | as a refusal |
+| `status: incomplete`, reason `max_output_tokens` | **throws** `PrismException` ("max tokens exceeded"), without the usage | fails at once, permanent, as a cut off answer, with the usage read from the answer (see 5) |
+| `status: failed` with an `error` object | **throws** `PrismException` ("OpenAI Error: [unknown] ...") | `server_error` and `rate_limit_exceeded` retryable, others permanent |
+| `status: completed`, text that is not JSON | **throws** `PrismStructuredDecodingException` with the text in its message | counts as an invalid answer and is asked for once more; the text is not kept |
+
+The last row holds for every provider: `Structured\ResponseBuilder` decodes
+the text of a finished answer and throws when it cannot. The earlier entry
+("Invalid JSON does not throw") was true for the strategy class and not for
+the response as a whole.
+
+The reasoning guide notes that an answer can reach `max_output_tokens`
+before any visible text, and that input and reasoning tokens are billed all
+the same. It recommends room for at least 25,000 tokens when starting out.
+Our default is 16,000 for both providers.
+
+### 4. Usage
+
+| Prism | OpenAI | Note |
+|---|---|---|
+| `promptTokens` | `usage.input_tokens` minus cached and cache write tokens | Prism subtracts, because OpenAI's `input_tokens` includes them |
+| `cacheReadInputTokens` | `usage.input_tokens_details.cached_tokens` | |
+| `cacheWriteInputTokens` | `usage.input_tokens_details.cache_write_tokens` | |
+| `completionTokens` | `usage.output_tokens` | includes reasoning tokens, which are billed as output |
+| `thoughtTokens` | `usage.output_tokens_details.reasoning_tokens` | part of `completionTokens`. Do not add it |
+
+OpenAI caches prompts by itself from 1,024 tokens on (prompt caching guide),
+and a week of drafts shares most of its prompt. So `promptTokens` alone would
+under-count. The generator now records **all** input as
+`draft_runs.input_tokens` (prompt plus cache read plus cache write), for
+every provider, and passes the two cache figures to the cost estimate. For
+Anthropic they are zero as long as we do not ask for caching. This replaces
+section 4 of the first entry, which recorded `promptTokens` only.
+
+Cached input is billed at other prices: a read at 0.1 times the input price
+on most current models (0.05 on some), a write at 1.25 times for the default
+lifetime of 30 minutes on GPT-5.6 and later. The price table can hold
+`cached_input` and `cache_write` per model; without them such tokens count
+at the input price. The two cache figures are not stored on the run, only
+the estimate that was worked out from them.
+
+### 5. Errors
+
+Prism maps an HTTP error of OpenAI like one of Anthropic: 429 to
+`PrismRateLimitedException`, 529 and 413 to their own classes, every other
+status to `PrismException` with the status as code, the message
+`OpenAI Error [status]: type - message` and the HTTP exception as
+`$previous` (which holds the bearer token, so it is never passed on).
+
+Two things are lost on the way, and the generator reads them from the HTTP
+answer itself (`Generators\ProviderReplies` listens to the HTTP client only
+while a call to a provider runs, and keeps a few plain fields, nothing of
+the request):
+
+- **Why a 429.** OpenAI answers 429 both for "too fast" and for "out of
+  credit" (error codes guide). Too fast (`rate_limit_error`, code
+  `slow_down` or a rate limit) is worth trying again. Out of credit is not:
+  type `insufficient_quota`, or the codes `credit_balance_exhausted`,
+  `organization_spend_limit_exceeded`, `project_spend_limit_exceeded`,
+  `organization_usage_limit_exceeded`. "Retrying billing, spend, or quota
+  errors won't restore API access."
+- **What a cut off answer used.** See the table in 3.
+
+| What happens | How the generator reports it |
+|---|---|
+| 401 (wrong, revoked or foreign key, IP not allowed) | permanent, "did not accept the API key" |
+| 403 (country not supported) | permanent, "not allowed to do this" |
+| 404 (model unknown or not available to the key) | permanent, names the operator |
+| 400 (a schema or a parameter the API refuses) | permanent, the provider's words in the operator detail |
+| 429, too fast | retryable, with `retry_after` |
+| 429, out of credit or over a spending limit | permanent, "no credit left or a billing problem" |
+| 500, 502, 503 (`server_is_overloaded`) | retryable |
+| Timeout, connection failure | retryable |
+
+The error names are in `PrismDialect`. `billing_not_active`,
+`server_error` and `rate_limit_exceeded` are on its lists from memory of
+earlier versions of the API and were not found in the pages read; they do no
+harm if they never occur.
+
+### 6. Model and prices
+
+From the pricing page and the models page, 2026-11-25, USD per million
+tokens, standard tier, prompts up to 272,000 tokens:
+
+| Model | Identifier | Input | Cached input | Output |
+|---|---|---|---|---|
+| GPT-6.2 Astra | `gpt-6.2-astra` | 8.00 | 0.40 | 40.00 |
+| GPT-6.2 Sol | `gpt-6.2-sol` | 2.00 | 0.10 | 10.00 |
+| GPT-6.1 Terra | `gpt-6.1-terra` | 1.00 | 0.05 | 5.00 |
+| GPT-6 Luna | `gpt-6-luna` | 0.10 | 0.01 | 0.50 |
+
+These four are the "flagship models" of the models page and are in the
+price table. `cache_write` in the table is 1.25 times the input price, worked
+out from the prompt caching guide and not read from the price list.
+
+Default: **`gpt-6.2-sol`**, "our go-to model for everyday work". The models
+page says "If you're not sure where to start, use GPT-6.2 Astra", which costs
+four times as much; a post of a few hundred words does not need it, and the
+model is one variable (`NOONGUN_DRAFT_OPENAI_MODEL`). This differs from the
+Anthropic default, which is that vendor's first recommendation.
+
+Reasoning effort (`reasoning.effort`): `none`, `minimal`, `low`, `medium`,
+`high`, `xhigh`, `max`, depending on the model. GPT-6.2 Sol and both Astra
+models reject `none`. The page names `medium` as the default for several
+models and does not say what GPT-6.2 Sol does without a value.
+`NOONGUN_DRAFT_OPENAI_EFFORT` is empty by default, which sends nothing.
+
+### 7. Keys
+
+An OpenAI key is sent as a bearer token, an Anthropic key in `x-api-key`. A
+key is stored per provider and looked up by provider, an `LlmKey` knows its
+provider, a `DraftingContext` cannot be built with a key of another
+provider, and the generator reads the value with `revealFor($provider)`.
+
+The key form also refuses a key whose beginning is that of another
+provider's keys (`key_prefix` in the configuration: `sk-ant-` for Anthropic,
+`sk-` for OpenAI; the longest prefix that fits decides). The prefixes are
+from the keys in use today and from no documentation page. If a provider
+changes how its keys start, change `key_prefix` in `config/noongun.php`.
+
+### 8. Testing
+
+The tests of the OpenAI path fake the HTTP client, not Prism, so Prism's own
+OpenAI provider runs: the request body, the headers and the reading of each
+kind of answer are real. The answers are written by hand in the shape of the
+Responses API. No answer was recorded from the live API.
