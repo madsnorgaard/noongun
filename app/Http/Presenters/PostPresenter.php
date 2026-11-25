@@ -13,6 +13,7 @@ use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Content\PostPreconditions;
 use App\Domain\Content\PostState;
+use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Workspaces\CurrentWorkspace;
 use Illuminate\Support\Str;
 
@@ -93,6 +94,9 @@ final class PostPresenter
             'alt_text' => $run->alt_text,
             // The model suggested a link the author never gave. It was left out.
             'link_dropped' => $run->link_dropped,
+            // Channels the draft was planned for and could not be written
+            // for, because they could not publish when it was drafted.
+            'left_out' => $this->leftOut($run),
             'drafted_at' => $run->finished_at?->toIso8601String(),
             // What this one draft used: tokens as the provider reported
             // them, and the estimate of the price table when there is one.
@@ -186,22 +190,41 @@ final class PostPresenter
     private function variant(PostVariant $variant): array
     {
         $channel = $variant->channel;
+        $capabilities = $channel !== null ? $this->capabilities($channel) : null;
+        // The card of a link belongs to a platform that shows one. On any
+        // other channel a stored title is never used, so it is not shown.
+        $card = $capabilities?->needsLinkCard() ?? false;
 
         return [
             'id' => $variant->id,
             'channel_id' => $variant->channel_id,
             'channel_name' => $channel->display_name ?? '',
             'platform_label' => $channel !== null ? $this->platformLabel($channel->platform) : '',
-            'max_body_length' => $channel !== null ? $this->capabilities($channel)?->maxBodyLength : null,
+            'max_body_length' => $capabilities?->maxBodyLength,
             'body' => $variant->body,
             'link' => $variant->link,
-            'link_title' => $variant->link_title,
-            'link_description' => $variant->link_description,
+            'link_title' => $card ? $variant->link_title : null,
+            'link_description' => $card ? $variant->link_description : null,
             'published' => $variant->isPublished(),
+            'outcome_unknown' => $variant->hasUnknownOutcome(),
             'permalink' => $variant->permalink,
             'published_at' => $variant->published_at?->toIso8601String(),
             'error' => $variant->isPublished() ? null : $variant->error,
         ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function leftOut(DraftRun $run): array
+    {
+        $ids = array_values(array_filter((array) ($run->request['left_out_channel_ids'] ?? []), is_numeric(...)));
+
+        if ($ids === []) {
+            return [];
+        }
+
+        return array_values(Channel::query()->whereKey($ids)->orderBy('id')->pluck('display_name')->all());
     }
 
     private function capabilities(Channel $channel): ?ChannelCapabilities
