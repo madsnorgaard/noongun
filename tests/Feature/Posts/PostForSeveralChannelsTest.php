@@ -198,7 +198,7 @@ describe('the editor', function () {
         $this->actingAs($this->editor)->get(route('posts.create'))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('channels.2.id', $elsewhere->id)
-                ->where('channels.2.problem', 'Publishing to somewhere is not available on this instance.')
+                ->where('channels.2.problem', 'Publishing to Somewhere is not available on this instance.')
                 ->where('channels.2.max_body_length', null)
                 ->where('channels.2.link_previews', null));
     });
