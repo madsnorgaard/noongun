@@ -1,0 +1,16 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "b360e1e0-ee34-4224-ad87-e505147891d5",
+  "version": 1,
+  "timestamp": "2026-11-25T18:19:18.905Z",
+  "payload": {
+    "title": "Content-Security-Policy is limited to frame-ancestors for now",
+    "context": "Security review of M3 (#16) added security response headers.",
+    "rationale": "A full script and style policy needs nonce support in the Vite build. frame-ancestors none with X-Frame-Options DENY closes clickjacking today without breaking the app.",
+    "alternatives": [
+      "Full CSP with nonces now"
+    ],
+    "consequences": "A full policy is left for M7 hardening."
+  },
+  "seq": 1
+}

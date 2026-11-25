@@ -1,0 +1,17 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "613c43d4-5694-4a28-8f17-dcf553304812",
+  "version": 1,
+  "timestamp": "2026-11-25T18:19:17.655Z",
+  "payload": {
+    "title": "Horizon is open to instance operators only",
+    "context": "Security review of M3 (#16): Horizon was open to every signed-in user and to everyone in the local environment.",
+    "rationale": "Queue payloads and failures can show data of every workspace, so only whoever operates the instance may see them. NOONGUN_OPERATOR_EMAILS names the operators; when empty, a self-hosted instance falls back to the owners of the oldest workspace and a SaaS instance lets nobody in.",
+    "alternatives": [
+      "Any workspace owner",
+      "Leave the local environment open"
+    ],
+    "consequences": "A SaaS instance must set NOONGUN_OPERATOR_EMAILS."
+  },
+  "seq": 1
+}
