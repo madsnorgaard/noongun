@@ -555,6 +555,36 @@ describe('the API key', function () {
         }
     });
 
+    it('is marked as sensitive in every signature it passes through', function () {
+        $unmarked = [];
+
+        foreach ([
+            PrismDraftGenerator::class,
+            DraftingException::class,
+            DraftGenerationFailed::class,
+            InvalidDraftOutput::class,
+            LlmKey::class,
+            App\Domain\Drafting\Models\LlmCredential::class,
+            App\Domain\Drafting\Models\InstanceLlmCredential::class,
+        ] as $class) {
+            foreach ((new ReflectionClass($class))->getMethods() as $method) {
+                if (! str_starts_with($method->class, 'App\\')) {
+                    continue;
+                }
+
+                foreach ($method->getParameters() as $parameter) {
+                    if (in_array($parameter->getName(), ['secrets', 'secret', 'apiKey', 'value', 'key'], true)
+                        && $parameter->getType()?->__toString() !== LlmKey::class
+                        && $parameter->getAttributes(SensitiveParameter::class) === []) {
+                        $unmarked[] = "{$method->class}::{$method->getName()}(\${$parameter->getName()})";
+                    }
+                }
+            }
+        }
+
+        expect(array_values(array_unique($unmarked)))->toBe([]);
+    });
+
     it('is not logged by the generator itself', function () {
         Log::spy();
         Prism::fake([prismAnswer()]);

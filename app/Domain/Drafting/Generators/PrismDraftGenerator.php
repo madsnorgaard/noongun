@@ -24,6 +24,7 @@ use Prism\Prism\Exceptions\PrismRequestTooLargeException;
 use Prism\Prism\Facades\Prism;
 use Prism\Prism\Schema\RawSchema;
 use Prism\Prism\Structured\Response;
+use SensitiveParameter;
 use Throwable;
 
 /**
@@ -157,7 +158,7 @@ class PrismDraftGenerator implements DraftGenerator
     /**
      * @param  list<string>  $secrets
      */
-    private function providerError(PrismException $failure, DraftingContext $context, ?DraftUsage $usage, array $secrets): DraftGenerationFailed
+    private function providerError(PrismException $failure, DraftingContext $context, ?DraftUsage $usage, #[SensitiveParameter] array $secrets): DraftGenerationFailed
     {
         $status = $failure->httpStatus ?? ($failure->getCode() >= 400 && $failure->getCode() <= 599 ? $failure->getCode() : null);
         $type = preg_match('/\b([a-z]+(?:_[a-z]+)*_error)\b/', $failure->getMessage(), $match) === 1 ? $match[1] : null;
