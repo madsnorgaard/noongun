@@ -133,6 +133,15 @@ function remove(slot: Slot): void {
             A slot proposes a planned time for a draft. It schedules nothing:
             nothing is published until you approve it.
         </p>
+        <p
+            v-if="channels.length > 1"
+            class="max-w-[72ch] text-base"
+            data-test="slots-shared-time"
+        >
+            Channels with a slot at the same time get one post, written once for
+            each of them. Slots at different times get separate posts on
+            separate ideas.
+        </p>
 
         <section
             v-if="channels.length === 0"

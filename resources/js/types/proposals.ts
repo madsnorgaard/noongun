@@ -63,6 +63,10 @@ export type WeekPlan = {
     taken: number;
     unavailable: number;
     left_out: number;
+    /** Posts written once for each of several channels that share a time. */
+    shared: number;
+    /** Posts for one channel only, in a plan that drafts for several. */
+    for_one_channel: number;
     short: { pillar: string; missing: number }[];
     /** How many pillars have a weekly target above zero. */
     pillars_with_target: number;

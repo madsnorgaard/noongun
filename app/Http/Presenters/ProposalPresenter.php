@@ -96,6 +96,10 @@ final class ProposalPresenter
             'taken' => $plan->taken,
             'unavailable' => $plan->unavailable,
             'left_out' => $plan->leftOut,
+            // One post for several channels, and posts that reach one
+            // channel although the plan drafts for more than one.
+            'shared' => $plan->sharedPosts(),
+            'for_one_channel' => $plan->postsForOneChannel(),
             'pillars_with_target' => Pillar::query()->where('weekly_target', '>', 0)->count(),
             'short' => array_map(fn (array $short): array => [
                 'pillar' => $short['pillar']->name,
