@@ -8,9 +8,15 @@ use RuntimeException;
  * DraftGenerators could not give a generator or a context for a provider:
  * it is not configured, has no model, or its class is missing or is not a
  * DraftGenerator. A configuration mistake, for the operator to fix.
+ *
+ * The message names classes, configuration paths and environment
+ * variables. It is for the log. A member of a workspace is shown
+ * FOR_MEMBERS instead.
  */
 class DraftGeneratorNotAvailable extends RuntimeException
 {
+    public const FOR_MEMBERS = 'Drafting is not set up on this instance. The person who runs the instance can find the reason in the log.';
+
     public static function notConfigured(string $provider): self
     {
         return new self("No draft generator is configured for provider [{$provider}]. Add it to config/noongun.php under drafting.providers.");

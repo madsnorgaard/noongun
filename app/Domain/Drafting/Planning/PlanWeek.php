@@ -8,6 +8,8 @@ use App\Domain\Content\Models\Idea;
 use App\Domain\Content\Models\Pillar;
 use App\Domain\Content\PostState;
 use App\Domain\Drafting\DraftingLimits;
+use App\Domain\Drafting\DraftRunStatus;
+use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Scheduling\Models\Slot;
 use App\Domain\Scheduling\PlannedTimes;
 use App\Domain\Workspaces\Models\Workspace;
@@ -22,8 +24,12 @@ use Illuminate\Database\Eloquent\Builder;
  *
  * 1. Times. Every slot of a channel that can publish gives one time in the
  *    week (Slot::occurrenceInWeekOf(), on the workspace calendar). A time
- *    that has passed is left out. So is a time at which that channel
- *    already has a post that is not rejected.
+ *    that has passed is left out, and one that is closer than the lead
+ *    time (noongun.drafting.limits.lead_minutes), because its draft could
+ *    not be read and approved before it passes. So is a time at which that channel
+ *    already has a post that is not rejected, and the time of a slot that
+ *    an earlier proposal for the week already drafted a post for, also
+ *    when that post was moved to another time since.
  * 2. Posts. Channels whose open slots fall on the same instant share one
  *    post, with a text for each of them: the post is what a person
  *    approves (ADR 0009). The posts are put in time order, and only the
@@ -36,9 +42,10 @@ use Illuminate\Database\Eloquent\Builder;
  *    posts the end of the sequence is dropped; with fewer, the remaining
  *    posts are drafted from the brief alone, without a pillar.
  * 4. Ideas. A post takes the oldest idea of its pillar that no post that
- *    is not rejected has used. A post without a pillar takes one from the
- *    ideas without a pillar. When there is none it is drafted without an
- *    idea.
+ *    is not rejected has used, and when its pillar has none, or it has no
+ *    pillar, the oldest unused idea without a pillar. When there is none
+ *    either it is drafted without an idea. An idea of another pillar is
+ *    never borrowed.
  *
  * The same records give the same plan, which is what lets the page show it
  * before anything is spent.
@@ -86,10 +93,12 @@ final class PlanWeek
         $inWeek = $monday->addHours(12);
 
         $taken = $this->plannedTimes->takenBetween($from, $until);
+        $drafted = $this->slotsDraftedFor($week);
 
         /** @var array<int, array{channels: array<int, Channel>, slots: list<int>}> $open */
         $open = [];
         $past = 0;
+        $soon = 0;
         $occupied = 0;
         $unavailable = 0;
 
@@ -116,7 +125,15 @@ final class PlanWeek
                 continue;
             }
 
-            if (in_array($at, $taken[$channel->id] ?? [], true)) {
+            // Too close to be drafted, read and approved before it passes,
+            // and a draft whose time has passed cannot be approved as it is.
+            if ($at <= $now->getTimestamp() + DraftingLimits::leadSeconds()) {
+                $soon++;
+
+                continue;
+            }
+
+            if (isset($drafted[$slot->id]) || in_array($at, $taken[$channel->id] ?? [], true)) {
                 $occupied++;
 
                 continue;
@@ -149,17 +166,52 @@ final class PlanWeek
 
         foreach ($posts as $position => $post) {
             $pillar = $sequence[$position] ?? null;
-            $shelf = $pillar !== null ? $pillar->id : 0;
             $idea = null;
 
-            if (($ideas[$shelf] ?? []) !== []) {
-                $idea = array_shift($ideas[$shelf]);
+            // The ideas of the pillar first, then the ones without a
+            // pillar: an idea nobody filed is still an idea for the week.
+            foreach ([$pillar !== null ? $pillar->id : 0, 0] as $shelf) {
+                if (($ideas[$shelf] ?? []) !== []) {
+                    $idea = array_shift($ideas[$shelf]);
+
+                    break;
+                }
             }
 
             $posts[$position] = $post->about($pillar, $idea);
         }
 
-        return new WeekPlan($week, $from, $until, $posts, $past, $occupied, $unavailable, $leftOut, $short);
+        return new WeekPlan($week, $from, $until, $posts, $past, $occupied, $unavailable, $leftOut, $short, $soon);
+    }
+
+    /**
+     * The slots that already got a draft for this week from an earlier
+     * proposal, as long as that post exists and is not rejected, wherever
+     * its time is now. Moving a drafted post to another time does not open
+     * its slot again: the slot was answered, and a second proposal would
+     * write the same post twice.
+     *
+     * @return array<int, true> keyed by slot id
+     */
+    private function slotsDraftedFor(string $week): array
+    {
+        $runs = DraftRun::query()
+            ->inStatus(DraftRunStatus::Succeeded)
+            ->where('request->week', $week)
+            ->whereHas('post', fn (Builder $posts) => $posts->whereIn('state', self::holdingStates()))
+            ->get();
+
+        $slots = [];
+
+        foreach ($runs as $run) {
+            foreach ((array) ($run->request['slot_ids'] ?? []) as $slotId) {
+                if (is_numeric($slotId)) {
+                    $slots[(int) $slotId] = true;
+                }
+            }
+        }
+
+        return $slots;
     }
 
     /**

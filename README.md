@@ -128,9 +128,10 @@ Four things to know when operating it:
 - `REDIS_QUEUE_RETRY_AFTER` (and `DB_QUEUE_RETRY_AFTER` for the database
   queue) must be greater than the longest time limit of a publishing job,
   which is `NOONGUN_PUBLISH_TIMEOUT` x `NOONGUN_PUBLISH_CALLS_PER_JOB` + 15
-  seconds. The defaults are 180 against 105. If it is lower, the queue hands
-  a job that is still running to a second worker; that copy does nothing, but
-  it is listed as a failed job.
+  seconds, and of a drafting job (see "Proposing a week"). The defaults are
+  300 against 105 for publishing and 255 for drafting. If it is lower, the
+  queue hands a job that is still running to a second worker; that copy does
+  nothing, but it is listed as a failed job.
 - If a worker dies in the middle of a platform call, or the platform does
   not answer, the post may be public without the app knowing. The variant is
   marked for that before the call is made, and the post ends as failed with
@@ -330,18 +331,22 @@ the page says which and links to where it is set.
 
 What it makes are drafts. Each one arrives in the queue like a post written
 by hand, with its slot time as planned time, and is approved or rejected by a
-person. Drafts can be approved one at a time or as a selection, and the person
-makes that selection: nothing is ever selected for them, and nothing a proposal
+person, one post at a time. There is no "approve all", and nothing a proposal
 creates is ever published by itself. See `docs/adr/0012-proposing-a-week.md`.
 
 Before anything starts, the page shows the week, every post that would be
-drafted with its time, channels, pillar and idea, the model, and the most it
-can cost. The plan is worked out by these rules, in this order:
+drafted with its time, channels, pillar and idea, the model, and what it is
+expected to cost. The plan is worked out by these rules, in this order:
 
 1. Every slot of a channel that can publish gives one time in the week, on
-   the clock of the workspace. A time that has passed is left out, and so is a
-   time at which that channel already has a post that is not rejected.
-   Proposing a week twice therefore fills the gaps and repeats nothing.
+   the clock of the workspace. A time is left out when it has passed, when it
+   is less than `NOONGUN_DRAFT_LEAD_MINUTES` away (a draft could not be read
+   and approved before then), or when that channel already has a post at that
+   time that is not rejected. A slot that an earlier proposal for the week
+   already drafted a post for is left out as well, also when that post was
+   moved to another time since. Proposing a week twice therefore fills the
+   gaps and repeats nothing. Rejecting or deleting a draft opens its slot
+   again.
 2. Channels whose slots fall on the same time share one post, with a text for
    each channel, because a post is what you approve.
 3. Each pillar needs its weekly target, minus the posts the week already holds
@@ -350,30 +355,46 @@ can cost. The plan is worked out by these rules, in this order:
    posts in time order. If the targets ask for more posts than the week has
    times, the end of the sequence is dropped and the page says which pillars
    come up short. If they ask for fewer, the remaining posts are drafted from
-   the brief alone, without a pillar. Without any pillar every post is.
-4. A post takes the oldest idea of its pillar that no post has used yet. A
-   post without a pillar takes an idea without a pillar.
+   the brief alone, without a pillar. When no pillar has a target, every post
+   is, and the page says so.
+4. A post takes the oldest unused idea of its pillar, then the oldest unused
+   idea without a pillar. An idea counts as used while a post that is not
+   rejected was drafted from it; rejecting that post frees the idea. An idea
+   of another pillar is never borrowed.
 
 The same brief, pillars, slots and posts always give the same plan. If the
 plan changes between looking at it and starting it, the start is refused and
 the new plan is shown.
 
 Starting opens one draft run for each post and queues one job for each run.
-The queue page shows every run as waiting, being written, written or failed,
+The queue page shows every run as waiting, being drafted, drafted or failed,
 and asks the server for that every five seconds until all are settled. A run
-that failed says why in plain words.
+that failed says why in plain words; what the person who runs the instance
+needs to know beyond that is in the log.
 
-What a proposal may spend is bounded:
+A run is opened for one provider, model and prompt version, and for one payer:
+the key of the workspace or the key of the instance. If any of these is
+different when its job runs, because a key was added or removed or the model
+was changed in between, the run fails with that reason and nothing is spent.
+
+### What a proposal may spend
 
 - One proposal drafts at most `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` posts.
   The earliest times are kept; the rest are left for a second proposal.
-- A workspace opens at most `NOONGUN_DRAFT_MAX_RUNS_PER_DAY` draft runs in 24
-  hours. Failed runs count, because they may have been paid for.
+- A workspace drafts at most `NOONGUN_DRAFT_MAX_RUNS_PER_DAY` posts in 24
+  hours. A run counts when it reached the provider, whether it succeeded or
+  failed, or is still waiting or at work. A run that spent nothing does not
+  count: one that could not be queued, one no worker picked up, one the
+  provider turned away for a wrong key or an unknown model.
+- All workspaces together draft at most
+  `NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY` posts in 24 hours on the key of the
+  instance, counted the same way. A workspace with a key of its own is not
+  held by this limit.
 - A workspace has one proposal at work at a time. A second one is refused
   until every run of the first is settled, also when two people press the
-  button at the same moment.
-- The request that starts a proposal is throttled to six a minute for each
-  user.
+  button at the same moment and while a run waits for its retry.
+- Starting and stopping are each throttled to six requests a minute for a
+  user. A request over that gets a sentence on the page.
 - A post is asked for at most `NOONGUN_DRAFT_MAX_ATTEMPTS` times, and a second
   time only when the provider failed in a way worth trying again (a rate
   limit, an overloaded provider, a timeout), after the wait in
@@ -381,11 +402,25 @@ What a proposal may spend is bounded:
   more by the generator and then fails the run. Each attempt is a draft run of
   its own, so that what every attempt used stays on record.
 
-The cost shown before the start is a ceiling by the price table: every
-attempt of every post, each with two answers at the full
-`NOONGUN_DRAFT_MAX_TOKENS` and a prompt of `NOONGUN_DRAFT_ESTIMATE_INPUT_TOKENS`
-tokens. A usual week costs a small part of it. Without a price for the model
-no cost is shown.
+### What it costs
+
+Before the start the page shows two figures from the price table:
+
+- **Expected, about**: one answer for each post. The prompt each post would
+  be sent is rendered and measured, at one token for three bytes, and the
+  answer is taken as `NOONGUN_DRAFT_EXPECTED_OUTPUT_TOKENS` tokens.
+- **Worst case**: every post uses every attempt, every attempt asks twice,
+  and every answer runs to `NOONGUN_DRAFT_MAX_TOKENS`. The prompt is counted
+  at one token for every byte, plus an allowance for what the provider wraps
+  around it. A token is never shorter than a byte, so a proposal cannot cost
+  more than this, however long the brief is.
+
+While a proposal is at work and after it, the queue shows what its runs used
+so far, failed attempts included. The editor shows on a drafted post what
+that one draft used. All of these are estimates from the price table, not an
+invoice, and without a price for the model only tokens are shown.
+
+### When drafts do not arrive
 
 The `scheduler` container runs one command for drafting:
 
@@ -393,18 +428,38 @@ The `scheduler` container runs one command for drafting:
 |---|---|---|
 | `noongun:recover-stuck-draft-runs` | every five minutes | Marks a draft run as failed when it has been running for longer than `NOONGUN_DRAFT_STUCK_AFTER_MINUTES` (its worker died), or has been waiting longer than that plus the largest backoff (its job was lost). It never asks a provider again: a run whose worker died may already have been paid for, so a person decides whether to propose the week again. |
 
-Two things to know when operating it:
+With the defaults a run is given up after 6 minutes at work or 8 minutes of
+waiting, found at the next run of the command. Until then the workspace
+cannot start another proposal.
+
+The queue page does not wait for that in silence. Once a draft has waited two
+minutes for a worker, it says "Waiting longer than expected. Check that the
+queue is running." and offers "Stop waiting" to owners and editors. Stopping
+marks every run of the workspace that is still open as failed, after a
+confirmation. It asks nothing of the provider, and the week can be proposed
+again at once. It also works when the scheduler is down. A draft that is with
+the provider at that moment is discarded and may still be charged for; its
+tokens are not recorded. A job that arrives later for a stopped run does
+nothing.
+
+Three things to know when operating it:
 
 - `GenerateDraftJob` runs in the `horizon` container on the default queue.
   Running it again by hand, with `queue:retry` or the retry button in Horizon,
   does nothing: a draft run is started once, by one conditional update in the
   database.
 - The time limit of the job is `NOONGUN_DRAFT_TIMEOUT` x 2 + 15 seconds, which
-  is 255 with the defaults and above the default `REDIS_QUEUE_RETRY_AFTER` of
-  180. When a draft takes longer than `REDIS_QUEUE_RETRY_AFTER`, the queue
-  hands the job to a second worker; that copy does nothing, but it is listed
-  as a failed job. Set `REDIS_QUEUE_RETRY_AFTER=300` (and
-  `DB_QUEUE_RETRY_AFTER` for the database queue) to avoid that.
+  is 255 with the defaults. `REDIS_QUEUE_RETRY_AFTER` (and
+  `DB_QUEUE_RETRY_AFTER` for the database queue) must stay above it; the
+  default is 300. If you raise `NOONGUN_DRAFT_TIMEOUT`, raise those too.
+  When a draft takes longer than `REDIS_QUEUE_RETRY_AFTER`, the queue hands
+  the job to a second worker; that copy does nothing, but it is listed as a
+  failed job.
+- Every failed run is logged as "A draft run failed." with the class of the
+  failure, its message and, where the provider gave one, a detail for the
+  operator. Keys are removed before anything is logged. When the page says
+  that drafting is not set up on this instance, the log line "Drafting is not
+  set up, so a week cannot be proposed." names the setting that is missing.
 
 ## Running on a home server
 
@@ -510,7 +565,7 @@ it there.
 | `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
 | `NOONGUN_PUBLISH_CALLS_PER_JOB` | `3` | How many variants one run of the publishing job sends before it hands the rest to a successor. Bounds the time limit of a job; see "Publishing" for what the queue needs. |
 | `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Shortest lifetime of the lock on one variant. The lock always lives at least 30 seconds longer than the longest job. |
-| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `180` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of a publishing job. |
+| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `300` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of any job: 255 seconds for a drafting job with the defaults, 105 for a publishing job. Raise it when you raise `NOONGUN_DRAFT_TIMEOUT`. |
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
@@ -523,11 +578,13 @@ it there.
 | `NOONGUN_DRAFT_PRICES` | empty | Prices per million tokens, as JSON, added to the table in `config/noongun.php`: `{"anthropic":{"model-name":{"input":4,"output":20}}}`. Only used to estimate what a draft run cost. |
 | `NOONGUN_DRAFT_PRICE_CURRENCY` | `USD` | Currency of the price table. |
 | `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` | `14` | Most posts one "Propose a week" drafts. |
-| `NOONGUN_DRAFT_MAX_RUNS_PER_DAY` | `50` | Most draft runs a workspace may open in 24 hours. Failed runs and retries count. |
+| `NOONGUN_DRAFT_MAX_RUNS_PER_DAY` | `50` | Most posts a workspace may draft in 24 hours. A draft run counts when it reached the provider or is still open; one that spent nothing does not. |
+| `NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY` | `200` | Most posts all workspaces together may draft in 24 hours on the key of the instance, counted the same way. Runs on a key a workspace brought do not count. |
 | `NOONGUN_DRAFT_MAX_ATTEMPTS` | `3` | How many times one planned post is asked for at most. Only failures the provider marks as worth trying again are retried. |
 | `NOONGUN_DRAFT_BACKOFF` | `30,120` | Seconds to wait before each retry of a draft, comma separated. The last value repeats. |
-| `NOONGUN_DRAFT_STUCK_AFTER_MINUTES` | `15` | How long a draft run may be running before it is marked as failed. Never less than the time limit of the job plus a minute. A waiting run is given this plus the largest backoff. |
-| `NOONGUN_DRAFT_ESTIMATE_INPUT_TOKENS` | `8000` | Prompt size assumed for the cost ceiling shown before a proposal starts. |
+| `NOONGUN_DRAFT_STUCK_AFTER_MINUTES` | `6` | How long a draft run may be running before it is marked as failed. Never less than the time limit of the job plus a minute. A waiting run is given this plus the largest backoff. |
+| `NOONGUN_DRAFT_LEAD_MINUTES` | `60` | How far ahead a slot time must be to get a draft, so that the draft can be read and approved before its time. |
+| `NOONGUN_DRAFT_EXPECTED_OUTPUT_TOKENS` | `1500` | Size of a usual answer, thinking included, for the expected cost shown before a proposal starts. Lower it when you set a low effort, raise it for a model that thinks at length. |
 
 Times are stored in UTC. Each workspace has its own timezone for display and
 scheduling. The application timezone is fixed to UTC in `config/app.php` and

@@ -1,12 +1,18 @@
 <?php
 
 use App\Domain\Content\PostState;
+use App\Domain\Drafting\Actions\StopOpenRuns;
+use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\GenerateDraftJob;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
+use App\Http\Presenters\ProposalPresenter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Route;
 use Inertia\Testing\AssertableInertia as Assert;
+use Tests\Fakes\FakeChannelAdapter;
+use Tests\Fakes\FakeDraftGenerator;
 
 require_once __DIR__.'/../../Support/publishing.php';
 require_once __DIR__.'/../../Support/posts.php';
@@ -41,7 +47,7 @@ function proposalPayload(Workspace $workspace, string $week = '2026-11-30'): arr
 }
 
 describe('the page that shows the plan', function () {
-    it('shows the week, the posts, the model, the cost ceiling and the usage before anything starts', function () {
+    it('shows the week, the posts, the model, the cost and the usage before anything starts', function () {
         $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-12-02']))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
@@ -59,9 +65,11 @@ describe('the page that shows the plan', function () {
                 ->where('plan.past', 0)
                 ->where('refusals', [])
                 ->where('generator', ['provider' => 'Fake', 'model' => DRAFT_TEST_MODEL])
-                // 3 posts x 3 attempts x 2 answers, each 8000 tokens in at 2.00
-                // and 2000 out at 10.00 per million: 0.648, shown as 0.65.
-                ->where('cost', ['amount' => '0.65', 'currency' => 'USD'])
+                ->where('cost.currency', 'USD')
+                // 3 posts x 1500 tokens out at 10.00 per million is 0.045; the prompts add a little.
+                ->where('cost.expected', fn (string $amount) => (float) $amount >= 0.05 && (float) $amount < 0.15)
+                // 3 posts x 3 attempts x 2 answers x 2000 tokens out at 10.00 per million is 0.36; the prompts add to it.
+                ->where('cost.worst', fn (string $amount) => (float) $amount > 0.36 && (float) $amount < 5)
                 ->where('limits.runs_used', 0)
                 ->where('limits.runs_per_day', 50)
                 ->where('limits.posts_per_proposal', 14)
@@ -82,7 +90,9 @@ describe('the page that shows the plan', function () {
                 ->where('week.next', '2026-11-30')
                 // Monday and Wednesday 09:00 have passed.
                 ->has('plan.posts', 1)
-                ->where('plan.past', 2));
+                ->where('plan.past', 2)
+                ->where('plan.soon', 0)
+                ->where('plan.lead_minutes', 60));
     })->with([null, 'garbage', '2026-11-01']);
 
     it('gives the times of a workspace in Johannesburg on its own clock', function () {
@@ -105,7 +115,7 @@ describe('the page that shows the plan', function () {
             ->assertInertia(fn (Assert $page) => $page->where('cost', null)->where('generator.model', DRAFT_TEST_MODEL));
     });
 
-    it('names what is missing, each with where to fix it when that page exists', function () {
+    it('names what is missing, each with the page where it is fixed', function () {
         DB::table('briefs')->delete();
         DB::table('channels')->update(['status' => 'needs_reconnect']);
         config(['noongun.drafting.providers.'.DRAFT_TEST_PROVIDER.'.api_key' => null]);
@@ -116,13 +126,61 @@ describe('the page that shows the plan', function () {
                 ->has('refusals', 3)
                 ->where('refusals.0.reason', 'brief')
                 ->where('refusals.0.message', fn (string $message) => str_contains($message, 'no brief'))
+                ->where('refusals.0.href', route('brief.edit'))
+                ->where('refusals.0.label', 'Write the brief')
                 ->where('refusals.1.reason', 'channels')
                 ->where('refusals.1.href', route('channels.index'))
                 ->where('refusals.1.label', 'Go to Channels')
                 ->where('refusals.2.reason', 'key')
                 ->where('refusals.2.message', fn (string $message) => str_contains($message, 'No API key is set'))
+                ->where('refusals.2.href', route('llm-key.edit'))
+                ->where('refusals.2.label', 'Add an API key')
                 ->where('generator', null)
                 ->where('cost', null));
+    });
+
+    it('sends a person without a slot to the slots, and one with nothing to draft as well', function () {
+        DB::table('slots')->delete();
+
+        $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('refusals', 1)
+                ->where('refusals.0.reason', 'slots')
+                ->where('refusals.0.href', route('slots.index'))
+                ->where('refusals.0.label', 'Set the slots'));
+
+        // One slot, and its time this week has passed.
+        slotIn($this->workspace, $this->channel, 1, '09:00');
+
+        $this->get(route('proposals.create'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('refusals', 1)
+                ->where('refusals.0.reason', 'empty')
+                ->where('refusals.0.href', route('slots.index'))
+                ->where('refusals.0.label', 'Look at the slots'));
+    });
+
+    it('links every refusal to a route that exists, and every reason that can be fixed on a page has one', function () {
+        $fixes = (new ReflectionClassConstant(ProposalPresenter::class, 'FIXES'))->getValue();
+
+        foreach ($fixes as $reason => $fix) {
+            foreach ($fix['routes'] as $name) {
+                expect(Route::has($name))->toBeTrue("The route [{$name}] for the refusal [{$reason}] does not exist.");
+            }
+        }
+
+        expect(array_keys($fixes))->toEqualCanonicalizing([
+            ProposalRefused::BRIEF_MISSING,
+            ProposalRefused::NO_CHANNEL,
+            ProposalRefused::NO_SLOT,
+            ProposalRefused::NO_KEY,
+            ProposalRefused::NOTHING_TO_DRAFT,
+            ProposalRefused::IN_PROGRESS,
+        ]);
+
+        foreach (['brief.edit', 'pillars.index', 'slots.index', 'ideas.index'] as $name) {
+            expect(Route::has($name))->toBeTrue("The plan page links to [{$name}], which does not exist.");
+        }
     });
 
     it('says so when the week has nothing to draft, when a proposal is at work and when the day is used up', function () {
@@ -222,7 +280,7 @@ describe('starting', function () {
         Queue::assertNothingPushed();
     });
 
-    it('starts one proposal when the button is pressed twice', function () {
+    it('starts one proposal when the same request arrives twice in a row', function () {
         $payload = proposalPayload($this->workspace);
 
         $this->actingAs($this->owner)->post(route('proposals.store'), $payload)->assertSessionHasNoErrors();
@@ -242,14 +300,107 @@ describe('starting', function () {
         [['week' => '2026-11-30'], 'plan'],
     ]);
 
-    it('is throttled', function () {
-        $this->actingAs($this->owner);
+    it('is throttled, and says so on the plan page in a sentence', function () {
+        $this->actingAs($this->owner)->from(route('proposals.create'));
 
         foreach (range(1, 6) as $ignored) {
-            $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale'])->assertStatus(302);
+            $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale'])
+                ->assertSessionHasErrors(['proposal' => 'The plan changed after you opened it. Look at it again before you start.']);
         }
 
-        $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale'])->assertStatus(429);
+        // The seventh in a minute, this time with a plan that would start: it does not.
+        $this->from(route('proposals.create'))
+            ->post(route('proposals.store'), proposalPayload($this->workspace))
+            ->assertRedirect(route('proposals.create'))
+            ->assertSessionHasErrors(['proposal' => 'That was asked too often in a short time. Wait a minute and try again.']);
+
+        expect(DB::table('draft_runs')->count())->toBe(0);
+        Queue::assertNothingPushed();
+
+        $this->travel(61)->seconds();
+
+        $this->post(route('proposals.store'), proposalPayload($this->workspace))->assertSessionHasNoErrors();
+    });
+
+    it('throttles each user by themselves', function () {
+        $this->actingAs($this->owner);
+
+        foreach (range(1, 7) as $ignored) {
+            $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale']);
+        }
+
+        $this->actingAs(userWithRole($this->workspace, Role::Editor))
+            ->post(route('proposals.store'), proposalPayload($this->workspace))
+            ->assertSessionHasNoErrors();
+    });
+});
+
+describe('the words on the plan page', function () {
+    it('says that there are no pillars when none has a target, instead of blaming the targets', function () {
+        DB::table('pillars')->update(['weekly_target' => 0]);
+
+        $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('plan.pillars_with_target', 0)
+                ->where('plan.posts.0.pillar', null)
+                ->where('links.pillars', route('pillars.index')));
+
+        DB::table('pillars')->delete();
+
+        $this->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page->where('plan.pillars_with_target', 0));
+    });
+
+    it('counts the pillars that have a target', function () {
+        pillarIn($this->workspace, ['name' => 'Offers', 'weekly_target' => 2]);
+        pillarIn($this->workspace, ['name' => 'Parked', 'weekly_target' => 0]);
+
+        $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page->where('plan.pillars_with_target', 2));
+    });
+
+    it('links to the brief, the pillars, the slots and the ideas', function () {
+        $this->actingAs($this->owner)->get(route('proposals.create'))
+            ->assertInertia(fn (Assert $page) => $page->where('links', [
+                'brief' => route('brief.edit'),
+                'pillars' => route('pillars.index'),
+                'slots' => route('slots.index'),
+                'ideas' => route('ideas.index'),
+            ]));
+    });
+
+    it('spells a platform the way the platform does', function () {
+        config(['noongun.channels.linkedin' => ['adapter' => FakeChannelAdapter::class]]);
+        fakeChannelAdapter('linkedin');
+        slotIn($this->workspace, channelIn($this->workspace, ['platform' => 'linkedin', 'display_name' => 'Company page']), 2, '09:00');
+
+        $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('plan.posts.1.channels', [['name' => 'Company page', 'platform_label' => 'LinkedIn']]));
+    });
+
+    it('renders the sentences the pages promise', function () {
+        $plan = file_get_contents(resource_path('js/pages/proposals/Create.vue'));
+        $progress = file_get_contents(resource_path('js/components/posts/ProposalProgress.vue'));
+        $editor = file_get_contents(resource_path('js/pages/posts/Edit.vue'));
+        $queue = file_get_contents(resource_path('js/pages/queue/Index.vue'));
+
+        expect($plan)->toContain('No pillar has a weekly target')
+            ->and($plan)->toContain('links.brief')
+            ->and($plan)->toContain('Expected cost, about')
+            ->and($plan)->toContain('Worst case:')
+            ->and($progress)->toContain('Waiting longer than expected. Check that the queue is running.')
+            ->and($progress)->toContain('Stop waiting')
+            ->and($progress)->toContain('Used so far:')
+            ->and($editor)->toContain('Drafted from your brief')
+            ->and($editor)->toContain('Planned time, {{ timezone }}')
+            ->and($editor)->toContain('It was left out.');
+
+        // One vocabulary: the act is drafting. And what a model wrote is never rendered as markup.
+        foreach ([$plan, $progress, $editor, $queue] as $page) {
+            expect($page)->not->toMatch('/\bGenerated\b|being written|Draft written|generated_at/')
+                ->and($page)->not->toContain('v-html');
+        }
     });
 });
 
@@ -374,6 +525,195 @@ describe('progress in the queue', function () {
     });
 });
 
+describe('a queue that does not run', function () {
+    it('says that it is waiting longer than expected once a draft has waited two minutes', function () {
+        proposeWeek($this->workspace, $this->owner);
+        $this->actingAs($this->owner);
+
+        $this->travel(119)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('drafting.proposal.active', true)
+            ->where('drafting.proposal.waiting_long', false));
+
+        $this->travel(1)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', true));
+    });
+
+    it('gives a retry its backoff before it counts as waiting long', function () {
+        config(['noongun.drafting.limits.backoff' => [300]]);
+
+        $runs = proposeWeek($this->workspace, $this->owner);
+        $this->generator->failRetryable();
+
+        foreach ($runs as $run) {
+            runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+        }
+
+        expect(DB::table('draft_runs')->where('request->retry_of', $runs[0]->id)->value('status'))->toBe('pending');
+
+        $this->actingAs($this->owner);
+
+        $this->travel(400)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', false));
+
+        $this->travel(20)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', true));
+    });
+
+    it('says so for a draft that has been with a worker for longer than a job may take', function () {
+        config(['noongun.drafting.timeout' => 20]);
+
+        $runs = proposeWeek($this->workspace, $this->owner);
+        inWorkspace($this->workspace, fn () => $runs[0]->markRunning());
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[1]->id));
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[2]->id));
+
+        $this->actingAs($this->owner);
+
+        // The job may take 2 x 20 + 15 seconds.
+        $this->travel(69)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', false));
+
+        $this->travel(1)->seconds();
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page->where('drafting.proposal.waiting_long', true));
+    });
+
+    it('lets an owner or editor stop waiting: the open runs fail with a reason and nothing is spent', function (Role $role) {
+        $runs = proposeWeek($this->workspace, $this->owner);
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[0]->id));
+        inWorkspace($this->workspace, fn () => $runs[1]->markRunning());
+        $this->generator->assertGeneratedTimes(1);
+
+        $this->actingAs(userWithRole($this->workspace, $role))
+            ->post(route('proposals.stop'))
+            ->assertRedirect(route('queue.index'))
+            ->assertSessionHasNoErrors();
+
+        expect(freshRun($runs[0])->status)->toBe('succeeded')
+            ->and(freshRun($runs[1]))->toMatchObject(['status' => 'failed', 'failure_reason' => StopOpenRuns::STOPPED])
+            ->and(freshRun($runs[2]))->toMatchObject(['status' => 'failed', 'failure_reason' => StopOpenRuns::STOPPED])
+            ->and(DB::table('posts')->count())->toBe(1);
+
+        $this->generator->assertGeneratedTimes(1);
+
+        $this->get(route('queue.index'))->assertInertia(fn (Assert $page) => $page
+            ->where('drafting.proposal.active', false)
+            ->where('drafting.proposal.waiting_long', false)
+            ->where('drafting.proposal.runs.1.failure_reason', StopOpenRuns::STOPPED));
+    })->with([Role::Owner, Role::Editor]);
+
+    it('leaves no dead end: the week can be proposed again right after', function () {
+        proposeWeek($this->workspace, $this->owner);
+
+        $this->actingAs($this->owner)->post(route('proposals.stop'))->assertSessionHasNoErrors();
+        $this->post(route('proposals.store'), proposalPayload($this->workspace))->assertSessionHasNoErrors();
+
+        expect(DB::table('draft_runs')->where('status', 'pending')->count())->toBe(3)
+            ->and(DB::table('draft_runs')->where('status', 'failed')->count())->toBe(3);
+    });
+
+    it('makes a job that arrives late for a stopped run do nothing', function () {
+        $runs = proposeWeek($this->workspace, $this->owner);
+
+        $this->actingAs($this->owner)->post(route('proposals.stop'));
+
+        runQueuedDraftJobs();
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[0]->id, 2));
+        (new GenerateDraftJob($this->workspace->id, $runs[0]->id))->failed(new RuntimeException('Late.'));
+
+        $this->generator->assertNothingGenerated();
+
+        expect(DB::table('posts')->count())->toBe(0)
+            ->and(DB::table('draft_runs')->count())->toBe(3)
+            ->and(DB::table('draft_runs')->pluck('failure_reason')->unique()->all())->toBe([StopOpenRuns::STOPPED]);
+    });
+
+    it('discards the answer of a worker that was in the middle of a stopped run, without an error', function () {
+        $runs = proposeWeek($this->workspace, $this->owner);
+
+        // The stop arrives while the provider is answering.
+        $this->generator->returnsOutput(function ($request) {
+            inWorkspace($this->workspace, fn () => app(StopOpenRuns::class)->handle($this->owner));
+
+            return FakeDraftGenerator::outputFor($request);
+        });
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $runs[0]->id));
+
+        expect(DB::table('posts')->count())->toBe(0)
+            ->and(freshRun($runs[0]))->toMatchObject(['status' => 'failed', 'failure_reason' => StopOpenRuns::STOPPED]);
+    });
+
+    it('refuses a viewer and a guest', function () {
+        proposeWeek($this->workspace, $this->owner);
+
+        $this->post(route('proposals.stop'))->assertRedirect(route('login'));
+        $this->actingAs(userWithRole($this->workspace, Role::Viewer))->post(route('proposals.stop'))->assertForbidden();
+
+        expect(DB::table('draft_runs')->pluck('status')->unique()->all())->toBe(['pending']);
+    });
+
+    it('stops nothing in another workspace', function () {
+        proposeWeek($this->workspace, $this->owner);
+
+        $other = Workspace::factory()->create();
+        $theirs = draftRunIn($other);
+
+        $this->actingAs(userWithRole($other, Role::Owner))->withSession(['workspace_id' => $this->workspace->id])
+            ->post(route('proposals.stop'), ['workspace_id' => $this->workspace->id])
+            ->assertRedirect(route('queue.index'));
+
+        expect(DB::table('draft_runs')->where('workspace_id', $this->workspace->id)->pluck('status')->unique()->all())->toBe(['pending'])
+            ->and(freshRun($theirs)->status)->toBe('failed');
+    });
+
+    it('is throttled, and says so in a sentence', function () {
+        $this->actingAs($this->owner);
+
+        foreach (range(1, 6) as $ignored) {
+            $this->post(route('proposals.stop'))->assertRedirect(route('queue.index'))->assertSessionHasNoErrors();
+        }
+
+        $waiting = draftRunIn($this->workspace, $this->owner);
+
+        $this->from(route('queue.index'))->post(route('proposals.stop'))
+            ->assertRedirect(route('queue.index'))
+            ->assertSessionHasErrors(['proposal' => 'That was asked too often in a short time. Wait a minute and try again.']);
+
+        expect(freshRun($waiting)->status)->toBe('pending');
+    });
+
+    it('is throttled apart from starting, so a person who tried to start can still stop', function () {
+        $this->actingAs($this->owner);
+
+        foreach (range(1, 7) as $ignored) {
+            $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale']);
+        }
+
+        $waiting = draftRunIn($this->workspace, $this->owner);
+
+        $this->post(route('proposals.stop'))->assertSessionHasNoErrors();
+
+        expect(freshRun($waiting)->status)->toBe('failed');
+    });
+
+    it('takes the lock a proposal takes before it reads a run', function () {
+        proposeWeek($this->workspace, $this->owner);
+
+        $statements = [];
+        DB::listen(function ($query) use (&$statements) {
+            $statements[] = strtolower($query->sql);
+        });
+
+        inWorkspace($this->workspace, fn () => app(StopOpenRuns::class)->handle($this->owner));
+
+        $lock = array_key_first(array_filter($statements, fn (string $sql) => str_contains($sql, '"workspaces"') && str_contains($sql, 'for update')));
+        $firstRun = array_key_first(array_filter($statements, fn (string $sql) => str_contains($sql, '"draft_runs"')));
+
+        expect($lock)->not->toBeNull()->and($firstRun)->toBeGreaterThan($lock);
+    });
+});
+
 describe('the editor', function () {
     it('shows where a generated draft came from, as the text the run recorded', function () {
         $idea = ideaIn($this->workspace, $this->craft, ['title' => 'How we roast']);
@@ -402,8 +742,31 @@ describe('the editor', function () {
                 ->where('post.origin.provider', 'Fake')
                 ->where('post.origin.rationale', 'It opens the week. <script>alert(1)</script>')
                 ->where('post.origin.alt_text', 'A roaster <b>at work</b>')
-                ->where('post.origin.generated_at', '2026-11-25T10:00:00+00:00')
+                ->where('post.origin.drafted_at', '2026-11-25T10:00:00+00:00')
                 ->where('post.can.approve', true));
+    });
+
+    it('says when the draft suggested a link that the author never gave', function () {
+        // The idea has no source and the brief no link: any link is the model's own.
+        $this->generator->returnsOutput(fn ($request) => [...FakeDraftGenerator::outputFor($request), 'link' => 'https://invented.example/offer']);
+
+        proposeWeek($this->workspace, $this->owner);
+        runQueuedDraftJobs();
+
+        $post = DB::table('posts')->orderBy('id')->first();
+
+        expect(DB::table('post_variants')->where('post_id', $post->id)->value('link'))->toBeNull();
+
+        $this->actingAs($this->owner)->get(route('posts.show', $post->id))
+            ->assertInertia(fn (Assert $page) => $page->where('post.origin.link_dropped', true));
+    });
+
+    it('says nothing about a link when none was left out', function () {
+        proposeWeek($this->workspace, $this->owner);
+        runQueuedDraftJobs();
+
+        $this->actingAs($this->owner)->get(route('posts.show', DB::table('posts')->value('id')))
+            ->assertInertia(fn (Assert $page) => $page->where('post.origin.link_dropped', false));
     });
 
     it('shows no origin on a post written by hand', function () {

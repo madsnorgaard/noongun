@@ -87,7 +87,58 @@ describe('times', function () {
             ->toBe(['2026-10-24 07:00 UTC', '2026-10-25 08:00 UTC', '2026-10-25 22:30 UTC']);
     });
 
+    it('reads a slot in the hour that comes twice as the second one, in standard time, and plans it once', function () {
+        $this->travelTo('2026-10-20 10:00:00');
+
+        // On 25 October 2026 the clocks in Copenhagen go from 03:00 back to
+        // 02:00, so 02:30 comes twice: at 00:30 UTC and at 01:30 UTC.
+        slotIn($this->copenhagen, $this->channel, 7, '02:30');
+        slotIn($this->copenhagen, $this->channel, 7, '01:30');
+        slotIn($this->copenhagen, $this->channel, 7, '03:30');
+
+        $theirs = channelIn($this->johannesburg);
+        slotIn($this->johannesburg, $theirs, 7, '02:30');
+
+        expect(plannedTimes(planFor($this->copenhagen, '2026-10-19')))
+            ->toBe(['2026-10-24 23:30 UTC', '2026-10-25 01:30 UTC', '2026-10-25 02:30 UTC'])
+            // Johannesburg has no such hour: 02:30 is 00:30 UTC as on any day.
+            ->and(plannedTimes(planFor($this->johannesburg, '2026-10-19')))->toBe(['2026-10-25 00:30 UTC']);
+    });
+
+    it('leaves out a time that is closer than the lead time, and counts it apart from the past ones', function () {
+        // Now is Wednesday 11:00 in Copenhagen. The default lead time is 60 minutes.
+        slotIn($this->copenhagen, $this->channel, 3, '10:30');
+        slotIn($this->copenhagen, $this->channel, 3, '11:01');
+        slotIn($this->copenhagen, $this->channel, 3, '12:00');
+        slotIn($this->copenhagen, $this->channel, 3, '12:01');
+
+        $plan = planFor($this->copenhagen, '2026-11-23');
+
+        expect(plannedTimes($plan))->toBe(['2026-11-25 11:01 UTC'])
+            ->and($plan->past)->toBe(1)
+            ->and($plan->soon)->toBe(2);
+
+        config(['noongun.drafting.limits.lead_minutes' => 180]);
+
+        $plan = planFor($this->copenhagen, '2026-11-23');
+
+        expect($plan->posts)->toBe([])->and($plan->soon)->toBe(3);
+    });
+
+    it('applies the lead time on the clock of the workspace, in Johannesburg as well', function () {
+        // Now is Wednesday 12:00 in Johannesburg.
+        $theirs = channelIn($this->johannesburg);
+        slotIn($this->johannesburg, $theirs, 3, '13:00');
+        slotIn($this->johannesburg, $theirs, 3, '13:01');
+
+        $plan = planFor($this->johannesburg, '2026-11-23');
+
+        expect(plannedTimes($plan))->toBe(['2026-11-25 11:01 UTC'])->and($plan->soon)->toBe(1);
+    });
+
     it('leaves out a time that has passed, to the minute', function () {
+        config(['noongun.drafting.limits.lead_minutes' => 0]);
+
         slotIn($this->copenhagen, $this->channel, 1, '09:00');
         slotIn($this->copenhagen, $this->channel, 3, '10:59');
         slotIn($this->copenhagen, $this->channel, 3, '11:00');
@@ -312,7 +363,32 @@ describe('ideas', function () {
 
         expect(plannedPillars($plan))->toBe(['Craft', 'Craft', null])
             ->and(array_map(fn (PlannedPost $post): ?int => $post->idea?->id, $plan->posts))
-            ->toBe([$rejectedOnly->id, null, $loose->id]);
+            // The second Craft post has no idea of its pillar left and takes the loose one.
+            ->toBe([$rejectedOnly->id, $loose->id, null]);
+    });
+
+    it('uses the ideas without a pillar when the pillar targets fill the week', function () {
+        foreach ([1, 2, 3, 4] as $weekday) {
+            slotIn($this->copenhagen, $this->channel, $weekday, '09:00');
+        }
+
+        $craft = pillarIn($this->copenhagen, ['name' => 'Craft', 'weekly_target' => 2]);
+        $offers = pillarIn($this->copenhagen, ['name' => 'Offers', 'weekly_target' => 2]);
+        $parked = pillarIn($this->copenhagen, ['name' => 'Parked', 'weekly_target' => 0]);
+
+        $looseOlder = ideaIn($this->copenhagen, null, ['title' => 'Loose, older']);
+        $ofCraft = ideaIn($this->copenhagen, $craft, ['title' => 'Of Craft']);
+        ideaIn($this->copenhagen, $parked, ['title' => 'Of a pillar that is not planned']);
+        $looseNewer = ideaIn($this->copenhagen, null, ['title' => 'Loose, newer']);
+
+        $plan = planFor($this->copenhagen, '2026-11-30');
+
+        // Every post has a pillar. Craft uses its own idea first; the rest
+        // take the loose ones, oldest first, and never one of another pillar.
+        expect(plannedPillars($plan))->toBe(['Craft', 'Offers', 'Craft', 'Offers'])
+            ->and(array_map(fn (PlannedPost $post): ?int => $post->idea?->id, $plan->posts))
+            ->toBe([$ofCraft->id, $looseOlder->id, $looseNewer->id, null])
+            ->and($offers->id)->not->toBe($craft->id);
     });
 });
 

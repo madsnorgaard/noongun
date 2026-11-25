@@ -22,9 +22,19 @@ export type ProposalProgress = {
     week: string;
     requested_at: string | null;
     requested_by: string | null;
-    /** Whether a draft is still waiting or being written. */
+    /** Whether a draft is still waiting or being drafted. */
     active: boolean;
+    /** Whether a draft has waited longer than a queue that runs would need. */
+    waiting_long: boolean;
     counts: Record<DraftRunStatus, number>;
+    /** What every attempt so far used. Null before the first answer. */
+    used: {
+        input_tokens: number;
+        output_tokens: number;
+        /** Estimated cost, to four places, or null without a price. */
+        cost: string | null;
+        currency: string | null;
+    } | null;
     max_attempts: number;
     runs: ProposalRun[];
 };
@@ -47,10 +57,15 @@ export type WeekPlan = {
     fingerprint: string;
     posts: PlannedPost[];
     past: number;
+    /** Slot times closer than the lead time, which are left out too. */
+    soon: number;
+    lead_minutes: number;
     taken: number;
     unavailable: number;
     left_out: number;
     short: { pillar: string; missing: number }[];
+    /** How many pillars have a weekly target above zero. */
+    pillars_with_target: number;
 };
 
 export type ProposalRefusal = {

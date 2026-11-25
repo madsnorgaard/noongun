@@ -655,7 +655,7 @@ const locked = computed(() => {
                     class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
                 >
                     <Label for="scheduled_at">
-                        Firing time, {{ timezone }}
+                        Planned time, {{ timezone }}
                     </Label>
                     <Input
                         id="scheduled_at"
@@ -665,7 +665,7 @@ const locked = computed(() => {
                     />
                     <p class="text-sm text-muted-foreground">
                         Leave it empty to decide after approval. A post with a
-                        firing time is scheduled the moment it is approved.
+                        planned time is scheduled the moment it is approved.
                     </p>
                     <InputError
                         :message="
@@ -928,12 +928,12 @@ const locked = computed(() => {
                             Where this draft came from
                         </h2>
                         <p class="text-base">
-                            Generated from your brief
-                            <template v-if="post.origin.generated_at">
+                            Drafted from your brief
+                            <template v-if="post.origin.drafted_at">
                                 on
                                 <span class="font-mono">{{
                                     formatDateTime(
-                                        post.origin.generated_at,
+                                        post.origin.drafted_at,
                                         timezone,
                                     )
                                 }}</span>
@@ -972,6 +972,44 @@ const locked = computed(() => {
                             </dt>
                             <dd class="break-words whitespace-pre-line">
                                 {{ post.origin.alt_text }}
+                            </dd>
+                        </div>
+                        <div
+                            v-if="post.origin.link_dropped"
+                            class="grid gap-0.5"
+                            data-test="post-origin-link-dropped"
+                        >
+                            <dt class="text-sm text-muted-foreground">Link</dt>
+                            <dd>
+                                The draft suggested a link that was not in the
+                                idea or the brief. It was left out.
+                            </dd>
+                        </div>
+                        <div
+                            v-if="post.origin.input_tokens !== null"
+                            class="grid gap-0.5"
+                            data-test="post-origin-cost"
+                        >
+                            <dt class="text-sm text-muted-foreground">
+                                What this draft used
+                            </dt>
+                            <dd>
+                                <template v-if="post.origin.cost">
+                                    About
+                                    <span class="font-mono">
+                                        {{ post.origin.currency }}
+                                        {{ post.origin.cost }}
+                                    </span>
+                                    by the price table,
+                                </template>
+                                <span class="font-mono">{{
+                                    post.origin.input_tokens
+                                }}</span>
+                                tokens in and
+                                <span class="font-mono">{{
+                                    post.origin.output_tokens
+                                }}</span>
+                                out.
                             </dd>
                         </div>
                     </dl>

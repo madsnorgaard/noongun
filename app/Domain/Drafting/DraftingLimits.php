@@ -18,6 +18,9 @@ final class DraftingLimits
     /** Seconds on top of the provider calls for a job's own work. */
     public const JOB_SLACK_SECONDS = 15;
 
+    /** Seconds a run usually waits for a worker at most, on a queue that runs. */
+    public const SLOW_AFTER_SECONDS = 120;
+
     /** The most posts one proposal drafts. */
     public static function postsPerProposal(): int
     {
@@ -28,6 +31,15 @@ final class DraftingLimits
     public static function runsPerDay(): int
     {
         return self::int('runs_per_day', 50, 1);
+    }
+
+    /**
+     * The most draft runs all workspaces together may open in 24 hours on
+     * the key of the instance. Runs on a workspace's own key do not count.
+     */
+    public static function instanceRunsPerDay(): int
+    {
+        return self::int('instance_runs_per_day', 200, 1);
     }
 
     /**
@@ -71,7 +83,17 @@ final class DraftingLimits
      */
     public static function stuckAfterSeconds(): int
     {
-        return max(self::int('stuck_after_minutes', 15, 1) * 60, self::jobSeconds() + 60);
+        return max(self::int('stuck_after_minutes', 6, 1) * 60, self::jobSeconds() + 60);
+    }
+
+    /**
+     * How long a run may wait for a worker before the page says that it is
+     * taking longer than expected. $attempt is the try the run is for: a
+     * retry waits out its backoff first.
+     */
+    public static function slowAfterSeconds(int $attempt = 1): int
+    {
+        return self::SLOW_AFTER_SECONDS + ($attempt > 1 ? self::backoffBefore($attempt - 1) : 0);
     }
 
     /**
@@ -84,10 +106,23 @@ final class DraftingLimits
         return self::stuckAfterSeconds() + self::longestBackoff();
     }
 
-    /** The prompt size assumed for the cost ceiling of a proposal. */
-    public static function estimateInputTokens(): int
+    /**
+     * How many tokens one answer usually takes, thinking included, for the
+     * expected cost of a proposal.
+     */
+    public static function expectedOutputTokens(): int
     {
-        return self::int('estimate_input_tokens', 8000, 0);
+        return self::int('expected_output_tokens', 1500, 1);
+    }
+
+    /**
+     * How far ahead a slot time must be to get a draft. A draft has to be
+     * drafted, read and approved before its time, and one whose time has
+     * passed cannot be approved as it stands.
+     */
+    public static function leadSeconds(): int
+    {
+        return self::int('lead_minutes', 60, 0) * 60;
     }
 
     /** How many weeks after the current one can be proposed. */

@@ -6,6 +6,7 @@ use App\Domain\Content\Models\Post;
 use App\Domain\Content\PostState;
 use App\Domain\Drafting\Actions\CreateDraftFromResult;
 use App\Domain\Drafting\Actions\GenerateDraft;
+use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftRunStatus;
 use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
 use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
@@ -245,7 +246,11 @@ describe('GenerateDraft', function () {
     it('uses the key the workspace brought', function () {
         inWorkspace($this->workspace, fn () => LlmCredential::store(DRAFT_TEST_PROVIDER, 'own-workspace-llm-key'));
         $request = draftRequestIn($this->workspace, [$this->facebook]);
-        $run = draftRunIn($this->workspace, $this->editor);
+        // Opened the way the application does, with the key that resolves.
+        $run = inWorkspace($this->workspace, fn () => DraftRun::start(
+            $this->editor,
+            app(DraftGenerators::class)->contextFor($this->workspace),
+        ));
 
         inWorkspace($this->workspace, fn () => app(GenerateDraft::class)->handle($this->editor, $run, $request));
 
@@ -344,7 +349,9 @@ describe('GenerateDraft', function () {
         });
 
         expect($run->status)->toBe(DraftRunStatus::Failed)
-            ->and($run->failure_reason)->toContain('No draft generator is configured for provider [nobody]');
+            // Members read the reason: it names no class, path or setting.
+            ->and($run->failure_reason)->toBe(DraftGeneratorNotAvailable::FOR_MEMBERS)
+            ->and($run->failure_reason)->not->toContain('config/');
     });
 
     it('fails the run without leaking anything when something unexpected is thrown', function () {
@@ -357,7 +364,7 @@ describe('GenerateDraft', function () {
         });
 
         expect($run->status)->toBe(DraftRunStatus::Failed)
-            ->and($run->failure_reason)->toBe('The draft could not be generated because of an unexpected error.')
+            ->and($run->failure_reason)->toBe('The post could not be drafted because of an unexpected error.')
             ->and(json_encode(DB::table('draft_runs')->where('id', $run->id)->first()))->not->toContain(DRAFT_TEST_KEY);
     });
 
@@ -371,7 +378,8 @@ describe('GenerateDraft', function () {
         });
 
         expect($run->status)->toBe(DraftRunStatus::Failed)
-            ->and($run->failure_reason)->toContain('may not')
+            ->and($run->failure_reason)->toBe(GenerateDraft::NOT_ALLOWED)
+            ->and($run->failure_reason)->not->toContain('#')
             ->and(DB::table('posts')->count())->toBe(0);
 
         $this->generator->assertNothingGenerated();

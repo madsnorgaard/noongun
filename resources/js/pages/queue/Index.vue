@@ -448,7 +448,7 @@ function failedHeadline(post: Post): string {
                                 class="rounded-sm bg-secondary px-2.5 py-1 text-sm"
                                 :data-test="`generated-${post.id}`"
                             >
-                                Generated
+                                Drafted from the brief
                                 <template v-if="post.origin.pillar">
                                     - {{ post.origin.pillar }}
                                 </template>

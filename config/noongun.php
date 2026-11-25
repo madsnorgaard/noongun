@@ -133,14 +133,18 @@ return [
     |
     | "limits" bounds what "Propose a week" may spend. "posts_per_proposal"
     | is the most posts one proposal drafts, "runs_per_day" the most draft
-    | runs a workspace may open in 24 hours. "max_attempts" is how many times
+    | runs a workspace may open in 24 hours, and "instance_runs_per_day" the
+    | most all workspaces together may open on the instance key. Only runs
+    | that reached a provider or are still open count. "max_attempts" is how many times
     | one planned post is asked for when the provider fails in a way worth
     | trying again, and "backoff" the wait in seconds before each retry,
     | comma separated; the last value repeats. "stuck_after_minutes" is how
     | long a draft run may stay unfinished before it is marked as failed.
-    | "estimate_input_tokens" is the prompt size assumed for the cost ceiling
-    | shown before a proposal starts. "weeks_ahead" is how far ahead a week
-    | can be proposed.
+    | "expected_output_tokens" is the size of a usual answer, thinking
+    | included, for the expected cost shown before a proposal starts.
+    | "lead_minutes" is how far ahead a slot time must be to get a draft, so
+    | that it can be read and approved in time. "weeks_ahead" is how far
+    | ahead a week can be proposed.
     */
 
     'drafting' => [
@@ -173,10 +177,12 @@ return [
         'limits' => [
             'posts_per_proposal' => (int) env('NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL', 14),
             'runs_per_day' => (int) env('NOONGUN_DRAFT_MAX_RUNS_PER_DAY', 50),
+            'instance_runs_per_day' => (int) env('NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY', 200),
             'max_attempts' => (int) env('NOONGUN_DRAFT_MAX_ATTEMPTS', 3),
             'backoff' => array_map(intval(...), explode(',', (string) env('NOONGUN_DRAFT_BACKOFF', '30,120'))),
-            'stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 15),
-            'estimate_input_tokens' => (int) env('NOONGUN_DRAFT_ESTIMATE_INPUT_TOKENS', 8000),
+            'stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 6),
+            'expected_output_tokens' => (int) env('NOONGUN_DRAFT_EXPECTED_OUTPUT_TOKENS', 1500),
+            'lead_minutes' => (int) env('NOONGUN_DRAFT_LEAD_MINUTES', 60),
             'weeks_ahead' => 8,
         ],
     ],

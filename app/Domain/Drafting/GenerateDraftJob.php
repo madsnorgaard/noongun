@@ -6,10 +6,12 @@ use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Drafting\Actions\BuildDraftRequest;
 use App\Domain\Drafting\Actions\GenerateDraft;
+use App\Domain\Drafting\Actions\ProposeWeek;
 use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
 use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
 use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\Exceptions\DraftingNotAllowed;
+use App\Domain\Drafting\Exceptions\DraftingStateConflict;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
@@ -19,6 +21,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use Throwable;
 
 /**
@@ -54,11 +57,13 @@ final class GenerateDraftJob implements ShouldQueue
 
     public const INTERRUPTED = 'The worker stopped before the draft was finished. No draft was created. Propose the week again to fill this time.';
 
-    public const REQUESTER_GONE = 'The person who asked for this draft is no longer a user here, so it was not generated.';
+    public const REQUESTER_GONE = 'The person who asked for this draft is no longer a user here, so it was not drafted.';
 
-    public const BRIEF_GONE = 'The brief this draft was asked from no longer exists, so it was not generated.';
+    public const BRIEF_GONE = 'The brief this draft was asked from no longer exists, so it was not drafted.';
 
-    public const CHANNELS_GONE = 'None of the channels this draft was planned for can publish any more, so it was not generated.';
+    public const CHANNELS_GONE = 'None of the channels this draft was planned for can publish any more, so it was not drafted.';
+
+    private const LOGGED_MESSAGE_LENGTH = 500;
 
     public int $tries = 1;
 
@@ -128,17 +133,28 @@ final class GenerateDraftJob implements ShouldQueue
                 return;
             }
 
-            try {
-                $generate->handle($requester, $run, $request, self::plannedAt($run));
-            } catch (DraftGenerationFailed $failure) {
-                $this->note($run, $failure);
+            $next = null;
 
-                if ($failure->retryable) {
-                    $this->openNextAttempt($workspace, $run, $requester, $generators);
-                }
+            try {
+                $generate->handle($requester, $run, $request, self::plannedAt($run), function (DraftRun $failed, DraftingException $failure) use (&$next, $workspace, $requester, $generators): void {
+                    // Still inside the transaction that marked the run
+                    // failed, under the lock on the workspace row.
+                    if ($failure instanceof DraftGenerationFailed && $failure->retryable) {
+                        $next = $this->openNextAttempt($workspace, $failed, $requester, $generators);
+                    }
+                });
             } catch (DraftingException|DraftGeneratorNotAvailable|DraftingNotAllowed $failure) {
                 // GenerateDraft has marked the run failed with this reason.
                 $this->note($run, $failure);
+            } catch (DraftingStateConflict $failure) {
+                // The run was closed while the provider was answering: a
+                // person stopped waiting, or the recovery gave it up. The
+                // answer has nowhere to go and no post was created.
+                $this->note($run, $failure);
+            }
+
+            if ($next instanceof DraftRun) {
+                $this->queueNextAttempt($next);
             }
         });
     }
@@ -176,37 +192,70 @@ final class GenerateDraftJob implements ShouldQueue
     }
 
     /**
-     * Opens the run for the next attempt and queues its job after the
-     * backoff, unless the attempts or the runs of the day are used up.
+     * Opens the run for the next attempt, unless the attempts, the runs of
+     * the workspace for the day or those of the instance key are used up.
+     * Called under the lock on the workspace row, in the transaction that
+     * marked the failed run, so the limits are counted where a proposal
+     * counts them and the workspace is never without an open run in
+     * between.
      */
-    private function openNextAttempt(Workspace $workspace, DraftRun $failed, User $requester, DraftGenerators $generators): void
+    private function openNextAttempt(Workspace $workspace, DraftRun $failed, User $requester, DraftGenerators $generators): ?DraftRun
     {
         if ($this->attempt >= DraftingLimits::maxAttempts()) {
-            return;
+            return null;
         }
 
-        if (DraftRun::query()->where('created_at', '>', now()->subDay())->count() >= DraftingLimits::runsPerDay()) {
-            return;
+        $budget = app(DraftBudget::class);
+
+        if ($budget->usedByWorkspace() >= DraftingLimits::runsPerDay()) {
+            return null;
         }
 
         try {
             $context = $generators->contextFor($workspace);
         } catch (DraftingException|DraftGeneratorNotAvailable) {
-            return;
+            return null;
         }
 
-        $next = DraftRun::start($requester, $context, [
+        if ($context->key->scope === CredentialScope::Instance && $budget->usedOnInstanceKey() >= DraftingLimits::instanceRunsPerDay()) {
+            return null;
+        }
+
+        return DraftRun::start($requester, $context, [
             ...$failed->request,
             'attempt' => $this->attempt + 1,
             'retry_of' => $failed->id,
         ], $failed->brief, $failed->pillar, $failed->idea);
-
-        dispatch(new self($this->workspaceId, $next->id, $this->attempt + 1))
-            ->delay(DraftingLimits::backoffBefore($this->attempt));
     }
 
     /**
-     * The messages of these exceptions are made safe by their classes.
+     * Queues the job of a run that was opened for a retry, after the
+     * backoff. A run that cannot be queued is closed at once: left pending
+     * it would hold the workspace until the recovery found it.
+     */
+    private function queueNextAttempt(DraftRun $next): void
+    {
+        try {
+            dispatch(new self($this->workspaceId, $next->id, $this->attempt + 1))
+                ->delay(DraftingLimits::backoffBefore($this->attempt));
+        } catch (Throwable $failure) {
+            // The exception itself is not logged: a queue connection
+            // failure can carry its address and password.
+            Log::error('The retry of a draft run could not be queued.', [
+                'workspace_id' => $this->workspaceId,
+                'draft_run_id' => $next->id,
+                'exception' => $failure::class,
+            ]);
+
+            $next->markFailed(ProposeWeek::NOT_QUEUED);
+        }
+    }
+
+    /**
+     * Writes down for the operator why the run failed: the class of the
+     * failure, its message, and the detail a drafting exception keeps for
+     * the operator and does not show to members. The message is cleaned of
+     * anything shaped like a credential and cut short before it is logged.
      */
     private function note(DraftRun $run, Throwable $failure): void
     {
@@ -214,8 +263,10 @@ final class GenerateDraftJob implements ShouldQueue
             'workspace_id' => $this->workspaceId,
             'draft_run_id' => $run->id,
             'attempt' => $this->attempt,
+            'exception' => $failure::class,
             'retryable' => $failure instanceof DraftingException && $failure->retryable,
-            'message' => $failure instanceof DraftingException ? $failure->getMessage() : $failure::class,
+            'message' => Str::limit(DraftingException::redact($failure->getMessage()), self::LOGGED_MESSAGE_LENGTH),
+            'operator_detail' => $failure instanceof DraftingException ? $failure->operatorDetail() : null,
         ]);
     }
 

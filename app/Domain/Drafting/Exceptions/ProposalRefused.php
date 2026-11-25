@@ -29,9 +29,19 @@ class ProposalRefused extends RuntimeException
 
     public const DAILY_LIMIT = 'daily_limit';
 
+    public const INSTANCE_LIMIT = 'instance_limit';
+
     final public function __construct(public readonly string $reason, string $message)
     {
         parent::__construct($message);
+    }
+
+    public static function nothingToDraft(): static
+    {
+        return new static(
+            self::NOTHING_TO_DRAFT,
+            (string) __('There is nothing to draft in this week: every slot time has passed, is too close or already has a post.'),
+        );
     }
 
     public static function because(string $reason, string $message): static

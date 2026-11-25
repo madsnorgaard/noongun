@@ -2,14 +2,29 @@
 
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Content\Exceptions\PostActionNotAllowed;
+use App\Domain\Drafting\Actions\GenerateDraft;
+use App\Domain\Drafting\Actions\ProposeWeek;
 use App\Domain\Drafting\Console\RecoverStuckDraftRuns;
+use App\Domain\Drafting\CredentialScope;
+use App\Domain\Drafting\DraftBudget;
+use App\Domain\Drafting\DraftGenerators;
+use App\Domain\Drafting\DraftingLimits;
+use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
+use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
+use App\Domain\Drafting\Exceptions\DraftingException;
+use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\GenerateDraftJob;
 use App\Domain\Drafting\Models\DraftRun;
+use App\Domain\Drafting\Models\LlmCredential;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
+use Tests\Fakes\FakeDraftGenerator;
 
 require_once __DIR__.'/../../Support/publishing.php';
 require_once __DIR__.'/../../Support/posts.php';
@@ -122,6 +137,18 @@ describe('one run', function () {
             ->and($payload)->not->toContain('DraftingContext')
             ->and($payload)->not->toContain(DRAFT_TEST_MODEL);
     });
+
+    it('has a time limit below the retry_after of the queue, so a running job is not handed to a second worker', function (string $connection) {
+        // The defaults an instance runs with, not the short timeout of the tests.
+        config(['noongun.drafting.timeout' => (require config_path('noongun.php'))['drafting']['timeout']]);
+
+        $retryAfter = config("queue.connections.{$connection}.retry_after");
+
+        expect((new GenerateDraftJob(1, 1))->timeout)->toBe(255)
+            ->and($retryAfter)->toBeInt()
+            ->and($retryAfter)->toBeGreaterThan((new GenerateDraftJob(1, 1))->timeout)
+            ->and($retryAfter)->toBeGreaterThan(DraftingLimits::jobSeconds());
+    })->with(['redis', 'database']);
 
     it('is never run again by the queue, and has a time limit from the configuration', function () {
         config(['noongun.drafting.timeout' => 40]);
@@ -308,14 +335,125 @@ describe('failures', function () {
     it('does not try again once the workspace has used its draft runs for the day', function () {
         config(['noongun.drafting.limits.runs_per_day' => 1]);
 
+        inWorkspace($this->workspace, fn () => DraftRun::factory()->succeeded()->create());
         $run = proposedRun();
         $this->generator->failRetryable();
 
         runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
 
-        expect(DB::table('draft_runs')->count())->toBe(1)
+        expect(DB::table('draft_runs')->count())->toBe(2)
             ->and(freshRun($run)->status)->toBe('failed');
         Queue::assertNothingPushed();
+    });
+
+    it('does not try again once the key of the instance has no runs left for the day', function () {
+        config(['noongun.drafting.limits.instance_runs_per_day' => 2]);
+
+        $other = Workspace::factory()->create();
+        inWorkspace($other, fn () => DraftRun::factory()->count(2)->succeeded()->create());
+
+        $run = proposedRun();
+        $this->generator->failRetryable();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        expect(retriesOf($run))->toBe([]);
+        Queue::assertNothingPushed();
+    });
+
+    it('opens the retry in the transaction that marks the run failed, under the lock a proposal takes', function () {
+        $run = proposedRun();
+        $this->generator->failRetryable();
+
+        $base = DB::transactionLevel();
+        $seen = [];
+        DB::listen(function ($query) use (&$seen) {
+            $seen[] = [strtolower($query->sql), DB::transactionLevel()];
+        });
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        $position = function (Closure $matches) use (&$seen): ?int {
+            foreach ($seen as $index => [$sql]) {
+                if ($matches($sql)) {
+                    return $index;
+                }
+            }
+
+            return null;
+        };
+
+        $lock = $position(fn (string $sql) => str_contains($sql, '"workspaces"') && str_contains($sql, 'for update'));
+        $failed = $position(fn (string $sql) => str_starts_with($sql, 'update "draft_runs"') && str_contains($sql, '"failure_reason"'));
+        $count = $position(fn (string $sql) => str_contains($sql, 'count(*)') && str_contains($sql, '"draft_runs"') && str_contains($sql, '"input_tokens" is not null'));
+        $opened = $position(fn (string $sql) => str_starts_with($sql, 'insert into "draft_runs"'));
+
+        expect($lock)->not->toBeNull()
+            ->and($failed)->toBeGreaterThan($lock)
+            ->and($count)->toBeGreaterThan($failed)
+            ->and($opened)->toBeGreaterThan($count)
+            // All four inside one transaction, which is over when the job returns.
+            ->and([$seen[$lock][1], $seen[$failed][1], $seen[$count][1], $seen[$opened][1]])->toBe(array_fill(0, 4, $base + 1))
+            ->and(DB::transactionLevel())->toBe($base);
+    });
+
+    it('lets no proposal start between a failed run and its retry', function () {
+        $run = proposedRun();
+        $this->generator->failRetryable();
+        slotIn($this->workspace, $this->channel, 1, '09:00');
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        // The failed run is closed and its retry is open: a workspace with a retry on its way is at work.
+        expect(fn () => proposeWeek($this->workspace, $this->owner))->toThrow(ProposalRefused::class, 'still being');
+        expect(DB::table('draft_runs')->count())->toBe(2);
+    });
+
+    it('closes the retry at once when it cannot be handed to the queue', function () {
+        $run = proposedRun();
+        $this->generator->failRetryable();
+
+        $this->mock(Dispatcher::class)
+            ->shouldReceive('dispatch')
+            ->andThrow(new RuntimeException('Connection refused: redis://user:secret@queue'));
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        $next = retriesOf($run)[0];
+
+        expect($next->status)->toBe('failed')
+            ->and($next->failure_reason)->toBe(ProposeWeek::NOT_QUEUED)
+            ->and(DB::table('draft_runs')->whereIn('status', ['pending', 'running'])->count())->toBe(0);
+    });
+
+    it('still closes the run when opening the retry goes wrong', function () {
+        $run = proposedRun();
+
+        // While the provider fails, the model name becomes one the database
+        // refuses, so the row for the retry cannot be written.
+        $this->generator->returnsOutput(function () {
+            config(['noongun.drafting.providers.'.DRAFT_TEST_PROVIDER.'.model' => str_repeat('m', 200)]);
+
+            throw DraftGenerationFailed::retryable(DRAFT_TEST_PROVIDER, 'The provider is busy.');
+        });
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        expect(freshRun($run))->toMatchObject(['status' => 'failed', 'failure_reason' => 'The provider is busy.'])
+            ->and(DB::table('draft_runs')->count())->toBe(1);
+        Queue::assertNothingPushed();
+    });
+
+    it('does try again when the only run of the day is the one that failed without spending', function () {
+        config(['noongun.drafting.limits.runs_per_day' => 1]);
+
+        $run = proposedRun();
+        $this->generator->failRetryable();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        expect(retriesOf($run))->toHaveCount(1);
+        Queue::assertPushed(GenerateDraftJob::class, 1);
     });
 
     it('fails the run with words a person can act on when the key is gone, without calling a provider', function () {
@@ -331,6 +469,58 @@ describe('failures', function () {
         Queue::assertNothingPushed();
     });
 
+    it('spends nothing when who pays changed after the run was opened', function (Closure $change, string $what) {
+        $run = $change($this);
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        $this->generator->assertNothingGenerated();
+
+        $stored = freshRun($run);
+
+        expect($stored->status)->toBe('failed')
+            ->and($stored->failure_reason)->toContain('The drafting settings changed after this draft was asked for')
+            ->and($stored->failure_reason)->toContain($what)
+            ->and($stored->failure_reason)->toContain('nothing was spent')
+            ->and($stored->input_tokens)->toBeNull()
+            ->and(DB::table('draft_runs')->count())->toBe(1)
+            ->and(DB::table('posts')->count())->toBe(0);
+        Queue::assertNothingPushed();
+    })->with([
+        'the workspace key was removed, so the instance would pay' => [function ($test) {
+            inWorkspace($test->workspace, fn () => LlmCredential::store(DRAFT_TEST_PROVIDER, 'a-workspace-llm-key'));
+            $run = inWorkspace($test->workspace, fn () => DraftRun::start(
+                $test->owner,
+                app(DraftGenerators::class)->contextFor($test->workspace),
+                ['channel_ids' => [$test->channel->id]],
+                $test->brief,
+            ));
+
+            expect($run->credential_scope)->toBe(CredentialScope::Workspace);
+            DB::table('llm_credentials')->where('workspace_id', $test->workspace->id)->delete();
+
+            return $run;
+        }, 'the API key that pays for it'],
+        'a workspace key was added, so the workspace would pay' => [function ($test) {
+            $run = proposedRun();
+            inWorkspace($test->workspace, fn () => LlmCredential::store(DRAFT_TEST_PROVIDER, 'a-workspace-llm-key'));
+
+            return $run;
+        }, 'the API key that pays for it'],
+        'the model was changed' => [function () {
+            $run = proposedRun();
+            config(['noongun.drafting.providers.'.DRAFT_TEST_PROVIDER.'.model' => 'a-dearer-model']);
+
+            return $run;
+        }, 'the model'],
+        'the prompt version was changed' => [function () {
+            $run = proposedRun();
+            config(['noongun.drafting.prompt_version' => 'v2']);
+
+            return $run;
+        }, 'the prompt version'],
+    ]);
+
     it('fails the run without calling a provider when the person who asked may no longer write', function () {
         $run = proposedRun();
         DB::table('memberships')->where('user_id', $this->owner->id)->update(['role' => Role::Viewer->value]);
@@ -340,7 +530,58 @@ describe('failures', function () {
         $this->generator->assertNothingGenerated();
 
         expect(freshRun($run)->status)->toBe('failed')
+            ->and(freshRun($run)->failure_reason)->toBe(GenerateDraft::NOT_ALLOWED)
             ->and(DB::table('posts')->count())->toBe(0);
+    });
+
+    it('shows members a fixed sentence when drafting is not set up any more, and logs the detail', function () {
+        $run = proposedRun();
+        config(['noongun.drafting.provider' => 'nobody']);
+        Log::spy();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        expect(freshRun($run)->failure_reason)->toBe(DraftGeneratorNotAvailable::FOR_MEMBERS);
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $line, array $context): bool => $line === 'A draft run failed.'
+            && $context['exception'] === DraftGeneratorNotAvailable::class
+            && str_contains($context['message'], 'No draft generator is configured for provider [nobody]')
+            && $context['draft_run_id'] === $run->id);
+    });
+
+    it('logs the class, a cleaned and shortened message and the detail for the operator of every failure', function () {
+        $run = proposedRun();
+        $this->generator->failNext(DraftGenerationFailed::permanent(
+            DRAFT_TEST_PROVIDER,
+            'The provider did not accept the API key.',
+            null,
+            [DraftingException::OPERATOR_DETAIL => 'HTTP 401 authentication_error for model '.DRAFT_TEST_MODEL.' '.str_repeat('x', 900)],
+        ));
+        Log::spy();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        // Members read the plain sentence only.
+        expect(freshRun($run)->failure_reason)->toBe('The provider did not accept the API key.');
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $line, array $context): bool => $line === 'A draft run failed.'
+            && $context['exception'] === DraftGenerationFailed::class
+            && $context['message'] === 'The provider did not accept the API key.'
+            && str_starts_with((string) $context['operator_detail'], 'HTTP 401 authentication_error')
+            && $context['retryable'] === false
+            && $context['workspace_id'] === $this->workspace->id);
+    });
+
+    it('never logs a key, also when a failure carries one', function () {
+        $run = proposedRun();
+        $this->generator->returnsOutput(fn () => throw new DraftGeneratorNotAvailable('Broken: x-api-key: sk-ant-abcdefghijklmnopqrstuvwxyz '.str_repeat('y', 900)));
+        Log::spy();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $line, array $context): bool => $line === 'A draft run failed.'
+            && ! str_contains($context['message'], 'sk-ant-abcdefghijklmnopqrstuvwxyz')
+            && mb_strlen($context['message']) <= 503);
     });
 
     it('fails the run without calling a provider when what it needs is gone', function (Closure $remove, string $reason) {
@@ -370,6 +611,32 @@ describe('failures', function () {
             ->and(freshRun($run)->status)->toBe('succeeded');
     });
 
+    it('keeps what a paid answer used when the post cannot be saved from it', function () {
+        $run = proposedRun();
+
+        // The provider answers. Meanwhile the person who asked loses the right to write posts.
+        $this->generator->returnsOutput(function ($request) {
+            DB::table('memberships')->where('user_id', $this->owner->id)->update(['role' => Role::Viewer->value]);
+
+            return FakeDraftGenerator::outputFor($request);
+        });
+
+        expect(fn () => runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id)))->toThrow(PostActionNotAllowed::class);
+
+        $stored = freshRun($run);
+
+        expect($stored->status)->toBe('failed')
+            ->and($stored->failure_reason)->toBe(GenerateDraft::NOT_SAVED)
+            ->and($stored->attempts)->toBe(1)
+            ->and($stored->input_tokens)->toBe(1200)
+            ->and($stored->output_tokens)->toBe(300)
+            ->and($stored->cost_estimate)->toBe('0.005400')
+            ->and($stored->cost_currency)->toBe('USD')
+            ->and(DB::table('posts')->count())->toBe(0)
+            // It was paid for, so it counts towards the day.
+            ->and(inWorkspace($this->workspace, fn () => app(DraftBudget::class)->usedByWorkspace()))->toBe(1);
+    });
+
     it('fails the run and reports the error when something unexpected happens', function () {
         $run = proposedRun();
         $this->generator->returnsOutput(fn () => throw new RuntimeException('secret detail sk-ant-abcdefghijklmnop'));
@@ -377,7 +644,7 @@ describe('failures', function () {
         expect(fn () => runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id)))->toThrow(RuntimeException::class);
 
         expect(freshRun($run)->status)->toBe('failed')
-            ->and(freshRun($run)->failure_reason)->toBe('The draft could not be generated because of an unexpected error.')
+            ->and(freshRun($run)->failure_reason)->toBe('The post could not be drafted because of an unexpected error.')
             ->and(DB::table('posts')->count())->toBe(0);
         Queue::assertNothingPushed();
     });
@@ -485,6 +752,20 @@ describe('noongun:recover-stuck-draft-runs', function () {
         $this->artisan('noongun:recover-stuck-draft-runs')->assertSuccessful();
 
         expect(freshRun($run)->status)->toBe('running');
+    });
+
+    it('gives a run up soon after a job could still be at work, with the defaults', function () {
+        config([
+            'noongun.drafting.timeout' => 120,
+            'noongun.drafting.limits.stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 6),
+        ]);
+
+        // The job may take 2 x 120 + 15 = 255 seconds.
+        expect(DraftingLimits::jobSeconds())->toBe(255)
+            ->and(DraftingLimits::stuckAfterSeconds())->toBe(360)
+            ->and(DraftingLimits::unclaimedAfterSeconds())->toBe(480)
+            ->and(DraftingLimits::stuckAfterSeconds())->toBeGreaterThan(DraftingLimits::jobSeconds())
+            ->and((require config_path('noongun.php'))['drafting']['limits']['stuck_after_minutes'])->toBe(6);
     });
 
     it('is scheduled', function () {

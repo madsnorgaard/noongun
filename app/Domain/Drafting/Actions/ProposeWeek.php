@@ -36,7 +36,7 @@ use Throwable;
  */
 final class ProposeWeek
 {
-    public const NOT_QUEUED = 'The draft could not be handed to the queue, so it was not generated. Nothing was spent. Propose the week again.';
+    public const NOT_QUEUED = 'The draft could not be handed to the queue, so it was not drafted. Nothing was spent. Propose the week again.';
 
     public function __construct(
         private readonly PlanWeek $planWeek,
@@ -73,10 +73,7 @@ final class ProposeWeek
             $plan = $this->planWeek->handle($workspace, $week);
 
             if ($plan->isEmpty()) {
-                throw ProposalRefused::because(
-                    ProposalRefused::NOTHING_TO_DRAFT,
-                    (string) __('There is nothing to draft in this week: every slot time has passed or already has a post.'),
-                );
+                throw ProposalRefused::nothingToDraft();
             }
 
             if (! hash_equals($plan->fingerprint(), $seen)) {
@@ -86,7 +83,7 @@ final class ProposeWeek
                 );
             }
 
-            foreach ($this->checks->overLimits(count($plan->posts)) as $refusal) {
+            foreach ($this->checks->overLimits($workspace, count($plan->posts)) as $refusal) {
                 throw $refusal;
             }
 

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Drafting;
 
 use App\Domain\Drafting\Actions\ProposeWeek;
+use App\Domain\Drafting\Actions\StopOpenRuns;
+use App\Domain\Drafting\DraftBudget;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\Models\DraftRun;
@@ -32,7 +34,7 @@ class ProposalController extends Controller
         private readonly ProposalPresenter $presenter,
     ) {}
 
-    public function create(Request $request, PlanWeek $planWeek, ProposalChecks $checks): Response
+    public function create(Request $request, PlanWeek $planWeek, ProposalChecks $checks, DraftBudget $budget): Response
     {
         Gate::authorize('create', DraftRun::class);
 
@@ -44,24 +46,21 @@ class ProposalController extends Controller
         $refusals = $checks->missingSetup($workspace);
 
         if ($refusals === [] && $plan->isEmpty()) {
-            $refusals[] = ProposalRefused::because(
-                ProposalRefused::NOTHING_TO_DRAFT,
-                (string) __('There is nothing to draft in this week: every slot time has passed or already has a post.'),
-            );
+            $refusals[] = ProposalRefused::nothingToDraft();
         }
 
-        $refusals = [...$refusals, ...$checks->overLimits(count($plan->posts))];
+        $refusals = [...$refusals, ...$checks->overLimits($workspace, count($plan->posts))];
 
         return Inertia::render('proposals/Create', [
             'week' => $this->presenter->week($workspace, $week),
             'plan' => $this->presenter->plan($plan),
             'refusals' => $this->presenter->refusals($refusals),
             'generator' => $this->presenter->generator($workspace),
-            'cost' => $this->presenter->costCeiling($workspace, count($plan->posts)),
+            'cost' => $this->presenter->cost($workspace, $plan),
             'limits' => [
                 'posts_per_proposal' => DraftingLimits::postsPerProposal(),
                 'runs_per_day' => DraftingLimits::runsPerDay(),
-                'runs_used' => $checks->runsInLastDay(),
+                'runs_used' => $budget->usedByWorkspace(),
                 'max_attempts' => DraftingLimits::maxAttempts(),
             ],
             'links' => $this->presenter->links(),
@@ -93,11 +92,37 @@ class ProposalController extends Controller
         Inertia::flash('toast', [
             'type' => 'success',
             'message' => trans_choice(
-                '{1} :count draft is being generated. It waits for your approval in the queue.|[2,*] :count drafts are being generated. They wait for your approval in the queue.',
+                '{1} :count post is being drafted. It waits for your approval in the queue.|[2,*] :count posts are being drafted. They wait for your approval in the queue.',
                 count($runs),
                 ['count' => count($runs)],
             ),
         ]);
+
+        return to_route('queue.index');
+    }
+
+    /**
+     * "Stop waiting": closes the draft runs of the workspace that are still
+     * open, for when the queue is down and nothing else will. It calls no
+     * provider and creates nothing.
+     */
+    public function stop(Request $request, StopOpenRuns $stop): RedirectResponse
+    {
+        Gate::authorize('create', DraftRun::class);
+
+        $actor = $request->user();
+
+        abort_unless($actor instanceof User, 401);
+
+        $stopped = $stop->handle($actor);
+
+        Inertia::flash('toast', $stopped === 0
+            ? ['type' => 'info', 'message' => __('Nothing was waiting any more.')]
+            : ['type' => 'success', 'message' => trans_choice(
+                '{1} :count draft was stopped. Its time is open again.|[2,*] :count drafts were stopped. Their times are open again.',
+                $stopped,
+                ['count' => $stopped],
+            )]);
 
         return to_route('queue.index');
     }

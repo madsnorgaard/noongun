@@ -35,8 +35,8 @@ const props = defineProps<{
     /** Everything that stands in the way of starting. Empty when it can start. */
     refusals: ProposalRefusal[];
     generator: { provider: string; model: string } | null;
-    /** The most the proposal can cost by the price table, or null without a price. */
-    cost: { amount: string; currency: string } | null;
+    /** Expected and worst case cost by the price table, or null without a price. */
+    cost: { currency: string; expected: string; worst: string } | null;
     limits: {
         posts_per_proposal: number;
         runs_per_day: number;
@@ -94,7 +94,7 @@ function start(): void {
                 <div class="grid gap-1">
                     <h1 class="text-title md:text-display">Propose a week</h1>
                     <p class="text-muted-foreground" data-test="proposal-week">
-                        Drafts for {{ weekLabel }}, written from your brief.
+                        Posts for {{ weekLabel }}, drafted from your brief.
                         Times in {{ timezone }}.
                     </p>
                 </div>
@@ -224,16 +224,39 @@ function start(): void {
                         How the week was planned
                     </h2>
                     <ul class="grid gap-1.5 text-base">
-                        <li>
-                            Pillars take turns, the largest weekly target first,
-                            until each has its target. Posts the week already
-                            holds for a pillar count towards it.
+                        <li
+                            v-if="plan.pillars_with_target === 0"
+                            data-test="proposal-no-pillars"
+                        >
+                            No pillar has a weekly target, so every post is
+                            drafted from the brief alone.
+                            <Link
+                                v-if="links.pillars"
+                                :href="links.pillars"
+                                class="font-semibold underline underline-offset-4"
+                            >
+                                Add pillars and targets
+                            </Link>
+                            <template v-if="links.pillars">
+                                to spread the week over your themes.
+                            </template>
                         </li>
-                        <li v-if="count > 0 && withoutPillar > 0">
-                            {{ posts(withoutPillar) }}
-                            {{ withoutPillar === 1 ? 'has' : 'have' }} no
-                            pillar, because the weekly targets ask for fewer
-                            posts than the week has open times.
+                        <template v-else>
+                            <li>
+                                Pillars take turns, the largest weekly target
+                                first, until each has its target. Posts the week
+                                already holds for a pillar count towards it.
+                            </li>
+                            <li v-if="count > 0 && withoutPillar > 0">
+                                {{ posts(withoutPillar) }}
+                                {{ withoutPillar === 1 ? 'has' : 'have' }} no
+                                pillar, because the weekly targets ask for fewer
+                                posts than the week has open times.
+                            </li>
+                        </template>
+                        <li>
+                            Each post takes the oldest unused idea of its
+                            pillar, then the oldest idea without a pillar.
                         </li>
                         <li v-for="short in plan.short" :key="short.pillar">
                             {{ short.pillar }} gets {{ short.missing }} fewer
@@ -250,6 +273,13 @@ function start(): void {
                             {{ plan.past }} slot
                             {{ plan.past === 1 ? 'time has' : 'times have' }}
                             passed.
+                        </li>
+                        <li v-if="plan.soon > 0">
+                            {{ plan.soon }} slot
+                            {{ plan.soon === 1 ? 'time is' : 'times are' }}
+                            less than {{ plan.lead_minutes }} minutes away and
+                            {{ plan.soon === 1 ? 'is' : 'are' }} left out: a
+                            draft could not be read and approved before then.
                         </li>
                         <li v-if="plan.unavailable > 0">
                             {{ plan.unavailable }}
@@ -269,9 +299,22 @@ function start(): void {
                         </li>
                     </ul>
                     <p
-                        v-if="links.pillars || links.slots || links.ideas"
+                        v-if="
+                            links.brief ||
+                            links.pillars ||
+                            links.slots ||
+                            links.ideas
+                        "
                         class="flex flex-wrap gap-x-5 gap-y-1 pt-1 text-base"
                     >
+                        <Link
+                            v-if="links.brief"
+                            :href="links.brief"
+                            class="inline-flex min-h-11 items-center font-semibold underline underline-offset-4"
+                            data-test="proposal-link-brief"
+                        >
+                            Brief
+                        </Link>
                         <Link
                             v-if="links.pillars"
                             :href="links.pillars"
@@ -317,20 +360,30 @@ function start(): void {
 
                         <div v-if="count > 0" class="grid gap-0.5">
                             <dt class="text-sm text-muted-foreground">
-                                Cost, at most
+                                Expected cost, about
                             </dt>
                             <dd v-if="cost" data-test="proposal-cost">
                                 <span class="font-mono text-base">
-                                    {{ cost.currency }} {{ cost.amount }}
+                                    {{ cost.currency }} {{ cost.expected }}
                                 </span>
                                 <span
                                     class="mt-1 block text-sm text-muted-foreground"
                                 >
-                                    The ceiling by the price table of this
-                                    instance: every answer at the full token
-                                    limit and every one of the
-                                    {{ limits.max_attempts }} attempts used. A
-                                    usual week costs a small part of it.
+                                    One answer of the usual length for each
+                                    post, by the price table of this instance.
+                                </span>
+                                <span
+                                    class="mt-2 block text-sm text-muted-foreground"
+                                    data-test="proposal-cost-worst"
+                                >
+                                    Worst case:
+                                    <span class="font-mono">
+                                        {{ cost.currency }} {{ cost.worst }}
+                                    </span>
+                                    if every post needed all
+                                    {{ limits.max_attempts }} attempts and every
+                                    answer ran to the token limit. It cannot
+                                    cost more than that.
                                 </span>
                             </dd>
                             <dd v-else class="text-sm text-muted-foreground">

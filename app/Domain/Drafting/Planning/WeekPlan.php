@@ -22,6 +22,7 @@ final readonly class WeekPlan
      * @param  int  $unavailable  slots of channels that cannot publish now
      * @param  int  $leftOut  open times beyond the most one proposal drafts
      * @param  list<array{pillar: Pillar, missing: int}>  $short  pillars whose weekly target does not fit in the open times
+     * @param  int  $soon  slot times that are closer than the lead time
      */
     public function __construct(
         public string $week,
@@ -33,6 +34,7 @@ final readonly class WeekPlan
         public int $unavailable = 0,
         public int $leftOut = 0,
         public array $short = [],
+        public int $soon = 0,
     ) {}
 
     public function isEmpty(): bool

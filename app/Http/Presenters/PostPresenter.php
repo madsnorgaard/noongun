@@ -69,7 +69,7 @@ final class PostPresenter
     }
 
     /**
-     * Where a generated post came from, read from its draft run, or null
+     * Where a drafted post came from, read from its draft run, or null
      * for a post written by hand. The rationale and the alternative text
      * are what a model wrote: the pages show them as plain text.
      *
@@ -90,7 +90,15 @@ final class PostPresenter
             'model' => $run->model,
             'rationale' => $run->rationale,
             'alt_text' => $run->alt_text,
-            'generated_at' => $run->finished_at?->toIso8601String(),
+            // The model suggested a link the author never gave. It was left out.
+            'link_dropped' => $run->link_dropped,
+            'drafted_at' => $run->finished_at?->toIso8601String(),
+            // What this one draft used: tokens as the provider reported
+            // them, and the estimate of the price table when there is one.
+            'input_tokens' => $run->input_tokens,
+            'output_tokens' => $run->output_tokens,
+            'cost' => $run->cost_estimate !== null ? Money::used($run->cost_estimate) : null,
+            'currency' => $run->cost_currency,
         ];
     }
 

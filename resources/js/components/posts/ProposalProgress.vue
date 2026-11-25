@@ -1,20 +1,30 @@
 <script setup lang="ts">
 import { Link, router, usePoll } from '@inertiajs/vue3';
-import { computed, onMounted, watch } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
+import { Button } from '@/components/ui/button';
+import {
+    Dialog,
+    DialogContent,
+    DialogDescription,
+    DialogFooter,
+    DialogHeader,
+    DialogTitle,
+} from '@/components/ui/dialog';
+import { Spinner } from '@/components/ui/spinner';
 import { formatDate, formatDateTime, useWorkspaceTimezone } from '@/lib/posts';
 import { show } from '@/routes/posts';
-import { create } from '@/routes/proposals';
+import { create, stop as stopWaiting } from '@/routes/proposals';
 import type { ProposalProgress, ProposalRun } from '@/types/proposals';
 
 /**
- * The drafts of the latest "Propose a week" while they are written and for
+ * The drafts of the latest "Propose a week" while they are drafted and for
  * a while after. It asks the server for the progress alone every few
- * seconds, only while a draft is waiting or being written, and loads the
+ * seconds, only while a draft is waiting or being drafted, and loads the
  * lists of the queue again each time one is settled.
  */
 const props = defineProps<{
     proposal: ProposalProgress;
-    /** Whether the viewer may propose a week again. */
+    /** Whether the viewer may propose a week, and stop one that hangs. */
     canPropose: boolean;
 }>();
 
@@ -43,14 +53,14 @@ watch(
     (active) => (active ? start() : stop()),
 );
 
-// A draft was written or gave up: show the new draft in the lists.
+// A draft arrived or gave up: show the new draft in the lists.
 watch(settled, () => router.reload({ only: ['sections', 'totals'] }));
 
 const total = computed(() => props.proposal.runs.length);
 
 const summary = computed(() => {
     const { succeeded, failed } = props.proposal.counts;
-    const parts = [`${succeeded} of ${total.value} written`];
+    const parts = [`${succeeded} of ${total.value} drafted`];
 
     if (failed > 0) {
         parts.push(`${failed} failed`);
@@ -65,14 +75,41 @@ const weekLabel = computed(() =>
         : '',
 );
 
+const open = computed(
+    () => props.proposal.counts.pending + props.proposal.counts.running,
+);
+
+// Stopping asks first: a draft that is with the provider right now is lost.
+const confirming = ref(false);
+const stopping = ref(false);
+
+function stopNow(): void {
+    if (stopping.value) {
+        return;
+    }
+
+    router.post(
+        stopWaiting.url(),
+        {},
+        {
+            preserveScroll: true,
+            onStart: () => (stopping.value = true),
+            onFinish: () => {
+                stopping.value = false;
+                confirming.value = false;
+            },
+        },
+    );
+}
+
 function word(run: ProposalRun): string {
     switch (run.status) {
         case 'pending':
             return run.attempt > 1 ? 'Waiting to try again' : 'Waiting';
         case 'running':
-            return 'Being written';
+            return 'Being drafted';
         case 'succeeded':
-            return 'Draft written';
+            return 'Drafted';
         default:
             return 'Failed';
     }
@@ -113,6 +150,32 @@ function dot(run: ProposalRun): string {
             </p>
         </div>
 
+        <!-- Advice, not an error: nothing has failed yet. -->
+        <div
+            v-if="proposal.active && proposal.waiting_long"
+            class="flex flex-wrap items-center justify-between gap-x-5 gap-y-3 rounded-lg bg-warning-surface px-4 py-3"
+            role="status"
+            data-test="proposal-waiting-long"
+        >
+            <p class="flex-[1_1_18rem] text-base">
+                <span
+                    class="mr-2 rounded-sm bg-warning-fill px-2 py-0.5 text-xs font-bold text-white"
+                >
+                    Check
+                </span>
+                Waiting longer than expected. Check that the queue is running.
+            </p>
+            <Button
+                v-if="canPropose"
+                size="sm"
+                variant="outline"
+                data-test="stop-waiting"
+                @click="confirming = true"
+            >
+                Stop waiting
+            </Button>
+        </div>
+
         <ul class="grid divide-y divide-border">
             <li
                 v-for="run in proposal.runs"
@@ -124,7 +187,7 @@ function dot(run: ProposalRun): string {
                     {{
                         run.planned_at
                             ? formatDateTime(run.planned_at, timezone)
-                            : 'No firing time'
+                            : 'No planned time'
                     }}
                 </span>
 
@@ -177,13 +240,32 @@ function dot(run: ProposalRun): string {
             </li>
         </ul>
 
+        <p
+            v-if="proposal.used"
+            class="text-sm text-muted-foreground"
+            data-test="proposal-used"
+        >
+            Used so far:
+            <template v-if="proposal.used.cost">
+                about
+                <span class="font-mono">
+                    {{ proposal.used.currency }} {{ proposal.used.cost }}
+                </span>
+                by the price table,
+            </template>
+            <span class="font-mono">{{ proposal.used.input_tokens }}</span>
+            tokens in and
+            <span class="font-mono">{{ proposal.used.output_tokens }}</span>
+            out, failed attempts included.
+        </p>
+
         <p class="text-sm text-muted-foreground">
             <template v-if="proposal.active">
-                Each draft appears under "To approve" when it is written. You
+                Each draft appears under "To approve" when it is drafted. You
                 can leave this page: the work goes on.
             </template>
             <template v-else-if="proposal.counts.failed > 0">
-                The drafts that were written wait under "To approve". The times
+                The posts that were drafted wait under "To approve". The times
                 that failed are still open.
                 <Link
                     v-if="canPropose"
@@ -200,4 +282,42 @@ function dot(run: ProposalRun): string {
             </template>
         </p>
     </section>
+
+    <Dialog
+        :open="confirming"
+        @update:open="(isOpen: boolean) => !isOpen && (confirming = false)"
+    >
+        <DialogContent>
+            <DialogHeader class="space-y-3">
+                <DialogTitle>Stop waiting for these drafts?</DialogTitle>
+                <DialogDescription class="text-base">
+                    {{ open === 1 ? '1 draft is' : `${open} drafts are` }}
+                    marked as failed, and
+                    {{ open === 1 ? 'its time is' : 'their times are' }} open
+                    again, so you can propose the week once more. Nothing new is
+                    asked of the provider. A draft that is with the provider at
+                    this moment is discarded, and may still be charged for.
+                </DialogDescription>
+            </DialogHeader>
+
+            <DialogFooter class="gap-2">
+                <Button
+                    type="button"
+                    variant="secondary"
+                    @click="confirming = false"
+                >
+                    Keep waiting
+                </Button>
+                <Button
+                    type="button"
+                    :disabled="stopping"
+                    data-test="confirm-stop-waiting"
+                    @click="stopNow"
+                >
+                    <Spinner v-if="stopping" />
+                    Stop waiting
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
 </template>
