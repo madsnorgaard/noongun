@@ -105,13 +105,13 @@ final class PostPresenter
 
     /**
      * A fingerprint of what a human reads before signing off: the planned
-     * time and every text. The approve request sends it back, so that a
+     * time, every text and every link with its card. The approve request sends it back, so that a
      * post that was edited in the meantime is not approved unseen.
      */
     public function version(Post $post): string
     {
         $content = $post->variants->sortBy('id')->values()
-            ->map(fn (PostVariant $variant): array => [$variant->id, $variant->channel_id, $variant->body, $variant->link])
+            ->map(fn (PostVariant $variant): array => [$variant->id, $variant->channel_id, $variant->body, $variant->link, $variant->link_title, $variant->link_description])
             ->all();
 
         return substr(hash('sha256', (string) json_encode([$post->scheduled_at?->getTimestamp(), $content])), 0, 20);
@@ -171,6 +171,10 @@ final class PostPresenter
                         ?? ($capabilities === null ? PostPreconditions::platformUnavailable($channel) : null),
                     'max_body_length' => $capabilities?->maxBodyLength,
                     'link_previews' => $capabilities?->linkPreviews,
+                    // Set when the platform shows a link only as the card
+                    // the author types: the editor then asks for one.
+                    'link_title_length' => $capabilities?->linkTitleLength,
+                    'link_description_length' => $capabilities?->linkDescriptionLength,
                 ];
             })
             ->all());
@@ -191,6 +195,8 @@ final class PostPresenter
             'max_body_length' => $channel !== null ? $this->capabilities($channel)?->maxBodyLength : null,
             'body' => $variant->body,
             'link' => $variant->link,
+            'link_title' => $variant->link_title,
+            'link_description' => $variant->link_description,
             'published' => $variant->isPublished(),
             'permalink' => $variant->permalink,
             'published_at' => $variant->published_at?->toIso8601String(),

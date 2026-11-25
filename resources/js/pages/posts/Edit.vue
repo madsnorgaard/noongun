@@ -58,7 +58,13 @@ const props = defineProps<{
     planned: string | null;
 }>();
 
-type VariantFields = { channel_id: number; body: string; link: string };
+type VariantFields = {
+    channel_id: number;
+    body: string;
+    link: string;
+    link_title: string;
+    link_description: string;
+};
 
 const timezone = useWorkspaceTimezone();
 const { busy, errors: refused, run } = usePostActions();
@@ -101,7 +107,15 @@ function fieldsFromServer(): {
             // With a single channel there is nothing to choose.
             variants:
                 usable.length === 1
-                    ? [{ channel_id: usable[0].id, body: '', link: '' }]
+                    ? [
+                          {
+                              channel_id: usable[0].id,
+                              body: '',
+                              link: '',
+                              link_title: '',
+                              link_description: '',
+                          },
+                      ]
                     : [],
         };
     }
@@ -114,6 +128,8 @@ function fieldsFromServer(): {
                 channel_id: variant.channel_id,
                 body: variant.body,
                 link: variant.link ?? '',
+                link_title: variant.link_title ?? '',
+                link_description: variant.link_description ?? '',
             })),
     };
 }
@@ -162,6 +178,8 @@ function toggleChannel(id: number, chosen: boolean): void {
             channel_id: id,
             body: first?.body ?? '',
             link: first?.link ?? '',
+            link_title: first?.link_title ?? '',
+            link_description: first?.link_description ?? '',
         });
     }
 }
@@ -502,6 +520,10 @@ const locked = computed(() => {
                             :key="column.variant.channel_id"
                             v-model:body="column.variant.body"
                             v-model:link="column.variant.link"
+                            v-model:link-title="column.variant.link_title"
+                            v-model:link-description="
+                                column.variant.link_description
+                            "
                             :channel="column.option"
                             :others="othersFor(column.variant.channel_id)"
                             :errors="{
@@ -513,6 +535,12 @@ const locked = computed(() => {
                                 ),
                                 link: fieldError(
                                     `variants.${column.position}.link`,
+                                ),
+                                linkTitle: fieldError(
+                                    `variants.${column.position}.link_title`,
+                                ),
+                                linkDescription: fieldError(
+                                    `variants.${column.position}.link_description`,
                                 ),
                             }"
                             :data-test="`text-${column.variant.channel_id}`"

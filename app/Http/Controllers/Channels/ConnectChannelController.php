@@ -31,6 +31,13 @@ class ConnectChannelController extends Controller
     /** How long the user has to come back from the platform. */
     private const STATE_MINUTES = 15;
 
+    /**
+     * The error values with which a platform says that the user said no:
+     * the OAuth standard one, and the two LinkedIn sends for a cancelled
+     * sign-in and a refused consent. Anything else is reported as a problem.
+     */
+    private const DECLINED = ['access_denied', 'user_cancelled_login', 'user_cancelled_authorize'];
+
     public function __construct(
         private readonly ChannelManager $manager,
         private readonly CurrentWorkspace $current,
@@ -91,7 +98,7 @@ class ConnectChannelController extends Controller
         }
 
         if ($request->query('error') !== null) {
-            $request->query('error') === 'access_denied'
+            in_array($request->query('error'), self::DECLINED, true)
                 ? $this->toast('info', __('Access was not granted on :platform. Nothing was connected.', ['platform' => $label]))
                 : $this->toast('error', __(':platform reported a problem during sign-in. Nothing was connected.', ['platform' => $label]));
 

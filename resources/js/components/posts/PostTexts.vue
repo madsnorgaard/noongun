@@ -72,6 +72,19 @@ const timezone = useWorkspaceTimezone();
                 >
                     {{ variant.link }}
                 </a>
+                <p
+                    v-if="webAddress(variant.link) && variant.link_title"
+                    class="max-w-[72ch] text-sm break-words"
+                    :data-test="`link-card-${variant.id}`"
+                >
+                    <span class="font-semibold">{{ variant.link_title }}</span>
+                    <span
+                        v-if="variant.link_description && !clamp"
+                        class="block text-muted-foreground"
+                    >
+                        {{ variant.link_description }}
+                    </span>
+                </p>
 
                 <p
                     v-if="variant.published"

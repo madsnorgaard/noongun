@@ -216,9 +216,9 @@ function access(channel: Channel): string {
             <h2 class="text-heading">No channels are connected yet</h2>
             <p class="mt-1 max-w-[72ch] text-muted-foreground">
                 <template v-if="can.manage">
-                    Connect a Page to start publishing. You are sent to the
-                    platform to sign in and choose what Noon Gun may post to,
-                    and then brought back here.
+                    Connect a Page or a profile to start publishing. You are
+                    sent to the platform to sign in and choose what Noon Gun may
+                    post to, and then brought back here.
                 </template>
                 <template v-else>
                     Only an owner of this workspace can connect one.

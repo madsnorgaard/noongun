@@ -656,6 +656,10 @@ it there.
 | `FACEBOOK_GRAPH_VERSION` | `v27.0` | Graph API version used for every Facebook call. |
 | `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
 | `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
+| `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | empty | Credentials of the LinkedIn app this instance connects profiles with. |
+| `LINKEDIN_API_VERSION` | `202611` | Value of the `Linkedin-Version` header on every LinkedIn API call, `YYYYMM`. LinkedIn refuses a version about a year after it came out. |
+| `LINKEDIN_SCOPES` | `openid,profile,w_member_social` | Permissions requested when a profile is connected, comma separated. |
+| `LINKEDIN_API_URL`, `LINKEDIN_WEB_URL` | `https://api.linkedin.com`, `https://www.linkedin.com` | Base addresses of the API and of the sign-in. Must be HTTPS. Change only for testing. |
 | `NOONGUN_PUBLISH_MAX_ATTEMPTS` | `5` | How many times one variant is sent before the post is marked as failed. Only retryable errors are tried again. |
 | `NOONGUN_PUBLISH_BACKOFF` | `60,300,900,3600` | Seconds to wait before each retry, comma separated. The last value repeats. The largest value is also the longest wait a platform may ask for; a longer one fails the post. |
 | `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
@@ -749,6 +753,64 @@ keeps the history of what was published.
 Only owners of a workspace can connect and disconnect channels, because a
 channel holds the access to an account on a platform. Editors and viewers can
 see them.
+
+## Connecting a LinkedIn profile
+
+Noon Gun posts to your own LinkedIn profile. Company pages are not supported
+yet (see `docs/adr/0007-linkedin-self-serve-until-m9.md`). Each instance
+connects through a LinkedIn app that its owner creates. The two products it
+needs are open to every developer and need no review.
+`docs/platform-notes/linkedin.md` has the longer checklist; the short version:
+
+1. Create an app at linkedin.com/developers/apps. LinkedIn asks for a LinkedIn
+   Page to associate the app with; a Page of your own is fine. Do not use
+   "LinkedIn" in the app name.
+2. On the **Products** tab, add **Share on LinkedIn** and **Sign In with
+   LinkedIn using OpenID Connect**. The **Auth** tab then lists the scopes
+   `openid`, `profile` and `w_member_social`.
+3. On the **Auth** tab, add this address as an authorised redirect URL:
+
+   ```
+   <APP_URL>/auth/linkedin/callback
+   ```
+
+   It must match `APP_URL` exactly and start with `https://`. The Channels
+   page shows the address this instance uses. If `APP_URL` changes, change it
+   in the app as well.
+4. Put the Client ID and Client Secret from the **Auth** tab in `.env` as
+   `LINKEDIN_CLIENT_ID` and `LINKEDIN_CLIENT_SECRET`, then restart with
+   `docker compose up -d`.
+5. Open **Channels** in Noon Gun and choose **Connect LinkedIn**. Sign in to
+   LinkedIn if asked and allow what is asked for.
+
+What to know about a LinkedIn channel:
+
+- **The access lasts 60 days.** LinkedIn gives an app like this no way to
+  renew it without you. The Channels page shows the date, warns two weeks
+  before it, and offers **Connect again**. If you are still signed in to
+  LinkedIn, connecting again takes one click. After the date nothing is
+  published to the profile until you have done so.
+- **Connecting again keeps the channel.** The same profile gets a new token on
+  the channel it already has. A profile you disconnected earlier is shown for
+  you to confirm first, as for Facebook.
+- **A link needs a title.** LinkedIn does not read the page behind a link. It
+  shows the link as a card with the title and description you type in the
+  editor, without an image for now. Noon Gun never fetches the page to fill
+  them in. A post with a link and no title cannot be approved.
+- **Text only, up to 3000 characters.** Hashtags work. Mentions do not: an
+  `@` is sent as plain text. Image posts are not built yet.
+- **If a post fails with "the outcome is unknown"**, LinkedIn may or may not
+  have published it: the connection broke or LinkedIn answered with an error
+  after the post was sent. LinkedIn offers no way to ask, so Noon Gun does not
+  send it again by itself. Look at your profile first, then choose **Send
+  again** or leave it.
+- **Set `LINKEDIN_API_VERSION` to a current version about once a year.**
+  LinkedIn stops accepting a version roughly a year after it came out. A post
+  that fails for this reason says so.
+
+Noon Gun stores one access token for each connected profile, encrypted with
+`APP_KEY`. It asks LinkedIn for your name and member id and for nothing else:
+not your email address, your connections or your posts.
 
 ## Tests
 

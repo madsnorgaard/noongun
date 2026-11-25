@@ -11,6 +11,7 @@ use App\Domain\Channels\Contracts\RateLimit;
 use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Channels\Exceptions\PublishFailed;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Channels\Support\LinkWithUtm;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
@@ -218,7 +219,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
         $parameters = ['message' => $variant->body];
 
         if (filled($variant->link)) {
-            $parameters['link'] = $this->linkWithUtm((string) $variant->link, $variant->utm ?? []);
+            $parameters['link'] = LinkWithUtm::apply((string) $variant->link, $variant->utm ?? []);
         }
 
         // One call, no read-after-write. Creating a post is not safe to repeat:
@@ -387,30 +388,6 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
     private function permalink(string $postId): string
     {
         return rtrim($this->setting('dialog_url'), '/').'/'.$postId;
-    }
-
-    /**
-     * Adds the variant's UTM values to the link. A value already on the link
-     * is kept.
-     *
-     * @param  array<array-key, mixed>  $utm
-     */
-    private function linkWithUtm(string $link, array $utm): string
-    {
-        $utm = array_filter($utm, fn (mixed $value): bool => is_scalar($value) && (string) $value !== '');
-
-        if ($utm === []) {
-            return $link;
-        }
-
-        [$base, $fragment] = array_pad(explode('#', $link, 2), 2, null);
-        [$path, $query] = array_pad(explode('?', $base, 2), 2, null);
-
-        parse_str($query ?? '', $existing);
-
-        $query = http_build_query([...$utm, ...$existing], '', '&', PHP_QUERY_RFC3986);
-
-        return $path.'?'.$query.($fragment === null ? '' : '#'.$fragment);
     }
 
     /**

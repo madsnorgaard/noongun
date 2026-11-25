@@ -1,0 +1,5 @@
+{
+    "status": 422,
+    "code": "UNPROCESSABLE_ENTITY",
+    "message": "com.linkedin.content.common.exception.BadRequestResponseException: Article title is required"
+}

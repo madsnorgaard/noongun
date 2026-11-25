@@ -1,0 +1,6 @@
+{
+    "access_token": "test-linkedin-access-token-renewed",
+    "expires_in": 5184000,
+    "refresh_token": "test-linkedin-refresh-token",
+    "refresh_token_expires_in": 30000000
+}

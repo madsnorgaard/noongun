@@ -22,8 +22,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * What one post says on one channel, and what became of it there.
  *
  * A variant has no state column. It is published when external_id is set,
- * failed when error is set, and waiting otherwise. Content (body, link, utm,
- * channel) can only change while the post is a draft and the variant is not
+ * failed when error is set, and waiting otherwise. Content (body, link, the
+ * link card, utm, channel) can only change while the post is a draft and the variant is not
  * published. The outcome columns (external_id, permalink, published_at,
  * error, outcome_unknown_since) are not fillable and are written only by
  * beginAttempt(), markPublished(), markRefused() and markFailed().
@@ -39,6 +39,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property int $channel_id
  * @property string $body
  * @property string|null $link
+ * @property string|null $link_title
+ * @property string|null $link_description
  * @property array<string, string>|null $utm
  * @property string|null $external_id
  * @property string|null $permalink
@@ -50,7 +52,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property-read Post|null $post
  * @property-read Channel|null $channel
  */
-#[Fillable(['post_id', 'channel_id', 'body', 'link', 'utm'])]
+#[Fillable(['post_id', 'channel_id', 'body', 'link', 'link_title', 'link_description', 'utm'])]
 #[UseFactory(PostVariantFactory::class)]
 class PostVariant extends Model
 {
@@ -59,7 +61,7 @@ class PostVariant extends Model
     /** @use HasFactory<PostVariantFactory> */
     use HasFactory;
 
-    private const CONTENT = ['channel_id', 'body', 'link', 'utm'];
+    private const CONTENT = ['channel_id', 'body', 'link', 'link_title', 'link_description', 'utm'];
 
     private const OUTCOME = ['external_id', 'permalink', 'published_at', 'error', 'outcome_unknown_since'];
 

@@ -120,10 +120,11 @@ describe('shipped configuration', function () {
             ->and($facebook)->toHaveKeys(['app_id', 'app_secret', 'graph_url', 'dialog_url']);
     });
 
-    it('boots and lists facebook whether or not its adapter class exists yet', function () {
+    it('boots and lists facebook and linkedin, facebook whether or not its adapter class exists yet', function () {
         $manager = app(ChannelManager::class)->forgetAdapters();
 
-        expect($manager->platforms())->toBe(['facebook']);
+        expect($manager->platforms())->toBe(['facebook', 'linkedin'])
+            ->and($manager->adapter('linkedin')->platform())->toBe('linkedin');
 
         if (class_exists($this->shipped['channels']['facebook']['adapter'])) {
             expect($manager->adapter('facebook')->platform())->toBe('facebook');

@@ -11,10 +11,12 @@ use Illuminate\Support\Facades\Http;
 use Inertia\Testing\AssertableInertia as Assert;
 
 require_once __DIR__.'/../../Support/facebook.php';
+require_once __DIR__.'/../../Support/linkedin.php';
 require_once __DIR__.'/../../Support/members.php';
 
 beforeEach(function () {
     configureFacebook();
+    configureLinkedIn();
     Http::preventStrayRequests();
 
     $this->workspace = Workspace::factory()->create(['timezone' => 'Europe/Copenhagen']);
@@ -58,6 +60,11 @@ describe('list', function () {
                 'label' => 'Facebook',
                 'missing_settings' => [],
                 'redirect_uri' => 'https://noongun.test/auth/facebook/callback',
+            ], [
+                'name' => 'linkedin',
+                'label' => 'LinkedIn',
+                'missing_settings' => [],
+                'redirect_uri' => 'https://noongun.test/auth/linkedin/callback',
             ]]));
 
         expect($response->getContent())->not->toContain('test-access-');
@@ -74,6 +81,21 @@ describe('list', function () {
                 ->has('channels', 0)
                 ->where('platforms.0.missing_settings', ['FACEBOOK_APP_ID', 'FACEBOOK_APP_SECRET'])
                 ->where('platforms.0.redirect_uri', 'https://noongun.test/auth/facebook/callback'));
+    });
+
+    it('lists LinkedIn with what is missing when only Facebook is set up', function () {
+        configureLinkedIn(['client_id' => null, 'client_secret' => null]);
+
+        $response = $this->actingAs($this->owner)->get(route('channels.index'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('platforms.0.missing_settings', [])
+                ->where('platforms.1.name', 'linkedin')
+                ->where('platforms.1.label', 'LinkedIn')
+                ->where('platforms.1.missing_settings', ['LINKEDIN_CLIENT_ID', 'LINKEDIN_CLIENT_SECRET'])
+                ->where('platforms.1.redirect_uri', 'https://noongun.test/auth/linkedin/callback'));
+
+        expect($response->getContent())->not->toContain(LINKEDIN_TEST_SECRET);
     });
 
     it('never shows the app secret', function () {
