@@ -17,6 +17,12 @@ Route::middleware(['auth', 'verified'])->group(function () {
         ->middleware(['throttle:6,1', RequirePassword::class])
         ->name('llm-key.update');
 
+    // Choosing the provider decides which company is sent the brief and
+    // whose account pays, so it is guarded the same way.
+    Route::put('settings/drafting/provider', [LlmKeyController::class, 'choose'])
+        ->middleware(['throttle:6,1', RequirePassword::class])
+        ->name('llm-key.choose');
+
     Route::delete('settings/drafting/key', [LlmKeyController::class, 'destroy'])
         ->middleware(['throttle:6,1', RequirePassword::class])
         ->name('llm-key.destroy');
