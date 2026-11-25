@@ -1,9 +1,13 @@
 <?php
 
+use App\Domain\Channels\Contracts\ChannelCapabilities;
+use App\Domain\Drafting\DraftRequest;
 use App\Domain\Drafting\DraftResult;
 use App\Domain\Drafting\DraftSchema;
 use App\Domain\Drafting\DraftUsage;
 use App\Domain\Drafting\Exceptions\InvalidDraftOutput;
+use App\Domain\Drafting\TargetChannel;
+use App\Domain\Drafting\VoiceRules;
 use Tests\Fakes\FakeDraftGenerator;
 
 function validOutput(int $channels = 2): array
@@ -61,6 +65,8 @@ describe('the result', function () {
                 ['channel_id' => 1, 'body' => 'For the first channel.'],
             ],
             'link' => ' https://example.com/roast ',
+            'link_title' => null,
+            'link_description' => null,
             'alt_text' => '',
             'rationale' => ' It fits. ',
         ], $request, $usage);
@@ -73,8 +79,8 @@ describe('the result', function () {
             ->and($result->rationale)->toBe('It fits.')
             ->and($result->usage)->toBe($usage)
             ->and($result->variants())->toBe([
-                ['channel_id' => 1, 'body' => 'For the first channel.', 'link' => 'https://example.com/roast'],
-                ['channel_id' => 2, 'body' => 'For the second channel.', 'link' => 'https://example.com/roast'],
+                ['channel_id' => 1, 'body' => 'For the first channel.', 'link' => 'https://example.com/roast', 'link_title' => null, 'link_description' => null],
+                ['channel_id' => 2, 'body' => 'For the second channel.', 'link' => 'https://example.com/roast', 'link_title' => null, 'link_description' => null],
             ]);
     });
 
@@ -186,11 +192,11 @@ describe('the result', function () {
 
     it('names a channel by its platform, never by its id', function () {
         $request = plainDraftRequest(1, maxBodyLength: 40, platform: 'linkedin');
-        $output = ['variants' => [['channel_id' => 1, 'body' => str_repeat('a', 41)]], 'link' => null, 'alt_text' => null, 'rationale' => 'Why.'];
+        $output = ['variants' => [['channel_id' => 1, 'body' => str_repeat('a', 41)]], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Why.'];
 
         expect(fn () => DraftResult::fromArray($output, $request, new DraftUsage('fake', 'fake-model', 1, 1)))
             ->toThrow(function (InvalidDraftOutput $failure) {
-                expect($failure->getMessage())->toContain('The text for Linkedin is 41 characters long.')->not->toContain('channel 1');
+                expect($failure->getMessage())->toContain('The text for LinkedIn is 41 characters long.')->not->toContain('channel 1');
             });
     });
 
@@ -207,5 +213,94 @@ describe('the result', function () {
         expect($both)->toBeInstanceOf(InvalidDraftOutput::class)
             ->and($both->usage?->attempts)->toBe(2)
             ->and($both->problems())->toBe(['There is no text for channel 2.']);
+    });
+});
+
+describe('the card of the link', function () {
+    function requestWithCardChannel(?string $ideaTitle = 'The new roast', ?string $sourceUrl = 'https://example.com/roast'): DraftRequest
+    {
+        return new DraftRequest(
+            briefTitle: 'Table Bay Coffee',
+            briefBody: 'We roast coffee in Cape Town.',
+            voiceRules: new VoiceRules([]),
+            channels: [
+                new TargetChannel(1, 'facebook', new ChannelCapabilities(500, linkPreviews: true)),
+                new TargetChannel(2, 'linkedin', new ChannelCapabilities(500, linkPreviews: true, linkTitleLength: 20, linkDescriptionLength: 30)),
+                new TargetChannel(3, 'linkedin', new ChannelCapabilities(500, linkPreviews: true, linkTitleLength: 12)),
+            ],
+            ideaTitle: $ideaTitle,
+            sourceUrl: $sourceUrl,
+        );
+    }
+
+    /**
+     * @return list<array{string|null, string|null}> title and description per channel
+     */
+    function cardsOf(DraftResult $result): array
+    {
+        return array_map(fn (array $variant): array => [$variant['link_title'], $variant['link_description']], $result->variants());
+    }
+
+    it('gives the title and the description to the channels that need a card, each within its own limits', function () {
+        $result = draftResultFor(requestWithCardChannel(), ['link_title' => 'A lighter roast', 'link_description' => 'How it tastes.']);
+
+        expect(cardsOf($result))->toBe([
+            [null, null],
+            ['A lighter roast', 'How it tastes.'],
+            // No description limit: this channel shows none. The title is cut at a word.
+            ['A lighter', null],
+        ]);
+    });
+
+    it('falls back to the title of the idea when the model wrote none', function (?string $title) {
+        expect(cardsOf(draftResultFor(requestWithCardChannel(), ['link_title' => $title])))->toBe([
+            [null, null],
+            ['The new roast', null],
+            ['The new', null],
+        ]);
+    })->with(['null' => [null], 'empty' => [''], 'blank' => [" \n "]]);
+
+    it('has no title when there is neither one from the model nor an idea', function () {
+        $result = draftResultFor(requestWithCardChannel(ideaTitle: null), ['link_title' => null, 'link_description' => 'How it tastes.']);
+
+        expect(cardsOf($result))->toBe([[null, null], [null, 'How it tastes.'], [null, null]]);
+    });
+
+    it('makes the title one line of plain text', function () {
+        $result = draftResultFor(requestWithCardChannel(), ['link_title' => "  A\tlighter\r\n roast\u{0000}\u{200B} "]);
+
+        expect($result->variants()[1]['link_title'])->toBe('A lighter roast');
+    });
+
+    it('cuts in the middle of a word when there is no earlier place to cut', function () {
+        $result = draftResultFor(requestWithCardChannel(), ['link_title' => 'Supercalifragilisticexpialidocious']);
+
+        expect($result->variants()[1]['link_title'])->toBe('Supercalifragilistic')
+            ->and($result->variants()[2]['link_title'])->toBe('Supercalifra');
+    });
+
+    it('has no card without a link, whatever the model wrote', function (array $output, ?string $sourceUrl) {
+        $result = draftResultFor(requestWithCardChannel(sourceUrl: $sourceUrl), ['link_title' => 'A title', 'link_description' => 'A description.', ...$output]);
+
+        expect($result->link)->toBeNull()
+            ->and(cardsOf($result))->toBe([[null, null], [null, null], [null, null]]);
+    })->with([
+        'the model set no link' => [['link' => null], 'https://example.com/roast'],
+        'the link was dropped' => [['link' => 'https://elsewhere.example/'], 'https://example.com/roast'],
+        'the author gave no link' => [['link' => 'https://example.com/roast'], null],
+    ]);
+
+    it('keeps the card when a generator reports the usage of two attempts', function () {
+        $result = draftResultFor(requestWithCardChannel(), ['link_title' => 'A lighter roast']);
+
+        expect(cardsOf($result->withUsage(new DraftUsage('fake', 'fake-model', 2, 2, 2))))->toBe(cardsOf($result));
+    });
+
+    it('requires both fields in the answer, as a text or as null', function () {
+        $output = validOutput();
+        unset($output['link_title']);
+
+        expect(DraftSchema::problems($output))->toBe(['The draft has no [link_title].'])
+            ->and(DraftSchema::problems([...validOutput(), 'link_description' => 5]))->toBe(['The draft [link_description] has a value of the wrong type.']);
     });
 });

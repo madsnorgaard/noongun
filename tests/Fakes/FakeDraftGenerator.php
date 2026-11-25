@@ -80,6 +80,8 @@ class FakeDraftGenerator implements DraftGenerator
         return [
             'variants' => $variants,
             'link' => $request->sourceUrl,
+            'link_title' => $request->sourceUrl !== null ? "Title of draft {$number}" : null,
+            'link_description' => null,
             'alt_text' => null,
             'rationale' => "Generated draft {$number} fits the brief.",
         ];

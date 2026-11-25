@@ -28,7 +28,7 @@ final class DraftSchema
             'type' => 'object',
             'description' => 'One social media post, written once for each target channel.',
             'additionalProperties' => false,
-            'required' => ['variants', 'link', 'alt_text', 'rationale'],
+            'required' => ['variants', 'link', 'link_title', 'link_description', 'alt_text', 'rationale'],
             'properties' => [
                 'variants' => [
                     'type' => 'array',
@@ -51,6 +51,14 @@ final class DraftSchema
                 ],
                 'link' => [
                     'description' => 'One link to attach to the post, or null when there is none.',
+                    'anyOf' => [['type' => 'string'], ['type' => 'null']],
+                ],
+                'link_title' => [
+                    'description' => 'A short plain title for the card some channels show with the link, or null when there is no link.',
+                    'anyOf' => [['type' => 'string'], ['type' => 'null']],
+                ],
+                'link_description' => [
+                    'description' => 'One plain sentence for the same card, or null.',
                     'anyOf' => [['type' => 'string'], ['type' => 'null']],
                 ],
                 'alt_text' => [

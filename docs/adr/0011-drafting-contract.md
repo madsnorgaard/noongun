@@ -18,8 +18,9 @@ Findings about Prism and Anthropic are in `docs/platform-notes/llm.md`.
 ### One request, one post, one run
 
 A `DraftRequest` asks for one post, written once for each target channel. A
-`DraftResult` holds a text per channel plus one link, one alternative text and
-one rationale. A `draft_runs` row is one such generation. A week of five posts
+`DraftResult` holds a text per channel plus one link, a title and a description
+for the card of that link (since M5, see below), one alternative text and one
+rationale. A `draft_runs` row is one such generation. A week of five posts
 is five requests, five runs and five posts.
 
 The brief sketches `generate()` as returning an array of results, one per
@@ -80,6 +81,40 @@ that it happened. A run does not fail for it. The reason: an idea or a source
 can hold text that someone else wrote, that text is sent to the model, and a
 model that follows it must not be able to put an address of that someone's
 choosing on a post that may then be approved in a batch.
+
+#### The card of the link (added in M5)
+
+Some platforms show a link only with a title the author gives
+(`ChannelCapabilities::needsLinkCard()`, ADR 0015), and the readiness check
+refuses a variant on such a channel that has a link and no title. A drafted
+post with a link would then never be approvable from the queue. So the answer
+carries two more fields, `link_title` and `link_description`, each a text or
+null, and both are required by the schema like every other property.
+
+They are treated like the link: never a reason to fail a run, and never stored
+as the model gave them without a look.
+
+- They are used only when the link was kept. A dropped link takes its card
+  with it.
+- They are stored only on the variants of channels that need a card. Any other
+  channel gets none.
+- Each is made one line of plain text: control characters and line breaks
+  become a space.
+- The title is what the model wrote. When that is empty, it is the title of
+  the idea. When there is no idea either, the variant has no title and the
+  readiness check asks the member for one; the draft is still created.
+- A title or a description longer than the channel takes is cut to that
+  limit, at a word where there is one in the second half. A channel without a
+  description limit gets no description.
+
+`TargetChannel::toArray()` gains `link_title_length` and
+`link_description_length`, so that a prompt can say which channel needs the
+title and how long it may be. Prompt v2 does. v1 is not edited and does not
+mention the fields; a run on v1 still answers in the schema, and when it
+leaves the title null the title of the idea is used.
+
+Nothing records on the run that a title was cut or taken from the idea. The
+member reads the title in the editor and in the queue before approving.
 
 Invalid output throws `InvalidDraftOutput`. The generator asks once more and
 then lets the exception out with the usage of both attempts; `GenerateDraft`

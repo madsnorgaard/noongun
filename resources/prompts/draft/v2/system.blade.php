@@ -21,5 +21,7 @@ One idea, one text for each channel:
 Return one object in the required format:
 - variants: exactly one entry per target channel, with that channel's channel_id and the text for it. Write plain text as it should appear on the platform, with line breaks where they help.
 - link: one address the post should carry on every channel, taken from the source URL or a call to action in the brief, or null. Never make an address up.
+- link_title: when you set a link, a short plain title for the card that some channels show with it: what the reader finds behind the link, in the author's words, without the address and without quotation marks. A channel that needs this card states the most characters its title may have; stay inside the smallest of them. Null when there is no link.
+- link_description: one plain sentence for the same card, or null. Null when there is no link.
 - alt_text: a short description of an image that would suit the post, for the author to use when they add one, or null.
 - rationale: one line telling the author why this post fits the brief and the pillar.

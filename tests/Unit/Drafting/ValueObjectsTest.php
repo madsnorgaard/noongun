@@ -88,6 +88,8 @@ describe('DraftRequest', function () {
                 'link_previews' => true,
                 'media_types' => ['image/png'],
                 'max_media_items' => 1,
+                'link_title_length' => null,
+                'link_description_length' => null,
                 'voice_rules' => ['Conversational.'],
             ]],
             'examples' => [['platform' => 'facebook', 'body' => 'An earlier post.']],

@@ -3,7 +3,7 @@
 namespace App\Domain\Drafting;
 
 use App\Domain\Drafting\Exceptions\InvalidDraftOutput;
-use Illuminate\Support\Str;
+use App\Http\Presenters\PlatformLabel;
 
 /**
  * One generated post: a text for each requested channel, a link, alternative
@@ -13,6 +13,13 @@ use Illuminate\Support\Str;
  * gave (the source of the request, or a call to action of the brief) or
  * there is none. $linkDropped says that the model suggested another one.
  *
+ * A channel whose platform shows a link only with a title the author gives
+ * (ChannelCapabilities::needsLinkCard()) gets a card in $linkCards: the
+ * title the model wrote, or else the title of the idea, cut to what that
+ * platform takes. No other channel gets one. A card never fails a draft:
+ * without any title the variant is saved without one, and the readiness
+ * check asks the member for it.
+ *
  * Build it with fromArray(), which is the validator: a DraftResult that
  * exists matches DraftSchema and its request. It is only ever turned into a
  * post in the draft state, by Actions\CreateDraftFromResult.
@@ -21,6 +28,7 @@ final readonly class DraftResult
 {
     /**
      * @param  array<int, string>  $bodies  text per channel id
+     * @param  array<int, array{title: string|null, description: string|null}>  $linkCards  per channel id, only for channels that need a card for the link
      */
     private function __construct(
         public array $bodies,
@@ -29,6 +37,7 @@ final readonly class DraftResult
         public string $rationale,
         public DraftUsage $usage,
         public bool $linkDropped = false,
+        public array $linkCards = [],
     ) {}
 
     /**
@@ -57,7 +66,7 @@ final readonly class DraftResult
             throw InvalidDraftOutput::because($usage->provider, $problems === [] ? ['The draft must be an object.'] : $problems, $usage);
         }
 
-        /** @var array{variants: list<array{channel_id: int, body: string}>, link: string|null, alt_text: string|null, rationale: string} $data */
+        /** @var array{variants: list<array{channel_id: int, body: string}>, link: string|null, link_title: string|null, link_description: string|null, alt_text: string|null, rationale: string} $data */
         $bodies = [];
 
         foreach ($data['variants'] as $variant) {
@@ -103,7 +112,15 @@ final readonly class DraftResult
             $ordered[$channelId] = $bodies[$channelId];
         }
 
-        return new self($ordered, $link, self::optional($data['alt_text']), trim($data['rationale']), $usage, $suggested !== null && $link === null);
+        return new self(
+            $ordered,
+            $link,
+            self::optional($data['alt_text']),
+            trim($data['rationale']),
+            $usage,
+            $suggested !== null && $link === null,
+            $link === null ? [] : self::linkCards($request, $data['link_title'], $data['link_description']),
+        );
     }
 
     public function bodyFor(int $channelId): ?string
@@ -117,23 +134,84 @@ final readonly class DraftResult
      */
     public function withUsage(DraftUsage $usage): self
     {
-        return new self($this->bodies, $this->link, $this->altText, $this->rationale, $usage, $this->linkDropped);
+        return new self($this->bodies, $this->link, $this->altText, $this->rationale, $usage, $this->linkDropped, $this->linkCards);
     }
 
     /**
      * The form SaveDraft takes: one entry per channel.
      *
-     * @return list<array{channel_id: int, body: string, link: string|null}>
+     * @return list<array{channel_id: int, body: string, link: string|null, link_title: string|null, link_description: string|null}>
      */
     public function variants(): array
     {
         $variants = [];
 
         foreach ($this->bodies as $channelId => $body) {
-            $variants[] = ['channel_id' => $channelId, 'body' => $body, 'link' => $this->link];
+            $variants[] = [
+                'channel_id' => $channelId,
+                'body' => $body,
+                'link' => $this->link,
+                'link_title' => $this->linkCards[$channelId]['title'] ?? null,
+                'link_description' => $this->linkCards[$channelId]['description'] ?? null,
+            ];
         }
 
         return $variants;
+    }
+
+    /**
+     * The card for the link, for each channel that needs one. The title is
+     * what the model wrote, or the title of the idea when it wrote none.
+     * Both parts are made one line of plain text and cut to the limits of
+     * the channel, at a word where there is one.
+     *
+     * @return array<int, array{title: string|null, description: string|null}>
+     */
+    private static function linkCards(DraftRequest $request, ?string $title, ?string $description): array
+    {
+        $title = self::oneLine($title) ?? self::oneLine($request->ideaTitle);
+        $description = self::oneLine($description);
+        $cards = [];
+
+        foreach ($request->channels as $channel) {
+            $limit = $channel->capabilities->linkTitleLength;
+
+            if ($limit === null) {
+                continue;
+            }
+
+            $cards[$channel->channelId] = [
+                'title' => $title === null ? null : self::cut($title, $limit),
+                'description' => $description === null || $channel->capabilities->linkDescriptionLength === null
+                    ? null
+                    : self::cut($description, $channel->capabilities->linkDescriptionLength),
+            ];
+        }
+
+        return $cards;
+    }
+
+    private static function oneLine(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $value = trim((string) preg_replace('/[\p{C}\s]+/u', ' ', $value));
+
+        return $value === '' ? null : $value;
+    }
+
+    private static function cut(string $value, int $limit): string
+    {
+        if (mb_strlen($value) <= $limit) {
+            return $value;
+        }
+
+        $cut = mb_substr($value, 0, $limit);
+        $atWord = mb_strrpos($cut, ' ');
+
+        return rtrim($atWord !== false && $atWord >= intdiv($limit, 2) ? mb_substr($cut, 0, $atWord) : $cut);
     }
 
     /**
@@ -142,7 +220,7 @@ final readonly class DraftResult
      */
     private static function nameOf(TargetChannel $channel): string
     {
-        return Str::headline($channel->platform);
+        return PlatformLabel::for($channel->platform);
     }
 
     private static function optional(?string $value): ?string

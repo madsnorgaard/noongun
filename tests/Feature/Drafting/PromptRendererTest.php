@@ -169,6 +169,45 @@ describe('v2, one idea written for each channel', function () {
             ->toContain('No rules of its own. The voice rules above apply.')
             ->toContain('Write the post for the target channel above.');
     });
+
+    it('tells the model which channel needs a title for the link, and how long it may be', function () {
+        $request = new DraftRequest(
+            briefTitle: 'Table Bay Coffee',
+            briefBody: 'We roast coffee in Cape Town.',
+            voiceRules: new VoiceRules(['No contractions.']),
+            channels: [
+                new TargetChannel(21, 'facebook', new ChannelCapabilities(400, linkPreviews: true)),
+                new TargetChannel(22, 'linkedin', new ChannelCapabilities(300, linkPreviews: true, linkTitleLength: 120, linkDescriptionLength: 200)),
+            ],
+            sourceUrl: 'https://example.com/roast',
+        );
+
+        $prompt = $this->renderer->render($request, 'v2');
+
+        expect($prompt->user)
+            ->toContain('channel_id="21" platform="facebook" max_characters="400" link_previews="yes" images="no">')
+            ->toContain('channel_id="22" platform="linkedin" max_characters="300" link_previews="yes" images="no" link_title_max_characters="120">')
+            ->and($prompt->system)
+            ->toContain('- link_title: when you set a link, a short plain title for the card')
+            ->toContain('- link_description: one plain sentence for the same card, or null.');
+    });
+
+    it('leaves v1 as it was: it says nothing about a title for the link', function () {
+        $request = new DraftRequest(
+            briefTitle: 'Table Bay Coffee',
+            briefBody: 'We roast coffee in Cape Town.',
+            voiceRules: new VoiceRules(['No contractions.']),
+            channels: [new TargetChannel(22, 'linkedin', new ChannelCapabilities(300, linkPreviews: true, linkTitleLength: 120))],
+        );
+
+        $prompt = $this->renderer->render($request, 'v1');
+
+        expect($prompt->system.$prompt->user)->not->toContain('link_title')
+            ->and(hash('sha256', (string) file_get_contents(resource_path('prompts/draft/v1/system.blade.php'))))
+            ->toBe('4a0303cc90279b2ce19f3a776bbc7dcb9241ce3f7388449f1c449d33d581fade')
+            ->and(hash('sha256', (string) file_get_contents(resource_path('prompts/draft/v1/user.blade.php'))))
+            ->toBe('7dbe9fbd07976934664ee70cc697ba3c240aff81ef8ec5aa23144123b1f29489');
+    });
 });
 
 describe('what is sent to a provider', function () {
@@ -238,7 +277,8 @@ describe('what is sent to a provider', function () {
         expect($holdsOnlyPlainValues($request->toArray()))->toBeTrue()
             ->and(array_keys($request->toArray()))->toBe(['brief', 'voice_rules', 'pillar', 'idea', 'source_url', 'channels', 'examples'])
             ->and(array_keys($request->toArray()['channels'][0]))->toBe([
-                'channel_id', 'platform', 'max_body_length', 'link_previews', 'media_types', 'max_media_items', 'voice_rules',
+                'channel_id', 'platform', 'max_body_length', 'link_previews', 'media_types', 'max_media_items',
+                'link_title_length', 'link_description_length', 'voice_rules',
             ]);
     });
 

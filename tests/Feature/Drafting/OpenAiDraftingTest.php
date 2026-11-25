@@ -327,6 +327,8 @@ describe('the answer', function () {
                 ['channel_id' => 1, 'body' => 'First channel.'],
             ],
             'link' => 'https://evil.example/not-given',
+            'link_title' => null,
+            'link_description' => null,
             'alt_text' => null,
             'rationale' => 'It fits the brief.',
         ]))]);
@@ -377,10 +379,10 @@ describe('the answer', function () {
             ->and($failure->usage?->attempts)->toBe(2)
             ->and($failure->usage?->inputTokens)->toBe(1800);
     })->with([
-        'a field that is not part of the format' => [['variants' => [['channel_id' => 1, 'body' => 'One.'], ['channel_id' => 2, 'body' => 'Two.']], 'link' => null, 'alt_text' => null, 'rationale' => 'Fine.', 'approve' => true]],
-        'a missing field' => [['variants' => [['channel_id' => 1, 'body' => 'One.'], ['channel_id' => 2, 'body' => 'Two.']], 'link' => null, 'alt_text' => null]],
-        'a channel that was not asked for' => [['variants' => [['channel_id' => 1, 'body' => 'One.'], ['channel_id' => 99, 'body' => 'Two.']], 'link' => null, 'alt_text' => null, 'rationale' => 'Fine.']],
-        'a text over the limit' => [['variants' => [['channel_id' => 1, 'body' => str_repeat('a', 501)], ['channel_id' => 2, 'body' => 'Two.']], 'link' => null, 'alt_text' => null, 'rationale' => 'Fine.']],
+        'a field that is not part of the format' => [['variants' => [['channel_id' => 1, 'body' => 'One.'], ['channel_id' => 2, 'body' => 'Two.']], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Fine.', 'approve' => true]],
+        'a missing field' => [['variants' => [['channel_id' => 1, 'body' => 'One.'], ['channel_id' => 2, 'body' => 'Two.']], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null]],
+        'a channel that was not asked for' => [['variants' => [['channel_id' => 1, 'body' => 'One.'], ['channel_id' => 99, 'body' => 'Two.']], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Fine.']],
+        'a text over the limit' => [['variants' => [['channel_id' => 1, 'body' => str_repeat('a', 501)], ['channel_id' => 2, 'body' => 'Two.']], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Fine.']],
     ]);
 
     it('accepts a valid answer after an invalid one and reports the usage of both', function () {

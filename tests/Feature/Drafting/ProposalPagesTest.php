@@ -720,6 +720,8 @@ describe('the editor', function () {
         $this->generator->returnsOutput(fn ($request) => [
             'variants' => [['channel_id' => $this->channel->id, 'body' => 'Fresh from the roaster.']],
             'link' => null,
+            'link_title' => null,
+            'link_description' => null,
             'alt_text' => 'A roaster <b>at work</b>',
             'rationale' => 'It opens the week. <script>alert(1)</script>',
         ]);

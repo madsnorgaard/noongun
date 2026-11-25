@@ -289,6 +289,8 @@ describe('the answer', function () {
                 ['channel_id' => 1, 'body' => 'First channel.'],
             ],
             'link' => 'https://example.com/coffee',
+            'link_title' => null,
+            'link_description' => null,
             'alt_text' => 'A cup of coffee.',
             'rationale' => 'It fits the brief.',
         ], input: 1234, output: 567)]);
@@ -340,7 +342,7 @@ describe('the answer', function () {
 
     it('asks once more after an invalid answer and reports the usage of both', function () {
         $fake = Prism::fake([
-            prismAnswer(['variants' => [['channel_id' => 1, 'body' => 'Only one channel.']], 'link' => null, 'alt_text' => null, 'rationale' => 'Why.'], input: 900, output: 250, model: 'first-model'),
+            prismAnswer(['variants' => [['channel_id' => 1, 'body' => 'Only one channel.']], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Why.'], input: 900, output: 250, model: 'first-model'),
             prismAnswer(input: 910, output: 260, model: 'second-model'),
         ]);
 
@@ -366,7 +368,7 @@ describe('the answer', function () {
         $tooLong = ['variants' => [
             ['channel_id' => 1, 'body' => str_repeat('a', 501)],
             ['channel_id' => 2, 'body' => 'Fine.'],
-        ], 'link' => null, 'alt_text' => null, 'rationale' => 'Why.'];
+        ], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Why.'];
 
         $fake = Prism::fake([prismAnswer($tooLong, 900, 250), prismAnswer($tooLong, 900, 250), prismAnswer()]);
 
@@ -502,7 +504,7 @@ describe('a failed call', function () {
 
     it('keeps the usage of the first attempt when the second call fails', function () {
         prismGives([
-            prismAnswer(['variants' => [], 'link' => null, 'alt_text' => null, 'rationale' => 'Why.'], 900, 250),
+            prismAnswer(['variants' => [], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Why.'], 900, 250),
             PrismRateLimitedException::make([], 5),
         ]);
 
@@ -566,8 +568,8 @@ describe('the API key', function () {
         'a cut off answer' => [fn () => [prismAnswer(finish: FinishReason::Length)]],
         'two invalid answers' => [fn () => [prismAnswer([], empty: true), prismAnswer(['variants' => PRISM_TEST_KEY], empty: true)]],
         'two answers that hold the key' => [fn () => [
-            prismAnswer(['variants' => [], 'link' => PRISM_TEST_KEY, 'alt_text' => null, 'rationale' => PRISM_TEST_KEY]),
-            prismAnswer(['variants' => [], 'link' => PRISM_TEST_KEY, 'alt_text' => null, 'rationale' => PRISM_TEST_KEY]),
+            prismAnswer(['variants' => [], 'link' => PRISM_TEST_KEY, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => PRISM_TEST_KEY]),
+            prismAnswer(['variants' => [], 'link' => PRISM_TEST_KEY, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => PRISM_TEST_KEY]),
         ]],
     ]);
 
@@ -670,6 +672,8 @@ describe('what the model writes is data', function () {
         $fake = Prism::fake([prismAnswer([
             'variants' => [['channel_id' => $this->channel->id, 'body' => $body]],
             'link' => 'https://example.com/a?b=<script>&c=%0d%0aX-Injected:1',
+            'link_title' => null,
+            'link_description' => null,
             'alt_text' => $altText,
             'rationale' => $rationale,
         ])]);
@@ -728,6 +732,8 @@ describe('what the model writes is data', function () {
                 ['channel_id' => 999, 'body' => 'For a channel of someone else.'],
             ],
             'link' => null,
+            'link_title' => null,
+            'link_description' => null,
             'alt_text' => null,
             'rationale' => 'Why.',
         ])));

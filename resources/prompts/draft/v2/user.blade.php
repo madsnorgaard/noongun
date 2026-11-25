@@ -38,7 +38,7 @@
 
 <target_channels count="{!! count($channels) !!}">
 @foreach ($channels as $channel)
-<channel channel_id="{!! $channel['channel_id'] !!}" platform="{!! $channel['platform'] !!}" max_characters="{!! $channel['max_body_length'] !!}" link_previews="{!! $channel['link_previews'] ? 'yes' : 'no' !!}" images="{!! $channel['max_media_items'] > 0 ? 'yes' : 'no' !!}">
+<channel channel_id="{!! $channel['channel_id'] !!}" platform="{!! $channel['platform'] !!}" max_characters="{!! $channel['max_body_length'] !!}" link_previews="{!! $channel['link_previews'] ? 'yes' : 'no' !!}" images="{!! $channel['max_media_items'] > 0 ? 'yes' : 'no' !!}"@if ($channel['link_title_length'] !== null) link_title_max_characters="{!! $channel['link_title_length'] !!}"@endif>
 @if ($channel['voice_rules'] !== [])
 Rules for the text of this channel:
 @foreach ($channel['voice_rules'] as $rule)
