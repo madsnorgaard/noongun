@@ -151,7 +151,7 @@ return [
         'provider' => env('NOONGUN_DRAFT_PROVIDER', 'anthropic'),
         'max_tokens' => (int) env('NOONGUN_DRAFT_MAX_TOKENS', 16000),
         'timeout' => (int) env('NOONGUN_DRAFT_TIMEOUT', 120),
-        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v1'),
+        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v2'),
         'currency' => env('NOONGUN_DRAFT_PRICE_CURRENCY', 'USD'),
 
         'providers' => [

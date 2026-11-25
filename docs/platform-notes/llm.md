@@ -278,7 +278,7 @@ The output is untrusted. Followed through the code on 2026-11-25:
   an added query or another port are all dropped. The page builds the `href`
   through `webAddress()`, which checks the scheme again. The server never opens
   the address; the Facebook adapter passes it to the Graph API as a parameter.
-  The prompt (v1) already tells the model to take the link from the source URL
+  The prompt (v1 and v2) already tells the model to take the link from the source URL
   or a call to action and never to make one up, so its wording is unchanged.
 - `variants[].channel_id`: an integer that must be one of the requested
   channels, and those were read from the current workspace when the request
