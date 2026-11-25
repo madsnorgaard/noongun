@@ -27,6 +27,14 @@ export type ProposalProgress = {
     /** Whether a draft has waited longer than a queue that runs would need. */
     waiting_long: boolean;
     counts: Record<DraftRunStatus, number>;
+    /** What every attempt so far used. Null before the first answer. */
+    used: {
+        input_tokens: number;
+        output_tokens: number;
+        /** Estimated cost, to four places, or null without a price. */
+        cost: string | null;
+        currency: string | null;
+    } | null;
     max_attempts: number;
     runs: ProposalRun[];
 };

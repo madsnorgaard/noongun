@@ -63,6 +63,12 @@ export type PostOrigin = {
     rationale: string | null;
     alt_text: string | null;
     generated_at: string | null;
+    /** Tokens the draft used, as the provider reported them. */
+    input_tokens: number | null;
+    output_tokens: number | null;
+    /** Estimated cost by the price table, to four places, or null without a price. */
+    cost: string | null;
+    currency: string | null;
 };
 
 export type ChannelOption = {

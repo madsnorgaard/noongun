@@ -43,7 +43,7 @@ function proposalPayload(Workspace $workspace, string $week = '2026-11-30'): arr
 }
 
 describe('the page that shows the plan', function () {
-    it('shows the week, the posts, the model, the cost ceiling and the usage before anything starts', function () {
+    it('shows the week, the posts, the model, the cost and the usage before anything starts', function () {
         $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-12-02']))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page
@@ -61,9 +61,11 @@ describe('the page that shows the plan', function () {
                 ->where('plan.past', 0)
                 ->where('refusals', [])
                 ->where('generator', ['provider' => 'Fake', 'model' => DRAFT_TEST_MODEL])
-                // 3 posts x 3 attempts x 2 answers, each 8000 tokens in at 2.00
-                // and 2000 out at 10.00 per million: 0.648, shown as 0.65.
-                ->where('cost', ['amount' => '0.65', 'currency' => 'USD'])
+                ->where('cost.currency', 'USD')
+                // 3 posts x 1500 tokens out at 10.00 per million is 0.045; the prompts add a little.
+                ->where('cost.expected', fn (string $amount) => (float) $amount >= 0.05 && (float) $amount < 0.15)
+                // 3 posts x 3 attempts x 2 answers x 2000 tokens out at 10.00 per million is 0.36; the prompts add to it.
+                ->where('cost.worst', fn (string $amount) => (float) $amount > 0.36 && (float) $amount < 5)
                 ->where('limits.runs_used', 0)
                 ->where('limits.runs_per_day', 50)
                 ->where('limits.posts_per_proposal', 14)

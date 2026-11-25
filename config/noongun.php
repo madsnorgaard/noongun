@@ -140,9 +140,9 @@ return [
     | trying again, and "backoff" the wait in seconds before each retry,
     | comma separated; the last value repeats. "stuck_after_minutes" is how
     | long a draft run may stay unfinished before it is marked as failed.
-    | "estimate_input_tokens" is the prompt size assumed for the cost ceiling
-    | shown before a proposal starts. "weeks_ahead" is how far ahead a week
-    | can be proposed.
+    | "expected_output_tokens" is the size of a usual answer, thinking
+    | included, for the expected cost shown before a proposal starts.
+    | "weeks_ahead" is how far ahead a week can be proposed.
     */
 
     'drafting' => [
@@ -179,7 +179,7 @@ return [
             'max_attempts' => (int) env('NOONGUN_DRAFT_MAX_ATTEMPTS', 3),
             'backoff' => array_map(intval(...), explode(',', (string) env('NOONGUN_DRAFT_BACKOFF', '30,120'))),
             'stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 6),
-            'estimate_input_tokens' => (int) env('NOONGUN_DRAFT_ESTIMATE_INPUT_TOKENS', 8000),
+            'expected_output_tokens' => (int) env('NOONGUN_DRAFT_EXPECTED_OUTPUT_TOKENS', 1500),
             'weeks_ahead' => 8,
         ],
     ],

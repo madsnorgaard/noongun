@@ -3,20 +3,20 @@
 namespace App\Http\Presenters;
 
 use App\Domain\Channels\Models\Channel;
-use App\Domain\Drafting\CostEstimator;
 use App\Domain\Drafting\DraftGenerators;
-use App\Domain\Drafting\DraftingConfig;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\DraftRunStatus;
-use App\Domain\Drafting\DraftUsage;
 use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
 use App\Domain\Drafting\Exceptions\LlmCredentialMissing;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
+use App\Domain\Drafting\Models\Brief;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Drafting\Planning\PlannedPost;
+use App\Domain\Drafting\Planning\ProposalCost;
 use App\Domain\Drafting\Planning\WeekPlan;
 use App\Domain\Workspaces\Models\Workspace;
 use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Str;
 
@@ -51,7 +51,7 @@ final class ProposalPresenter
 
     public function __construct(
         private readonly DraftGenerators $generators,
-        private readonly CostEstimator $costs,
+        private readonly ProposalCost $proposalCost,
     ) {}
 
     /**
@@ -137,42 +137,35 @@ final class ProposalPresenter
     }
 
     /**
-     * The most the proposal can cost by the price table: every attempt of
-     * every post used, each with two answers at the full token limit. Null
-     * when the model has no price.
+     * What the plan is expected to cost and what it can cost at most, by
+     * the price table (see ProposalCost). Null when there is nothing to
+     * draft, no brief, no generator or no price for the model.
      *
-     * @return array{amount: string, currency: string}|null
+     * @return array{currency: string, expected: string, worst: string}|null
      */
-    public function costCeiling(Workspace $workspace, int $posts): ?array
+    public function cost(Workspace $workspace, WeekPlan $plan): ?array
     {
-        if ($posts < 1) {
+        $brief = Brief::current();
+
+        if ($brief === null) {
             return null;
         }
 
         try {
-            $context = $this->generators->contextFor($workspace);
+            $cost = $this->proposalCost->of($plan, $brief, $this->generators->contextFor($workspace));
         } catch (DraftGeneratorNotAvailable|LlmCredentialMissing) {
             return null;
         }
 
-        $answers = $posts * DraftingLimits::maxAttempts() * DraftingLimits::ANSWERS_PER_RUN;
-
-        $estimate = $this->costs->estimate(new DraftUsage(
-            $context->provider,
-            $context->model,
-            $answers * DraftingLimits::estimateInputTokens(),
-            $answers * DraftingConfig::maxTokens(),
-            $answers,
-        ));
-
-        if ($estimate === null) {
+        if ($cost === null) {
             return null;
         }
 
         return [
-            // Rounded up to whole cents: a ceiling is never shown lower than it is.
-            'amount' => number_format(ceil(((float) $estimate->amount) * 100) / 100, 2, '.', ''),
-            'currency' => $estimate->currency,
+            'currency' => $cost['expected']->currency,
+            // Both rounded up to whole cents: never shown lower than it is.
+            'expected' => Money::upToCents($cost['expected']->amount),
+            'worst' => Money::upToCents($cost['worst']->amount),
         ];
     }
 
@@ -245,6 +238,7 @@ final class ProposalPresenter
             // offers a way to stop waiting.
             'waiting_long' => $shown->contains(fn (DraftRun $run): bool => self::overdue($run)),
             'counts' => $counts,
+            'used' => self::used($runs),
             'max_attempts' => DraftingLimits::maxAttempts(),
             'runs' => $shown->map(function (DraftRun $run) use ($runs, $channelNames): array {
                 $earlier = $runs->firstWhere('id', $run->request['retry_of'] ?? null);
@@ -268,6 +262,35 @@ final class ProposalPresenter
                     'post_id' => $run->status === DraftRunStatus::Succeeded ? $run->post?->id : null,
                 ];
             })->all(),
+        ];
+    }
+
+    /**
+     * What the runs of a proposal used so far, every attempt included, also
+     * the ones that failed: tokens as the provider reported them, and the
+     * estimated cost when the model has a price. Null before any answer.
+     *
+     * @param  Collection<int, DraftRun>  $runs
+     * @return array{input_tokens: int, output_tokens: int, cost: string|null, currency: string|null}|null
+     */
+    private static function used(Collection $runs): ?array
+    {
+        $answered = $runs->filter(fn (DraftRun $run): bool => $run->input_tokens !== null);
+
+        if ($answered->isEmpty()) {
+            return null;
+        }
+
+        $priced = $answered->filter(fn (DraftRun $run): bool => $run->cost_estimate !== null);
+        $currency = $priced->first()?->cost_currency;
+
+        return [
+            'input_tokens' => (int) $answered->sum('input_tokens'),
+            'output_tokens' => (int) $answered->sum('output_tokens'),
+            'cost' => $currency !== null
+                ? Money::used(Money::sum($priced->where('cost_currency', $currency)->map(fn (DraftRun $run): ?string => $run->cost_estimate)))
+                : null,
+            'currency' => $currency,
         ];
     }
 

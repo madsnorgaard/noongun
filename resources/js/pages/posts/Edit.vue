@@ -974,6 +974,33 @@ const locked = computed(() => {
                                 {{ post.origin.alt_text }}
                             </dd>
                         </div>
+                        <div
+                            v-if="post.origin.input_tokens !== null"
+                            class="grid gap-0.5"
+                            data-test="post-origin-cost"
+                        >
+                            <dt class="text-sm text-muted-foreground">
+                                What this draft used
+                            </dt>
+                            <dd>
+                                <template v-if="post.origin.cost">
+                                    About
+                                    <span class="font-mono">
+                                        {{ post.origin.currency }}
+                                        {{ post.origin.cost }}
+                                    </span>
+                                    by the price table,
+                                </template>
+                                <span class="font-mono">{{
+                                    post.origin.input_tokens
+                                }}</span>
+                                tokens in and
+                                <span class="font-mono">{{
+                                    post.origin.output_tokens
+                                }}</span>
+                                out.
+                            </dd>
+                        </div>
                     </dl>
                 </section>
 

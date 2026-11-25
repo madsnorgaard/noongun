@@ -106,10 +106,13 @@ final class DraftingLimits
         return self::stuckAfterSeconds() + self::longestBackoff();
     }
 
-    /** The prompt size assumed for the cost ceiling of a proposal. */
-    public static function estimateInputTokens(): int
+    /**
+     * How many tokens one answer usually takes, thinking included, for the
+     * expected cost of a proposal.
+     */
+    public static function expectedOutputTokens(): int
     {
-        return self::int('estimate_input_tokens', 8000, 0);
+        return self::int('expected_output_tokens', 1500, 1);
     }
 
     /** How many weeks after the current one can be proposed. */

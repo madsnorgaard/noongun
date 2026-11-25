@@ -91,6 +91,12 @@ final class PostPresenter
             'rationale' => $run->rationale,
             'alt_text' => $run->alt_text,
             'generated_at' => $run->finished_at?->toIso8601String(),
+            // What this one draft used: tokens as the provider reported
+            // them, and the estimate of the price table when there is one.
+            'input_tokens' => $run->input_tokens,
+            'output_tokens' => $run->output_tokens,
+            'cost' => $run->cost_estimate !== null ? Money::used($run->cost_estimate) : null,
+            'currency' => $run->cost_currency,
         ];
     }
 

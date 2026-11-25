@@ -240,6 +240,25 @@ function dot(run: ProposalRun): string {
             </li>
         </ul>
 
+        <p
+            v-if="proposal.used"
+            class="text-sm text-muted-foreground"
+            data-test="proposal-used"
+        >
+            Used so far:
+            <template v-if="proposal.used.cost">
+                about
+                <span class="font-mono">
+                    {{ proposal.used.currency }} {{ proposal.used.cost }}
+                </span>
+                by the price table,
+            </template>
+            <span class="font-mono">{{ proposal.used.input_tokens }}</span>
+            tokens in and
+            <span class="font-mono">{{ proposal.used.output_tokens }}</span>
+            out, failed attempts included.
+        </p>
+
         <p class="text-sm text-muted-foreground">
             <template v-if="proposal.active">
                 Each draft appears under "To approve" when it is drafted. You

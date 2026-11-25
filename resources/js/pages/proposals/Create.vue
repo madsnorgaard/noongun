@@ -35,8 +35,8 @@ const props = defineProps<{
     /** Everything that stands in the way of starting. Empty when it can start. */
     refusals: ProposalRefusal[];
     generator: { provider: string; model: string } | null;
-    /** The most the proposal can cost by the price table, or null without a price. */
-    cost: { amount: string; currency: string } | null;
+    /** Expected and worst case cost by the price table, or null without a price. */
+    cost: { currency: string; expected: string; worst: string } | null;
     limits: {
         posts_per_proposal: number;
         runs_per_day: number;
@@ -317,20 +317,30 @@ function start(): void {
 
                         <div v-if="count > 0" class="grid gap-0.5">
                             <dt class="text-sm text-muted-foreground">
-                                Cost, at most
+                                Expected cost, about
                             </dt>
                             <dd v-if="cost" data-test="proposal-cost">
                                 <span class="font-mono text-base">
-                                    {{ cost.currency }} {{ cost.amount }}
+                                    {{ cost.currency }} {{ cost.expected }}
                                 </span>
                                 <span
                                     class="mt-1 block text-sm text-muted-foreground"
                                 >
-                                    The ceiling by the price table of this
-                                    instance: every answer at the full token
-                                    limit and every one of the
-                                    {{ limits.max_attempts }} attempts used. A
-                                    usual week costs a small part of it.
+                                    One answer of the usual length for each
+                                    post, by the price table of this instance.
+                                </span>
+                                <span
+                                    class="mt-2 block text-sm text-muted-foreground"
+                                    data-test="proposal-cost-worst"
+                                >
+                                    Worst case:
+                                    <span class="font-mono">
+                                        {{ cost.currency }} {{ cost.worst }}
+                                    </span>
+                                    if every post needed all
+                                    {{ limits.max_attempts }} attempts and every
+                                    answer ran to the token limit. It cannot
+                                    cost more than that.
                                 </span>
                             </dd>
                             <dd v-else class="text-sm text-muted-foreground">
