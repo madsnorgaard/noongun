@@ -334,6 +334,19 @@ run records that a link was left out. Text that is pasted into an idea can
 therefore not make a post point somewhere you did not choose. Add the link by
 hand in the editor when you do want another one.
 
+LinkedIn shows a link only with a title you give it. The model writes that
+title, and an optional description, with the post, and they are stored on the
+LinkedIn text only. When the model writes no title, the title of the idea is
+used. A title or a description that is too long is cut to what LinkedIn takes.
+A draft with a link can therefore be approved from the queue without opening
+it. When there is neither a title nor an idea, the draft says that the link
+needs a title.
+
+When a channel can no longer publish at the moment a shared post is drafted,
+the draft is written for the other channels and says which one was left out.
+The slot of that channel stays open: connect the channel and propose the week
+again.
+
 When an answer does not pass the check, the model is asked once more. After a
 second answer that cannot be used the run fails and says why. A run also fails,
 without a second request, when the model declines to write the post or the

@@ -1,6 +1,6 @@
 # 0014 - One idea, one variant per channel
 
-Date: 2026-11-25. Status: proposed.
+Date: 2026-11-25. Status: accepted.
 
 ## Context
 
@@ -90,21 +90,35 @@ for the owner and is not built.
 
 ### Each text within its own channel
 
-Nothing in the validation changed, because it already held this line:
+The validation of the texts already held this line:
 
 - Drafting: `DraftResult::fromArray()` checks each text against the
   capabilities of its own target. One text over its limit, one missing, one
   empty or one for a channel that was not asked for fails the whole run. A
   shared post is never created with a channel left out by the model.
 - A channel that cannot publish when the job runs is left out of the request,
-  and the draft is written for the channels that are left (ADR 0012).
+  and the draft is written for the channels that are left (ADR 0012). The run
+  is then rewritten, while it is still pending, to name only those channels
+  and only their slots, and it notes the channels that were left out
+  (`DraftRun::draftForFewer()`). The slot of a channel that was left out
+  therefore counts as open when the week is proposed again, and the editor
+  says on the draft which channel has no text and why.
+- A drafted post with a link gets the title for the card of that link from the
+  same answer, on the channels that need one, so that it can be approved from
+  the queue without being opened (ADR 0011, "The card of the link").
 - Writing by hand: a text may be saved empty or too long, and the readiness
   check on approval refuses the post (ADR 0010). The check is per variant:
   the error names the channel.
 
 What blocks an approval, per variant: an empty text, a text over the limit of
-its platform, a channel that cannot publish, and a platform this instance has
-no adapter for. The editor now shows these in the column they belong to:
+its platform, a channel that cannot publish, a platform this instance has no
+adapter for, and, on a platform that shows a link only with a title the author
+gives, a link without a title or with a title or description over its limit
+(ADR 0015). The editor shows these in the column they belong to:
+
+- a link that needs a title and has none says so under the title field as
+  soon as the link is typed, and the title and the description show their
+  count against their limits. The fields are not cut while typing or pasting;
 
 - the count turns red and reads "N over the limit of M", with one line that
   the post cannot be approved until the text fits;
@@ -117,12 +131,21 @@ no adapter for. The editor now shows these in the column they belong to:
 ### Writing one post for several channels by hand
 
 One text, then diverge. A channel that is ticked starts from the first text
-and its link (as before). Each column has "Copy text from" for the other
-columns that hold a text: a button when there is one, a list when there are
-more. Copying replaces the text only, never the link, and asks first when the
-column already holds a different text. After that every text is edited by
-itself; `SaveDraft` writes each variant from its own input and leaves a
-variant alone when its input did not change.
+and its link (as before), and from the card of that link only when its own
+platform shows one. Each column has "Copy text from" for the other columns
+that hold a text: a button when there is one, a list when there are more.
+Copying replaces the text only, never the link, and asks first, in a dialog,
+when the column already holds a different text. After that every text is
+edited by itself; `SaveDraft` writes each variant from its own input and
+leaves a variant alone when its input did not change.
+
+Taking a channel off the post throws its text away, so the page asks first
+when that text is nowhere else: no other column holds the same text, or it was
+changed since it was saved. A text the server keeps whatever is sent (it is
+published, or its outcome on the platform is unknown, ADR 0009) cannot be
+taken off on the page either. The errors of a refused save are keyed by the
+position of a text and are cleared when a column is added or taken off, so
+that none is shown in the wrong column.
 
 ### Side by side
 
@@ -134,10 +157,11 @@ columns until the screen is very wide, so that two texts fit next to each
 other on a laptop. Posts that are not drafts show their texts the same way,
 read-only.
 
-`PostVariant` and `SaveDraft` are not changed. A platform that needs more
-fields on a variant (a link title, a description, a thumbnail) adds them to
-the variant and to the column; the column has the link field as its last
-block for that reason.
+This record changes nothing in `PostVariant` or `SaveDraft`. ADR 0015 does: it
+adds `link_title` and `link_description` to a variant for the platforms that
+show a link only as a card the author writes, and the column shows those two
+fields under the link when its channel needs them. A page shows the card of a
+variant only when the platform of its channel shows one.
 
 ### The prompt
 
@@ -180,3 +204,28 @@ a folder and fails when a folder is added without being listed.
 - Drafts made with v2 cannot be compared one to one with drafts made with v1.
   The version is on each run.
 - An instance that sets `NOONGUN_DRAFT_PROMPT_VERSION=v1` keeps v1.
+- A draft that was written for fewer channels than planned is a post of its
+  own. When the channel that was left out is connected again and the week is
+  proposed again, that channel gets a second post at the same time, on the
+  next idea. The two are not joined.
+
+## Open questions
+
+These are for the owner. None is built.
+
+1. **Approval per variant.** The design guide approves each channel version by
+   itself ("1 of 2 approved"). The system approves the post.
+2. **A firing time per variant.** The same idea at nine on one channel and at
+   noon on another needs a claim per variant, which is a change to the state
+   machine of ADR 0009.
+3. **A looser rule for sharing.** Whether planning should ever join slots that
+   are not at the same instant, for example on the same day, or by a choice of
+   the workspace.
+4. **Drafting one more variant.** A channel added to an existing draft starts
+   from a copy. Asking the model for that one text would be a new kind of run
+   with its own cost.
+5. **A link per channel from the model.** A drafted post carries one link on
+   every variant.
+6. **A post that went out without the app knowing.** A variant whose outcome
+   is unknown can only be sent again or returned to draft. Marking it as
+   published by hand waits for M7.
