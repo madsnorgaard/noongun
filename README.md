@@ -254,6 +254,7 @@ Do not change `APP_KEY` on an instance that has data.
 | `NOONGUN_VITE_PORT` | `5173` | Host port for `./dev vite`. |
 | `NOONGUN_AUTO_MIGRATE` | `true` | Run migrations when the `app` container starts. |
 | `NOONGUN_TRUSTED_PROXIES` | empty | Reverse proxies whose forwarded headers are trusted: comma separated addresses or CIDR ranges, or `*`. |
+| `NOONGUN_OPERATOR_EMAILS` | empty | Who may open the Horizon dashboard at `/horizon`: email addresses of accounts with a verified address, comma separated. Empty: the owners of the first workspace in `self_hosted` mode, nobody in `saas` mode. The rule applies in every environment, including `local`. |
 | `NOONGUN_DEFAULT_TIMEZONE` | `Europe/Copenhagen` | Preselected timezone on the setup screen if the browser timezone is unknown. |
 | `NOONGUN_UID`, `NOONGUN_GID` | `1000` | User and group the containers run as. |
 | `APP_URL` | `http://localhost:8080` | Public address of the app. |
