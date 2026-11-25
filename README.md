@@ -179,7 +179,10 @@ Owners and editors write, approve, schedule and delete. Viewers can look.
 
 `./setup` gives a development stack: it mounts the source code and runs in debug
 mode. On a server, run the production image instead. The app container then holds
-the code and the built assets, and nothing on the host needs PHP or Node.
+the code and the built assets, and nothing on the host needs PHP or Node. The
+production image runs PHP with `php.ini-production`, so PHP errors go to the
+container log and never to the browser; `docker/app/php.ini` is applied on top
+of it in both images.
 
 The steps below put the app behind `tailscale serve`, which provides HTTPS on the
 machine's tailnet name and keeps it off the public internet. Another TLS reverse
