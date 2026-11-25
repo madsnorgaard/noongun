@@ -9,10 +9,10 @@
 
 use App\Domain\Content\Models\Post;
 use App\Domain\Drafting\Actions\GenerateDraft;
+use App\Domain\Drafting\Contracts\DraftGenerator;
 use App\Domain\Drafting\CredentialScope;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingContext;
-use App\Domain\Drafting\DraftRequest;
 use App\Domain\Drafting\DraftSchema;
 use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
 use App\Domain\Drafting\Exceptions\DraftingException;
@@ -42,7 +42,6 @@ use Prism\Prism\Providers\Provider;
 use Prism\Prism\Schema\RawSchema;
 use Prism\Prism\Structured\Request as StructuredRequest;
 use Prism\Prism\Structured\Response as StructuredResponse;
-use Prism\Prism\Testing\StructuredResponseFake;
 use Prism\Prism\ValueObjects\Messages\UserMessage;
 use Prism\Prism\ValueObjects\Meta;
 use Prism\Prism\ValueObjects\Usage;
@@ -673,5 +672,5 @@ it('is the generator the configuration names for the default provider', function
     $configured = require config_path('noongun.php');
 
     expect($configured['drafting']['providers']['anthropic']['generator'])->toBe(PrismDraftGenerator::class)
-        ->and(is_subclass_of(PrismDraftGenerator::class, App\Domain\Drafting\Contracts\DraftGenerator::class))->toBeTrue();
+        ->and(is_subclass_of(PrismDraftGenerator::class, DraftGenerator::class))->toBeTrue();
 });
