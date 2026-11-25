@@ -4,6 +4,7 @@ namespace App\Http\Presenters;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\ChannelStatus;
+use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Actions\DeletePost;
@@ -158,14 +159,20 @@ final class PostPresenter
             ->orderBy('platform')
             ->orderBy('display_name')
             ->get()
-            ->map(fn (Channel $channel): array => [
-                'id' => $channel->id,
-                'display_name' => $channel->display_name,
-                'platform_label' => $this->platformLabel($channel->platform),
-                'can_publish' => $channel->canPublish(),
-                'problem' => PostPreconditions::channelProblem($channel),
-                'max_body_length' => $this->maxBodyLength($channel),
-            ])
+            ->map(function (Channel $channel): array {
+                $capabilities = $this->capabilities($channel);
+
+                return [
+                    'id' => $channel->id,
+                    'display_name' => $channel->display_name,
+                    'platform_label' => $this->platformLabel($channel->platform),
+                    'can_publish' => $channel->canPublish(),
+                    'problem' => PostPreconditions::channelProblem($channel)
+                        ?? ($capabilities === null ? PostPreconditions::platformUnavailable($channel) : null),
+                    'max_body_length' => $capabilities?->maxBodyLength,
+                    'link_previews' => $capabilities?->linkPreviews,
+                ];
+            })
             ->all());
     }
 
@@ -181,7 +188,7 @@ final class PostPresenter
             'channel_id' => $variant->channel_id,
             'channel_name' => $channel->display_name ?? '',
             'platform_label' => $channel !== null ? $this->platformLabel($channel->platform) : '',
-            'max_body_length' => $channel !== null ? $this->maxBodyLength($channel) : null,
+            'max_body_length' => $channel !== null ? $this->capabilities($channel)?->maxBodyLength : null,
             'body' => $variant->body,
             'link' => $variant->link,
             'published' => $variant->isPublished(),
@@ -191,10 +198,10 @@ final class PostPresenter
         ];
     }
 
-    private function maxBodyLength(Channel $channel): ?int
+    private function capabilities(Channel $channel): ?ChannelCapabilities
     {
         try {
-            return $this->channels->for($channel)->capabilities()->maxBodyLength;
+            return $this->channels->for($channel)->capabilities();
         } catch (ChannelAdapterNotAvailable) {
             return null;
         }
