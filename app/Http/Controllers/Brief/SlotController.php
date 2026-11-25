@@ -7,7 +7,7 @@ use App\Domain\Scheduling\Models\Slot;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Http\Controllers\Brief\Concerns\ActsAsMember;
 use App\Http\Controllers\Controller;
-use App\Http\Presenters\BriefPresenter;
+use App\Http\Presenters\PlatformLabel;
 use App\Http\Requests\Brief\StoreSlotRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -24,7 +24,7 @@ class SlotController extends Controller
 {
     use ActsAsMember;
 
-    public function index(Request $request, CurrentWorkspace $current, BriefPresenter $presenter): Response
+    public function index(Request $request, CurrentWorkspace $current): Response
     {
         Gate::authorize('viewAny', Slot::class);
 
@@ -45,7 +45,7 @@ class SlotController extends Controller
             'channels' => $channels->map(fn (Channel $channel): array => [
                 'id' => $channel->id,
                 'display_name' => $channel->display_name,
-                'platform_label' => $presenter->platformLabel($channel->platform),
+                'platform_label' => PlatformLabel::for($channel->platform),
                 'offered' => ! in_array($channel->status, StoreSlotRequest::NOT_OFFERED, true),
                 'can_publish' => $channel->canPublish(),
             ])->all(),

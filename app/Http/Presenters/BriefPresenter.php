@@ -5,7 +5,6 @@ namespace App\Http\Presenters;
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Drafting\Models\Brief;
 use App\Domain\Drafting\VoiceRules;
-use Illuminate\Support\Str;
 
 /**
  * What the brief pages show of a brief version. The text of a brief goes out
@@ -29,8 +28,6 @@ final class BriefPresenter
             'linkedin' => ['Professional but human.'],
         ],
     ];
-
-    private const LABELS = ['linkedin' => 'LinkedIn'];
 
     public function __construct(private readonly ChannelManager $channels) {}
 
@@ -101,13 +98,8 @@ final class BriefPresenter
     public function platforms(?Brief $brief): array
     {
         return array_map(
-            fn (string $name): array => ['name' => $name, 'label' => $this->platformLabel($name)],
+            fn (string $name): array => ['name' => $name, 'label' => PlatformLabel::for($name)],
             $this->platformNames($brief),
         );
-    }
-
-    public function platformLabel(string $platform): string
-    {
-        return self::LABELS[$platform] ?? Str::headline($platform);
     }
 }
