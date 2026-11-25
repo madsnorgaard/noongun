@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "19984896-4a1d-471e-bb60-ffe971784b1a",
+  "version": 1,
+  "timestamp": "2026-11-25T18:19:18.275Z",
+  "payload": {
+    "title": "A workspace always keeps an owner",
+    "context": "Security review of M3 (#16): the last owner could delete their account, leaving a workspace nobody can manage, and first-run setup reopened when no workspace existed.",
+    "rationale": "An ownerless workspace cannot be recovered through the UI, and a reopened setup lets a stranger claim the instance.",
+    "alternatives": [],
+    "consequences": "The last owner cannot delete their account; setup counts as complete when a workspace or a user exists."
+  },
+  "seq": 1
+}

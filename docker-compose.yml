@@ -25,7 +25,7 @@ services:
     environment:
       NOONGUN_ROLE: app
     ports:
-      - "${NOONGUN_HTTP_PORT:-8080}:8080"
+      - "${NOONGUN_HTTP_PORT:-127.0.0.1:8080}:8080"
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/up"]
       interval: 10s

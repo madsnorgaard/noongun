@@ -43,6 +43,38 @@ final readonly class WeekPlan
     }
 
     /**
+     * Posts that are written once for each of several channels, because
+     * those channels have an open slot at the same instant.
+     */
+    public function sharedPosts(): int
+    {
+        return count(array_filter($this->posts, fn (PlannedPost $post): bool => count($post->channels) > 1));
+    }
+
+    /**
+     * Posts for one channel only in a plan that drafts for more than one
+     * channel: no other channel has an open slot at that instant, so the
+     * idea of such a post reaches that one channel. Zero when the plan
+     * covers a single channel, where there is nothing to share.
+     */
+    public function postsForOneChannel(): int
+    {
+        $channels = [];
+
+        foreach ($this->posts as $post) {
+            foreach ($post->channelIds() as $channelId) {
+                $channels[$channelId] = true;
+            }
+        }
+
+        if (count($channels) < 2) {
+            return 0;
+        }
+
+        return count($this->posts) - $this->sharedPosts();
+    }
+
+    /**
      * A fingerprint of what would be drafted. The page that shows the plan
      * sends it back when the person starts the proposal, so that a plan
      * that changed in the meantime is shown again instead of being run

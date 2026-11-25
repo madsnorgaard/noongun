@@ -29,13 +29,21 @@ time, for example after pulling changes.
 When it finishes, open <http://localhost:8080>. A fresh instance shows the setup
 screen: create the owner account and the workspace (name, timezone, language).
 You land on the dashboard, logged in. After that the setup screen is gone and
-registration is closed.
+registration is closed. The setup screen stays closed for as long as a
+workspace exists, and the only owner of a workspace cannot delete their
+account.
 
 If port 8080 is taken, choose another before the first run:
 
 ```sh
 NOONGUN_HTTP_PORT=8081 ./setup
 ```
+
+The app is published on `127.0.0.1` only, so other machines on the network
+cannot reach it. To open it to them, set `NOONGUN_HTTP_PORT` in `.env` to an
+address and a port, for example `0.0.0.0:8080`, and run `./dev up`. Docker
+bypasses host firewalls for published ports, so do this only on a network you
+trust.
 
 ## Daily commands
 
@@ -150,8 +158,13 @@ Four things to know when operating it:
   workspace. A draft or an approved post with a planned time is drawn with a
   dashed outline: it is a plan and does not go out until it is scheduled.
 - **Editor** (`/posts/{id}`) is where a post is written: one text per channel,
-  an optional link and an optional planned time. It shows the characters that
-  are left for each channel and what stands in the way of approval.
+  an optional link and an optional planned time. Each channel is a column with
+  its own count against the limit of its platform. The columns stand next to
+  each other on a wide screen and under each other on a narrow one. A channel
+  you add starts from the first text, and "Copy text from" brings the text of
+  another column in at any time; each text is then changed by itself. One
+  approval covers every text of the post, and they fire together. The page
+  says what stands in the way of approval, per channel.
 
 Times are entered and shown on the clock of the workspace and stored in UTC.
 
@@ -279,7 +292,7 @@ there: Noon Gun estimates cost, it does not cap what the provider charges.
 | `NOONGUN_DRAFT_OPENAI_EFFORT` | empty | The reasoning effort for OpenAI: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`, as far as the model accepts it. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call. |
-| `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | The folder under `resources/prompts/draft/` that holds the prompt. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v2` | The folder under `resources/prompts/draft/` that holds the prompt. `v2` asks for a text written for each channel; `v1` is kept for the runs that used it. |
 | `NOONGUN_DRAFT_PRICES`, `NOONGUN_DRAFT_PRICE_CURRENCY` | empty, `USD` | The price table for the cost estimate. |
 
 ### What is sent to the provider
@@ -373,7 +386,7 @@ The model must support structured outputs. A smaller model is cheaper and
 faster and writes plainer drafts. Thinking counts against
 `NOONGUN_DRAFT_MAX_TOKENS`, so if answers are cut off, raise that limit or set
 a lower `NOONGUN_DRAFT_ANTHROPIC_EFFORT`. To change what the model is told,
-copy `resources/prompts/draft/v1` to a new folder, edit it and point
+copy `resources/prompts/draft/v2` to a new folder, edit it and point
 `NOONGUN_DRAFT_PROMPT_VERSION` at it. Details are in
 `docs/platform-notes/llm.md` and `docs/adr/0011-drafting-contract.md`.
 
@@ -403,7 +416,11 @@ expected to cost. The plan is worked out by these rules, in this order:
    gaps and repeats nothing. Rejecting or deleting a draft opens its slot
    again.
 2. Channels whose slots fall on the same time share one post, with a text for
-   each channel, because a post is what you approve.
+   each channel, because a post is what you approve. It is one idea, drafted
+   in one call and written for each channel by its own rules and limits.
+   Channels with slots at different times get separate posts on separate
+   ideas, and the page says how many posts reach one channel only. To get one
+   idea on every channel, give the channels the same slot time.
 3. Each pillar needs its weekly target, minus the posts the week already holds
    for it. The pillars take turns, the largest target first and then by name,
    one post per turn, until every need is met. That sequence is laid over the
@@ -520,7 +537,10 @@ Three things to know when operating it:
 
 `./setup` gives a development stack: it mounts the source code and runs in debug
 mode. On a server, run the production image instead. The app container then holds
-the code and the built assets, and nothing on the host needs PHP or Node.
+the code and the built assets, and nothing on the host needs PHP or Node. The
+production image runs PHP with `php.ini-production`, so PHP errors go to the
+container log and never to the browser; `docker/app/php.ini` is applied on top
+of it in both images.
 
 The steps below put the app behind `tailscale serve`, which provides HTTPS on the
 machine's tailnet name and keeps it off the public internet. Another TLS reverse
@@ -569,11 +589,31 @@ proxy works the same way.
 
 5. Open `APP_URL` and complete the setup screen.
 
-`NOONGUN_TRUSTED_PROXIES` lists the proxies whose `X-Forwarded-*` headers the app
-trusts. Without it the app sees plain HTTP behind the proxy and builds `http://`
-links and redirects. A request from a proxy on the host arrives from the Docker
-network gateway, which is why the value above names the private ranges Docker
-uses. Leave it empty when no proxy is in front of the app.
+`NOONGUN_TRUSTED_PROXIES` lists the proxies whose `X-Forwarded-For` and
+`X-Forwarded-Proto` headers the app trusts. Without it the app sees plain HTTP
+behind the proxy and builds `http://` links and redirects. A request from a
+proxy on the host arrives from the Docker network gateway, which is why the
+value above names the private ranges Docker uses. Leave it empty when no proxy
+is in front of the app.
+
+The app never reads the host name from `X-Forwarded-Host` or the port from
+`X-Forwarded-Port`. It uses the `Host` header, so the proxy must pass that
+header on unchanged. `tailscale serve` and Caddy do. nginx needs
+`proxy_set_header Host $host;`.
+
+Outside the `local` environment the app only answers requests whose host is the
+host of `APP_URL`, or `localhost`, `127.0.0.1` or `[::1]`, which the container
+health check uses. A request for any other host gets a 400 response. If every
+page answers 400 after an update, `APP_URL` does not match the address in the
+browser, or the proxy rewrites the `Host` header.
+
+Every page is sent with `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and
+`Referrer-Policy: same-origin`, so the app cannot be shown inside a frame on
+another site. Over HTTPS it also sends `Strict-Transport-Security` for one
+year, without subdomains: a browser that has opened the app over HTTPS refuses
+plain HTTP for that host name from then on. The Content-Security-Policy does
+not restrict scripts or styles yet.
 
 To update, pull and rebuild. Migrations run when the `app` container starts.
 
@@ -602,13 +642,14 @@ it there.
 | Variable | Default | Meaning |
 |---|---|---|
 | `NOONGUN_MODE` | `self_hosted` | `self_hosted`: one workspace, created on first run, registration closed. `saas` is not built yet. |
-| `NOONGUN_HTTP_PORT` | `8080` | Host port for the web app. Keep `APP_URL` in step. Accepts an address too, for example `127.0.0.1:8090`. |
+| `NOONGUN_HTTP_PORT` | `127.0.0.1:8080` | Where the web app is published on the host, as `address:port`. Keep the port of `APP_URL` in step. A bare port, for example `8080`, is published on every network interface; an `.env` from before this default still has that form. |
 | `NOONGUN_VITE_PORT` | `5173` | Host port for `./dev vite`. |
 | `NOONGUN_AUTO_MIGRATE` | `true` | Run migrations when the `app` container starts. |
-| `NOONGUN_TRUSTED_PROXIES` | empty | Reverse proxies whose forwarded headers are trusted: comma separated addresses or CIDR ranges, or `*`. |
+| `NOONGUN_TRUSTED_PROXIES` | empty | Reverse proxies whose `X-Forwarded-For` and `X-Forwarded-Proto` headers are trusted: comma separated addresses or CIDR ranges, or `*`. |
+| `NOONGUN_OPERATOR_EMAILS` | empty | Who may open the Horizon dashboard at `/horizon`: email addresses of accounts with a verified address, comma separated. Empty: the owners of the first workspace in `self_hosted` mode, nobody in `saas` mode. The rule applies in every environment, including `local`. |
 | `NOONGUN_DEFAULT_TIMEZONE` | `Europe/Copenhagen` | Preselected timezone on the setup screen if the browser timezone is unknown. |
 | `NOONGUN_UID`, `NOONGUN_GID` | `1000` | User and group the containers run as. |
-| `APP_URL` | `http://localhost:8080` | Public address of the app. |
+| `APP_URL` | `http://localhost:8080` | Public address of the app. Outside the `local` environment its host is the only one the app answers to, besides the loopback names. |
 | `DB_*` | `pgsql`, host `postgres` | Database connection. The compose file uses the same values to create the database. |
 | `REDIS_HOST` | `redis` | Redis host. |
 | `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` | empty | Credentials of the Meta app this instance connects Pages with. |
@@ -633,7 +674,7 @@ it there.
 | `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call to the provider. |
-| `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v2` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
 | `NOONGUN_DRAFT_PRICES` | empty | Prices per million tokens, as JSON, added to the table in `config/noongun.php`: `{"anthropic":{"model-name":{"input":4,"output":20}}}`. Only used to estimate what a draft run cost. |
 | `NOONGUN_DRAFT_PRICE_CURRENCY` | `USD` | Currency of the price table. |
 | `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` | `14` | Most posts one "Propose a week" drafts. |
@@ -705,8 +746,9 @@ your role on the Page or remove the app. The channel then shows **Needs
 reconnecting**; choose **Connect again**. **Disconnect** erases the token and
 keeps the history of what was published.
 
-Owners and editors of a workspace can connect and disconnect channels. Viewers
-can only see them.
+Only owners of a workspace can connect and disconnect channels, because a
+channel holds the access to an account on a platform. Editors and viewers can
+see them.
 
 ## Tests
 

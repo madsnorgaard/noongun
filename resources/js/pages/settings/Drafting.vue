@@ -94,10 +94,10 @@ const explanation = computed(() => {
     }
 
     if (props.key_source === 'instance') {
-        return `Drafts are written by ${props.provider.label} with the key of this instance, set by its operator. Store a key below to use a ${props.provider.label} account of your own.`;
+        return `Drafts are written by ${props.provider.label} with the key of this instance, set by its operator. Store a key below to use your own ${props.provider.label} account.`;
     }
 
-    return `There is no key for ${props.provider.label}, so drafts cannot be requested. Store a ${props.provider.label} API key below.`;
+    return `There is no key for ${props.provider.label}, so drafts cannot be requested. Store an API key for ${props.provider.label} below.`;
 });
 
 function keyLine(row: ProviderRow): string {

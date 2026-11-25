@@ -61,6 +61,7 @@ describe('new post page', function () {
                 'can_publish' => true,
                 'problem' => null,
                 'max_body_length' => 5000,
+                'link_previews' => true,
             ])
             ->where('channels.1.id', $reconnect->id)
             ->where('channels.1.can_publish', false)
