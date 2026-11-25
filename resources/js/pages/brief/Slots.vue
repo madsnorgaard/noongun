@@ -126,7 +126,7 @@ function remove(slot: Slot): void {
                     {{ timezone }}.
                 </p>
             </div>
-            <BriefTabs current="slots" />
+            <BriefTabs current="slots" :can-propose="can.manage" />
         </header>
 
         <p class="max-w-[72ch] text-base">

@@ -6,6 +6,7 @@ import BriefText from '@/components/brief/BriefText.vue';
 import RuleList from '@/components/brief/RuleList.vue';
 import SavedLine from '@/components/brief/SavedLine.vue';
 import InputError from '@/components/InputError.vue';
+import TextLink from '@/components/TextLink.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,6 +14,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { formatDateTime, textLength, useWorkspaceTimezone } from '@/lib/posts';
 import { edit, update } from '@/routes/brief';
 import { show as showVersion } from '@/routes/brief/versions';
+import { create as proposeWeek } from '@/routes/proposals';
 import type {
     Brief,
     BriefLimits,
@@ -244,7 +246,7 @@ onBeforeUnmount(() => {
                     changes with it. Times in {{ timezone }}.
                 </p>
             </div>
-            <BriefTabs current="brief" />
+            <BriefTabs current="brief" :can-propose="can.update" />
         </header>
 
         <section
@@ -564,7 +566,13 @@ onBeforeUnmount(() => {
                     <p class="text-sm text-muted-foreground">
                         <template v-if="brief && !form.isDirty">
                             Nothing has changed since version
-                            {{ brief.version }}.
+                            {{ brief.version }}. With slots in place, the next
+                            step is to
+                            <TextLink
+                                :href="proposeWeek()"
+                                data-test="brief-propose"
+                                >propose a week</TextLink
+                            >.
                         </template>
                         <template v-else>
                             Saving adds a version. Earlier versions are kept as

@@ -9,6 +9,7 @@ use App\Http\Requests\Brief\SaveBriefRequest;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Route;
 use Inertia\Testing\AssertableInertia as Assert;
 
 require_once __DIR__.'/../../Support/members.php';
@@ -379,5 +380,21 @@ it('never renders text from a user as markup on the brief, pillar, slot and idea
 
     foreach ($files as $file) {
         expect(file_get_contents($file))->not->toContain('v-html')->not->toContain('innerHTML');
+    }
+});
+
+it('leads from the setup pages on to proposing a week', function () {
+    expect(Route::has('proposals.create'))->toBeTrue();
+
+    foreach (['components/brief/BriefTabs.vue', 'pages/brief/Edit.vue', 'pages/settings/Drafting.vue', 'pages/Dashboard.vue'] as $file) {
+        $source = (string) file_get_contents(resource_path('js/'.$file));
+
+        expect($source)->toContain("from '@/routes/proposals'")->toContain(':href="proposeWeek()"');
+        // Proposing is never the red action of these pages.
+        expect($source)->not->toContain('variant="signal"');
+    }
+
+    foreach (['Edit' => 'can.update', 'Pillars' => 'can.manage', 'Slots' => 'can.manage'] as $page => $ability) {
+        expect((string) file_get_contents(resource_path("js/pages/brief/{$page}.vue")))->toContain(':can-propose="'.$ability.'"');
     }
 });

@@ -121,6 +121,12 @@ const localTime = computed(() => {
                 failed are in the <TextLink :href="queue()">queue</TextLink>.
                 The <TextLink :href="calendar()">calendar</TextLink> shows the
                 same posts by day.
+                <template v-if="can.propose">
+                    To fill a week with drafts from your brief,
+                    <TextLink :href="proposeWeek()" data-test="propose-week"
+                        >propose a week</TextLink
+                    >.
+                </template>
             </p>
         </section>
     </div>
