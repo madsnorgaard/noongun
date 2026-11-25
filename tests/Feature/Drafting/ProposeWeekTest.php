@@ -325,7 +325,7 @@ describe('limits', function () {
         }],
     ]);
 
-    it('lets the second of two simultaneous requests for the same plan through to nothing', function () {
+    it('refuses a second request that carries the fingerprint of the plan the first one started', function () {
         // Both requests were made from the same page, so both carry the
         // fingerprint of the same plan.
         $seen = planFor($this->workspace, '2026-11-30')->fingerprint();
@@ -337,7 +337,7 @@ describe('limits', function () {
         Queue::assertPushed(GenerateDraftJob::class, 3);
     });
 
-    it('locks the workspace before it reads or writes a draft run, so two requests cannot both pass the checks', function () {
+    it('takes the lock on the workspace row before it reads or writes a draft run', function () {
         // The page worked the plan out earlier; only the start is watched.
         $seen = planFor($this->workspace, '2026-11-30')->fingerprint();
 

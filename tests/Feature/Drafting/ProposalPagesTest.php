@@ -2,11 +2,14 @@
 
 use App\Domain\Content\PostState;
 use App\Domain\Drafting\Actions\StopOpenRuns;
+use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\GenerateDraftJob;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
+use App\Http\Presenters\ProposalPresenter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Route;
 use Inertia\Testing\AssertableInertia as Assert;
 use Tests\Fakes\FakeChannelAdapter;
 use Tests\Fakes\FakeDraftGenerator;
@@ -112,7 +115,7 @@ describe('the page that shows the plan', function () {
             ->assertInertia(fn (Assert $page) => $page->where('cost', null)->where('generator.model', DRAFT_TEST_MODEL));
     });
 
-    it('names what is missing, each with where to fix it when that page exists', function () {
+    it('names what is missing, each with the page where it is fixed', function () {
         DB::table('briefs')->delete();
         DB::table('channels')->update(['status' => 'needs_reconnect']);
         config(['noongun.drafting.providers.'.DRAFT_TEST_PROVIDER.'.api_key' => null]);
@@ -123,13 +126,61 @@ describe('the page that shows the plan', function () {
                 ->has('refusals', 3)
                 ->where('refusals.0.reason', 'brief')
                 ->where('refusals.0.message', fn (string $message) => str_contains($message, 'no brief'))
+                ->where('refusals.0.href', route('brief.edit'))
+                ->where('refusals.0.label', 'Write the brief')
                 ->where('refusals.1.reason', 'channels')
                 ->where('refusals.1.href', route('channels.index'))
                 ->where('refusals.1.label', 'Go to Channels')
                 ->where('refusals.2.reason', 'key')
                 ->where('refusals.2.message', fn (string $message) => str_contains($message, 'No API key is set'))
+                ->where('refusals.2.href', route('llm-key.edit'))
+                ->where('refusals.2.label', 'Add an API key')
                 ->where('generator', null)
                 ->where('cost', null));
+    });
+
+    it('sends a person without a slot to the slots, and one with nothing to draft as well', function () {
+        DB::table('slots')->delete();
+
+        $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('refusals', 1)
+                ->where('refusals.0.reason', 'slots')
+                ->where('refusals.0.href', route('slots.index'))
+                ->where('refusals.0.label', 'Set the slots'));
+
+        // One slot, and its time this week has passed.
+        slotIn($this->workspace, $this->channel, 1, '09:00');
+
+        $this->get(route('proposals.create'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->has('refusals', 1)
+                ->where('refusals.0.reason', 'empty')
+                ->where('refusals.0.href', route('slots.index'))
+                ->where('refusals.0.label', 'Look at the slots'));
+    });
+
+    it('links every refusal to a route that exists, and every reason that can be fixed on a page has one', function () {
+        $fixes = (new ReflectionClassConstant(ProposalPresenter::class, 'FIXES'))->getValue();
+
+        foreach ($fixes as $reason => $fix) {
+            foreach ($fix['routes'] as $name) {
+                expect(Route::has($name))->toBeTrue("The route [{$name}] for the refusal [{$reason}] does not exist.");
+            }
+        }
+
+        expect(array_keys($fixes))->toEqualCanonicalizing([
+            ProposalRefused::BRIEF_MISSING,
+            ProposalRefused::NO_CHANNEL,
+            ProposalRefused::NO_SLOT,
+            ProposalRefused::NO_KEY,
+            ProposalRefused::NOTHING_TO_DRAFT,
+            ProposalRefused::IN_PROGRESS,
+        ]);
+
+        foreach (['brief.edit', 'pillars.index', 'slots.index', 'ideas.index'] as $name) {
+            expect(Route::has($name))->toBeTrue("The plan page links to [{$name}], which does not exist.");
+        }
     });
 
     it('says so when the week has nothing to draft, when a proposal is at work and when the day is used up', function () {
@@ -229,7 +280,7 @@ describe('starting', function () {
         Queue::assertNothingPushed();
     });
 
-    it('starts one proposal when the button is pressed twice', function () {
+    it('starts one proposal when the same request arrives twice in a row', function () {
         $payload = proposalPayload($this->workspace);
 
         $this->actingAs($this->owner)->post(route('proposals.store'), $payload)->assertSessionHasNoErrors();

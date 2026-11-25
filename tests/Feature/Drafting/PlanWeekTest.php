@@ -87,6 +87,24 @@ describe('times', function () {
             ->toBe(['2026-10-24 07:00 UTC', '2026-10-25 08:00 UTC', '2026-10-25 22:30 UTC']);
     });
 
+    it('reads a slot in the hour that comes twice as the second one, in standard time, and plans it once', function () {
+        $this->travelTo('2026-10-20 10:00:00');
+
+        // On 25 October 2026 the clocks in Copenhagen go from 03:00 back to
+        // 02:00, so 02:30 comes twice: at 00:30 UTC and at 01:30 UTC.
+        slotIn($this->copenhagen, $this->channel, 7, '02:30');
+        slotIn($this->copenhagen, $this->channel, 7, '01:30');
+        slotIn($this->copenhagen, $this->channel, 7, '03:30');
+
+        $theirs = channelIn($this->johannesburg);
+        slotIn($this->johannesburg, $theirs, 7, '02:30');
+
+        expect(plannedTimes(planFor($this->copenhagen, '2026-10-19')))
+            ->toBe(['2026-10-24 23:30 UTC', '2026-10-25 01:30 UTC', '2026-10-25 02:30 UTC'])
+            // Johannesburg has no such hour: 02:30 is 00:30 UTC as on any day.
+            ->and(plannedTimes(planFor($this->johannesburg, '2026-10-19')))->toBe(['2026-10-25 00:30 UTC']);
+    });
+
     it('leaves out a time that is closer than the lead time, and counts it apart from the past ones', function () {
         // Now is Wednesday 11:00 in Copenhagen. The default lead time is 60 minutes.
         slotIn($this->copenhagen, $this->channel, 3, '10:30');
