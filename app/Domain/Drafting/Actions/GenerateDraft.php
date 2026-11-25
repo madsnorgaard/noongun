@@ -100,7 +100,7 @@ final class GenerateDraft
                     $failure instanceof DraftGeneratorNotAvailable => DraftGeneratorNotAvailable::FOR_MEMBERS,
                     $failure instanceof DraftingNotAllowed => self::NOT_ALLOWED,
                     $used !== null => self::NOT_SAVED,
-                    default => 'The draft could not be generated because of an unexpected error.',
+                    default => 'The post could not be drafted because of an unexpected error.',
                 },
                 $used,
                 $used !== null ? $this->costs->estimate($used, $run->model) : null,

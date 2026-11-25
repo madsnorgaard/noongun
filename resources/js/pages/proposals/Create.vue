@@ -94,7 +94,7 @@ function start(): void {
                 <div class="grid gap-1">
                     <h1 class="text-title md:text-display">Propose a week</h1>
                     <p class="text-muted-foreground" data-test="proposal-week">
-                        Drafts for {{ weekLabel }}, written from your brief.
+                        Posts for {{ weekLabel }}, drafted from your brief.
                         Times in {{ timezone }}.
                     </p>
                 </div>
@@ -224,16 +224,39 @@ function start(): void {
                         How the week was planned
                     </h2>
                     <ul class="grid gap-1.5 text-base">
-                        <li>
-                            Pillars take turns, the largest weekly target first,
-                            until each has its target. Posts the week already
-                            holds for a pillar count towards it.
+                        <li
+                            v-if="plan.pillars_with_target === 0"
+                            data-test="proposal-no-pillars"
+                        >
+                            No pillar has a weekly target, so every post is
+                            drafted from the brief alone.
+                            <Link
+                                v-if="links.pillars"
+                                :href="links.pillars"
+                                class="font-semibold underline underline-offset-4"
+                            >
+                                Add pillars and targets
+                            </Link>
+                            <template v-if="links.pillars">
+                                to spread the week over your themes.
+                            </template>
                         </li>
-                        <li v-if="count > 0 && withoutPillar > 0">
-                            {{ posts(withoutPillar) }}
-                            {{ withoutPillar === 1 ? 'has' : 'have' }} no
-                            pillar, because the weekly targets ask for fewer
-                            posts than the week has open times.
+                        <template v-else>
+                            <li>
+                                Pillars take turns, the largest weekly target
+                                first, until each has its target. Posts the week
+                                already holds for a pillar count towards it.
+                            </li>
+                            <li v-if="count > 0 && withoutPillar > 0">
+                                {{ posts(withoutPillar) }}
+                                {{ withoutPillar === 1 ? 'has' : 'have' }} no
+                                pillar, because the weekly targets ask for fewer
+                                posts than the week has open times.
+                            </li>
+                        </template>
+                        <li>
+                            Each post takes the oldest unused idea of its
+                            pillar, then the oldest idea without a pillar.
                         </li>
                         <li v-for="short in plan.short" :key="short.pillar">
                             {{ short.pillar }} gets {{ short.missing }} fewer
@@ -276,9 +299,22 @@ function start(): void {
                         </li>
                     </ul>
                     <p
-                        v-if="links.pillars || links.slots || links.ideas"
+                        v-if="
+                            links.brief ||
+                            links.pillars ||
+                            links.slots ||
+                            links.ideas
+                        "
                         class="flex flex-wrap gap-x-5 gap-y-1 pt-1 text-base"
                     >
+                        <Link
+                            v-if="links.brief"
+                            :href="links.brief"
+                            class="inline-flex min-h-11 items-center font-semibold underline underline-offset-4"
+                            data-test="proposal-link-brief"
+                        >
+                            Brief
+                        </Link>
                         <Link
                             v-if="links.pillars"
                             :href="links.pillars"

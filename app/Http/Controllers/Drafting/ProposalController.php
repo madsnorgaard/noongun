@@ -92,7 +92,7 @@ class ProposalController extends Controller
         Inertia::flash('toast', [
             'type' => 'success',
             'message' => trans_choice(
-                '{1} :count draft is being generated. It waits for your approval in the queue.|[2,*] :count drafts are being generated. They wait for your approval in the queue.',
+                '{1} :count post is being drafted. It waits for your approval in the queue.|[2,*] :count posts are being drafted. They wait for your approval in the queue.',
                 count($runs),
                 ['count' => count($runs)],
             ),

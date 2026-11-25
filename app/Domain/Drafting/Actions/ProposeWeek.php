@@ -36,7 +36,7 @@ use Throwable;
  */
 final class ProposeWeek
 {
-    public const NOT_QUEUED = 'The draft could not be handed to the queue, so it was not generated. Nothing was spent. Propose the week again.';
+    public const NOT_QUEUED = 'The draft could not be handed to the queue, so it was not drafted. Nothing was spent. Propose the week again.';
 
     public function __construct(
         private readonly PlanWeek $planWeek,

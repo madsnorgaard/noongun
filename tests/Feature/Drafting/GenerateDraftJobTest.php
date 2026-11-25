@@ -644,7 +644,7 @@ describe('failures', function () {
         expect(fn () => runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id)))->toThrow(RuntimeException::class);
 
         expect(freshRun($run)->status)->toBe('failed')
-            ->and(freshRun($run)->failure_reason)->toBe('The draft could not be generated because of an unexpected error.')
+            ->and(freshRun($run)->failure_reason)->toBe('The post could not be drafted because of an unexpected error.')
             ->and(DB::table('posts')->count())->toBe(0);
         Queue::assertNothingPushed();
     });

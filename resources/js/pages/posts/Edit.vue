@@ -655,7 +655,7 @@ const locked = computed(() => {
                     class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
                 >
                     <Label for="scheduled_at">
-                        Firing time, {{ timezone }}
+                        Planned time, {{ timezone }}
                     </Label>
                     <Input
                         id="scheduled_at"
@@ -665,7 +665,7 @@ const locked = computed(() => {
                     />
                     <p class="text-sm text-muted-foreground">
                         Leave it empty to decide after approval. A post with a
-                        firing time is scheduled the moment it is approved.
+                        planned time is scheduled the moment it is approved.
                     </p>
                     <InputError
                         :message="
@@ -928,12 +928,12 @@ const locked = computed(() => {
                             Where this draft came from
                         </h2>
                         <p class="text-base">
-                            Generated from your brief
-                            <template v-if="post.origin.generated_at">
+                            Drafted from your brief
+                            <template v-if="post.origin.drafted_at">
                                 on
                                 <span class="font-mono">{{
                                     formatDateTime(
-                                        post.origin.generated_at,
+                                        post.origin.drafted_at,
                                         timezone,
                                     )
                                 }}</span>

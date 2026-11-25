@@ -64,6 +64,8 @@ export type WeekPlan = {
     unavailable: number;
     left_out: number;
     short: { pillar: string; missing: number }[];
+    /** How many pillars have a weekly target above zero. */
+    pillars_with_target: number;
 };
 
 export type ProposalRefusal = {

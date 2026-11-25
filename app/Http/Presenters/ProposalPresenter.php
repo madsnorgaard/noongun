@@ -3,6 +3,7 @@
 namespace App\Http\Presenters;
 
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Content\Models\Pillar;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\DraftRunStatus;
@@ -30,7 +31,7 @@ final class ProposalPresenter
     /** How long a finished proposal stays on the queue when a draft failed. */
     private const FAILED_SHOWN_HOURS = 24;
 
-    /** How long a finished proposal stays on the queue when every draft was generated. */
+    /** How long a finished proposal stays on the queue when every post was drafted. */
     private const DONE_SHOWN_MINUTES = 60;
 
     /**
@@ -84,7 +85,7 @@ final class ProposalPresenter
                 'at' => $post->at->toIso8601String(),
                 'channels' => array_map(fn (Channel $channel): array => [
                     'name' => $channel->display_name,
-                    'platform_label' => Str::headline($channel->platform),
+                    'platform_label' => PlatformLabel::for($channel->platform),
                 ], $post->channels),
                 'pillar' => $post->pillar?->name,
                 'idea' => $post->idea?->title,
@@ -95,6 +96,7 @@ final class ProposalPresenter
             'taken' => $plan->taken,
             'unavailable' => $plan->unavailable,
             'left_out' => $plan->leftOut,
+            'pillars_with_target' => Pillar::query()->where('weekly_target', '>', 0)->count(),
             'short' => array_map(fn (array $short): array => [
                 'pillar' => $short['pillar']->name,
                 'missing' => $short['missing'],

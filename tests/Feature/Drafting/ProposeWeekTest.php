@@ -313,7 +313,7 @@ describe('limits', function () {
 
         $runs = DB::table('draft_runs')->count();
 
-        expect(fn () => proposeWeek($this->workspace, $this->owner))->toThrow(ProposalRefused::class, 'still being generated');
+        expect(fn () => proposeWeek($this->workspace, $this->owner))->toThrow(ProposalRefused::class, 'still being drafted');
         expect(DB::table('draft_runs')->count())->toBe($runs);
         Queue::assertNothingPushed();
     })->with([

@@ -23,7 +23,7 @@ use Throwable;
  */
 class RecoverStuckDraftRuns extends Command
 {
-    public const NEVER_STARTED = 'The draft was never picked up by a worker, so it was not generated. Nothing was spent. Check that the queue is running, then propose the week again.';
+    public const NEVER_STARTED = 'The draft was never picked up by a worker, so it was not drafted. Nothing was spent. Check that the queue is running, then propose the week again.';
 
     protected $signature = 'noongun:recover-stuck-draft-runs';
 

@@ -57,11 +57,11 @@ final class GenerateDraftJob implements ShouldQueue
 
     public const INTERRUPTED = 'The worker stopped before the draft was finished. No draft was created. Propose the week again to fill this time.';
 
-    public const REQUESTER_GONE = 'The person who asked for this draft is no longer a user here, so it was not generated.';
+    public const REQUESTER_GONE = 'The person who asked for this draft is no longer a user here, so it was not drafted.';
 
-    public const BRIEF_GONE = 'The brief this draft was asked from no longer exists, so it was not generated.';
+    public const BRIEF_GONE = 'The brief this draft was asked from no longer exists, so it was not drafted.';
 
-    public const CHANNELS_GONE = 'None of the channels this draft was planned for can publish any more, so it was not generated.';
+    public const CHANNELS_GONE = 'None of the channels this draft was planned for can publish any more, so it was not drafted.';
 
     private const LOGGED_MESSAGE_LENGTH = 500;
 

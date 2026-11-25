@@ -46,7 +46,7 @@ final class ProposalChecks
         if (Brief::current() === null) {
             $missing[] = ProposalRefused::because(
                 ProposalRefused::BRIEF_MISSING,
-                (string) __('There is no brief yet. Every draft is written from the brief, so write it first.'),
+                (string) __('There is no brief yet. Every post is drafted from the brief, so write it first.'),
             );
         }
 
@@ -90,7 +90,7 @@ final class ProposalChecks
             $refusals[] = ProposalRefused::because(
                 ProposalRefused::IN_PROGRESS,
                 (string) trans_choice(
-                    '{1} A draft is still being generated. Wait until it is done before you propose another week.|[2,*] :count drafts are still being generated. Wait until they are done before you propose another week.',
+                    '{1} A post is still being drafted. Wait until it is done before you propose another week.|[2,*] :count posts are still being drafted. Wait until they are done before you propose another week.',
                     $open,
                     ['count' => $open],
                 ),

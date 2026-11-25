@@ -364,7 +364,7 @@ describe('GenerateDraft', function () {
         });
 
         expect($run->status)->toBe(DraftRunStatus::Failed)
-            ->and($run->failure_reason)->toBe('The draft could not be generated because of an unexpected error.')
+            ->and($run->failure_reason)->toBe('The post could not be drafted because of an unexpected error.')
             ->and(json_encode(DB::table('draft_runs')->where('id', $run->id)->first()))->not->toContain(DRAFT_TEST_KEY);
     });
 

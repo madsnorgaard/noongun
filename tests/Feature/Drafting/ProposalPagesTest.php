@@ -8,6 +8,7 @@ use App\Domain\Workspaces\Role;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
+use Tests\Fakes\FakeChannelAdapter;
 use Tests\Fakes\FakeDraftGenerator;
 
 require_once __DIR__.'/../../Support/publishing.php';
@@ -248,14 +249,107 @@ describe('starting', function () {
         [['week' => '2026-11-30'], 'plan'],
     ]);
 
-    it('is throttled', function () {
-        $this->actingAs($this->owner);
+    it('is throttled, and says so on the plan page in a sentence', function () {
+        $this->actingAs($this->owner)->from(route('proposals.create'));
 
         foreach (range(1, 6) as $ignored) {
-            $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale'])->assertStatus(302);
+            $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale'])
+                ->assertSessionHasErrors(['proposal' => 'The plan changed after you opened it. Look at it again before you start.']);
         }
 
-        $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale'])->assertStatus(429);
+        // The seventh in a minute, this time with a plan that would start: it does not.
+        $this->from(route('proposals.create'))
+            ->post(route('proposals.store'), proposalPayload($this->workspace))
+            ->assertRedirect(route('proposals.create'))
+            ->assertSessionHasErrors(['proposal' => 'That was asked too often in a short time. Wait a minute and try again.']);
+
+        expect(DB::table('draft_runs')->count())->toBe(0);
+        Queue::assertNothingPushed();
+
+        $this->travel(61)->seconds();
+
+        $this->post(route('proposals.store'), proposalPayload($this->workspace))->assertSessionHasNoErrors();
+    });
+
+    it('throttles each user by themselves', function () {
+        $this->actingAs($this->owner);
+
+        foreach (range(1, 7) as $ignored) {
+            $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale']);
+        }
+
+        $this->actingAs(userWithRole($this->workspace, Role::Editor))
+            ->post(route('proposals.store'), proposalPayload($this->workspace))
+            ->assertSessionHasNoErrors();
+    });
+});
+
+describe('the words on the plan page', function () {
+    it('says that there are no pillars when none has a target, instead of blaming the targets', function () {
+        DB::table('pillars')->update(['weekly_target' => 0]);
+
+        $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('plan.pillars_with_target', 0)
+                ->where('plan.posts.0.pillar', null)
+                ->where('links.pillars', route('pillars.index')));
+
+        DB::table('pillars')->delete();
+
+        $this->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page->where('plan.pillars_with_target', 0));
+    });
+
+    it('counts the pillars that have a target', function () {
+        pillarIn($this->workspace, ['name' => 'Offers', 'weekly_target' => 2]);
+        pillarIn($this->workspace, ['name' => 'Parked', 'weekly_target' => 0]);
+
+        $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page->where('plan.pillars_with_target', 2));
+    });
+
+    it('links to the brief, the pillars, the slots and the ideas', function () {
+        $this->actingAs($this->owner)->get(route('proposals.create'))
+            ->assertInertia(fn (Assert $page) => $page->where('links', [
+                'brief' => route('brief.edit'),
+                'pillars' => route('pillars.index'),
+                'slots' => route('slots.index'),
+                'ideas' => route('ideas.index'),
+            ]));
+    });
+
+    it('spells a platform the way the platform does', function () {
+        config(['noongun.channels.linkedin' => ['adapter' => FakeChannelAdapter::class]]);
+        fakeChannelAdapter('linkedin');
+        slotIn($this->workspace, channelIn($this->workspace, ['platform' => 'linkedin', 'display_name' => 'Company page']), 2, '09:00');
+
+        $this->actingAs($this->owner)->get(route('proposals.create', ['week' => '2026-11-30']))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('plan.posts.1.channels', [['name' => 'Company page', 'platform_label' => 'LinkedIn']]));
+    });
+
+    it('renders the sentences the pages promise', function () {
+        $plan = file_get_contents(resource_path('js/pages/proposals/Create.vue'));
+        $progress = file_get_contents(resource_path('js/components/posts/ProposalProgress.vue'));
+        $editor = file_get_contents(resource_path('js/pages/posts/Edit.vue'));
+        $queue = file_get_contents(resource_path('js/pages/queue/Index.vue'));
+
+        expect($plan)->toContain('No pillar has a weekly target')
+            ->and($plan)->toContain('links.brief')
+            ->and($plan)->toContain('Expected cost, about')
+            ->and($plan)->toContain('Worst case:')
+            ->and($progress)->toContain('Waiting longer than expected. Check that the queue is running.')
+            ->and($progress)->toContain('Stop waiting')
+            ->and($progress)->toContain('Used so far:')
+            ->and($editor)->toContain('Drafted from your brief')
+            ->and($editor)->toContain('Planned time, {{ timezone }}')
+            ->and($editor)->toContain('It was left out.');
+
+        // One vocabulary: the act is drafting. And what a model wrote is never rendered as markup.
+        foreach ([$plan, $progress, $editor, $queue] as $page) {
+            expect($page)->not->toMatch('/\bGenerated\b|being written|Draft written|generated_at/')
+                ->and($page)->not->toContain('v-html');
+        }
     });
 });
 
@@ -522,14 +616,34 @@ describe('a queue that does not run', function () {
             ->and(freshRun($theirs)->status)->toBe('failed');
     });
 
-    it('is throttled', function () {
+    it('is throttled, and says so in a sentence', function () {
         $this->actingAs($this->owner);
 
         foreach (range(1, 6) as $ignored) {
-            $this->post(route('proposals.stop'))->assertRedirect(route('queue.index'));
+            $this->post(route('proposals.stop'))->assertRedirect(route('queue.index'))->assertSessionHasNoErrors();
         }
 
-        expect($this->post(route('proposals.stop'))->isRedirect(route('queue.index')))->toBeFalse();
+        $waiting = draftRunIn($this->workspace, $this->owner);
+
+        $this->from(route('queue.index'))->post(route('proposals.stop'))
+            ->assertRedirect(route('queue.index'))
+            ->assertSessionHasErrors(['proposal' => 'That was asked too often in a short time. Wait a minute and try again.']);
+
+        expect(freshRun($waiting)->status)->toBe('pending');
+    });
+
+    it('is throttled apart from starting, so a person who tried to start can still stop', function () {
+        $this->actingAs($this->owner);
+
+        foreach (range(1, 7) as $ignored) {
+            $this->post(route('proposals.store'), ['week' => '2026-11-30', 'plan' => 'stale']);
+        }
+
+        $waiting = draftRunIn($this->workspace, $this->owner);
+
+        $this->post(route('proposals.stop'))->assertSessionHasNoErrors();
+
+        expect(freshRun($waiting)->status)->toBe('failed');
     });
 
     it('takes the lock a proposal takes before it reads a run', function () {
@@ -577,7 +691,7 @@ describe('the editor', function () {
                 ->where('post.origin.provider', 'Fake')
                 ->where('post.origin.rationale', 'It opens the week. <script>alert(1)</script>')
                 ->where('post.origin.alt_text', 'A roaster <b>at work</b>')
-                ->where('post.origin.generated_at', '2026-11-25T10:00:00+00:00')
+                ->where('post.origin.drafted_at', '2026-11-25T10:00:00+00:00')
                 ->where('post.can.approve', true));
     });
 
