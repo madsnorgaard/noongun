@@ -150,8 +150,13 @@ Four things to know when operating it:
   workspace. A draft or an approved post with a planned time is drawn with a
   dashed outline: it is a plan and does not go out until it is scheduled.
 - **Editor** (`/posts/{id}`) is where a post is written: one text per channel,
-  an optional link and an optional planned time. It shows the characters that
-  are left for each channel and what stands in the way of approval.
+  an optional link and an optional planned time. Each channel is a column with
+  its own count against the limit of its platform. The columns stand next to
+  each other on a wide screen and under each other on a narrow one. A channel
+  you add starts from the first text, and "Copy text from" brings the text of
+  another column in at any time; each text is then changed by itself. One
+  approval covers every text of the post, and they fire together. The page
+  says what stands in the way of approval, per channel.
 
 Times are entered and shown on the clock of the workspace and stored in UTC.
 
@@ -348,7 +353,11 @@ expected to cost. The plan is worked out by these rules, in this order:
    gaps and repeats nothing. Rejecting or deleting a draft opens its slot
    again.
 2. Channels whose slots fall on the same time share one post, with a text for
-   each channel, because a post is what you approve.
+   each channel, because a post is what you approve. It is one idea, drafted
+   in one call and written for each channel by its own rules and limits.
+   Channels with slots at different times get separate posts on separate
+   ideas, and the page says how many posts reach one channel only. To get one
+   idea on every channel, give the channels the same slot time.
 3. Each pillar needs its weekly target, minus the posts the week already holds
    for it. The pillars take turns, the largest target first and then by name,
    one post per turn, until every need is met. That sequence is laid over the
