@@ -335,8 +335,9 @@ your role on the Page or remove the app. The channel then shows **Needs
 reconnecting**; choose **Connect again**. **Disconnect** erases the token and
 keeps the history of what was published.
 
-Owners and editors of a workspace can connect and disconnect channels. Viewers
-can only see them.
+Only owners of a workspace can connect and disconnect channels, because a
+channel holds the access to an account on a platform. Editors and viewers can
+see them.
 
 ## Tests
 

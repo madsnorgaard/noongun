@@ -60,7 +60,7 @@ describe('start', function () {
         $this->actingAs($this->owner)->get('/channels/facebook/connect')->assertStatus(405);
     });
 
-    it('lets owners and editors connect and refuses viewers', function (Role $role, bool $allowed) {
+    it('lets owners connect and refuses editors and viewers', function (Role $role, bool $allowed) {
         $response = $this->actingAs(workspaceMember($this->workspace, $role))->post(route('channels.connect', 'facebook'));
 
         $allowed ? $response->assertRedirect() : $response->assertForbidden();
@@ -68,7 +68,7 @@ describe('start', function () {
         expect(session()->has(ConnectChannelController::PENDING))->toBe($allowed);
     })->with([
         'owner' => [Role::Owner, true],
-        'editor' => [Role::Editor, true],
+        'editor' => [Role::Editor, false],
         'viewer' => [Role::Viewer, false],
     ]);
 
