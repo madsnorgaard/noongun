@@ -90,6 +90,8 @@ final class ProposalPresenter
                 'idea' => $post->idea?->title,
             ], $plan->posts),
             'past' => $plan->past,
+            'soon' => $plan->soon,
+            'lead_minutes' => intdiv(DraftingLimits::leadSeconds(), 60),
             'taken' => $plan->taken,
             'unavailable' => $plan->unavailable,
             'left_out' => $plan->leftOut,

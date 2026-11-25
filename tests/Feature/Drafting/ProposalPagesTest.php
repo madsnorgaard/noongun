@@ -86,7 +86,9 @@ describe('the page that shows the plan', function () {
                 ->where('week.next', '2026-11-30')
                 // Monday and Wednesday 09:00 have passed.
                 ->has('plan.posts', 1)
-                ->where('plan.past', 2));
+                ->where('plan.past', 2)
+                ->where('plan.soon', 0)
+                ->where('plan.lead_minutes', 60));
     })->with([null, 'garbage', '2026-11-01']);
 
     it('gives the times of a workspace in Johannesburg on its own clock', function () {

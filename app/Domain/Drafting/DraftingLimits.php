@@ -115,6 +115,16 @@ final class DraftingLimits
         return self::int('expected_output_tokens', 1500, 1);
     }
 
+    /**
+     * How far ahead a slot time must be to get a draft. A draft has to be
+     * drafted, read and approved before its time, and one whose time has
+     * passed cannot be approved as it stands.
+     */
+    public static function leadSeconds(): int
+    {
+        return self::int('lead_minutes', 60, 0) * 60;
+    }
+
     /** How many weeks after the current one can be proposed. */
     public static function weeksAhead(): int
     {

@@ -87,7 +87,40 @@ describe('times', function () {
             ->toBe(['2026-10-24 07:00 UTC', '2026-10-25 08:00 UTC', '2026-10-25 22:30 UTC']);
     });
 
+    it('leaves out a time that is closer than the lead time, and counts it apart from the past ones', function () {
+        // Now is Wednesday 11:00 in Copenhagen. The default lead time is 60 minutes.
+        slotIn($this->copenhagen, $this->channel, 3, '10:30');
+        slotIn($this->copenhagen, $this->channel, 3, '11:01');
+        slotIn($this->copenhagen, $this->channel, 3, '12:00');
+        slotIn($this->copenhagen, $this->channel, 3, '12:01');
+
+        $plan = planFor($this->copenhagen, '2026-11-23');
+
+        expect(plannedTimes($plan))->toBe(['2026-11-25 11:01 UTC'])
+            ->and($plan->past)->toBe(1)
+            ->and($plan->soon)->toBe(2);
+
+        config(['noongun.drafting.limits.lead_minutes' => 180]);
+
+        $plan = planFor($this->copenhagen, '2026-11-23');
+
+        expect($plan->posts)->toBe([])->and($plan->soon)->toBe(3);
+    });
+
+    it('applies the lead time on the clock of the workspace, in Johannesburg as well', function () {
+        // Now is Wednesday 12:00 in Johannesburg.
+        $theirs = channelIn($this->johannesburg);
+        slotIn($this->johannesburg, $theirs, 3, '13:00');
+        slotIn($this->johannesburg, $theirs, 3, '13:01');
+
+        $plan = planFor($this->johannesburg, '2026-11-23');
+
+        expect(plannedTimes($plan))->toBe(['2026-11-25 11:01 UTC'])->and($plan->soon)->toBe(1);
+    });
+
     it('leaves out a time that has passed, to the minute', function () {
+        config(['noongun.drafting.limits.lead_minutes' => 0]);
+
         slotIn($this->copenhagen, $this->channel, 1, '09:00');
         slotIn($this->copenhagen, $this->channel, 3, '10:59');
         slotIn($this->copenhagen, $this->channel, 3, '11:00');

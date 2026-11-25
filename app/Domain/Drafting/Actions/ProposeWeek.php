@@ -73,10 +73,7 @@ final class ProposeWeek
             $plan = $this->planWeek->handle($workspace, $week);
 
             if ($plan->isEmpty()) {
-                throw ProposalRefused::because(
-                    ProposalRefused::NOTHING_TO_DRAFT,
-                    (string) __('There is nothing to draft in this week: every slot time has passed or already has a post.'),
-                );
+                throw ProposalRefused::nothingToDraft();
             }
 
             if (! hash_equals($plan->fingerprint(), $seen)) {

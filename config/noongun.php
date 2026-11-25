@@ -142,7 +142,9 @@ return [
     | long a draft run may stay unfinished before it is marked as failed.
     | "expected_output_tokens" is the size of a usual answer, thinking
     | included, for the expected cost shown before a proposal starts.
-    | "weeks_ahead" is how far ahead a week can be proposed.
+    | "lead_minutes" is how far ahead a slot time must be to get a draft, so
+    | that it can be read and approved in time. "weeks_ahead" is how far
+    | ahead a week can be proposed.
     */
 
     'drafting' => [
@@ -180,6 +182,7 @@ return [
             'backoff' => array_map(intval(...), explode(',', (string) env('NOONGUN_DRAFT_BACKOFF', '30,120'))),
             'stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 6),
             'expected_output_tokens' => (int) env('NOONGUN_DRAFT_EXPECTED_OUTPUT_TOKENS', 1500),
+            'lead_minutes' => (int) env('NOONGUN_DRAFT_LEAD_MINUTES', 60),
             'weeks_ahead' => 8,
         ],
     ],

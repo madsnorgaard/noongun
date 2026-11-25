@@ -46,10 +46,7 @@ class ProposalController extends Controller
         $refusals = $checks->missingSetup($workspace);
 
         if ($refusals === [] && $plan->isEmpty()) {
-            $refusals[] = ProposalRefused::because(
-                ProposalRefused::NOTHING_TO_DRAFT,
-                (string) __('There is nothing to draft in this week: every slot time has passed or already has a post.'),
-            );
+            $refusals[] = ProposalRefused::nothingToDraft();
         }
 
         $refusals = [...$refusals, ...$checks->overLimits($workspace, count($plan->posts))];

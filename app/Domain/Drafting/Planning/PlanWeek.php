@@ -24,7 +24,9 @@ use Illuminate\Database\Eloquent\Builder;
  *
  * 1. Times. Every slot of a channel that can publish gives one time in the
  *    week (Slot::occurrenceInWeekOf(), on the workspace calendar). A time
- *    that has passed is left out. So is a time at which that channel
+ *    that has passed is left out, and one that is closer than the lead
+ *    time (noongun.drafting.limits.lead_minutes), because its draft could
+ *    not be read and approved before it passes. So is a time at which that channel
  *    already has a post that is not rejected, and the time of a slot that
  *    an earlier proposal for the week already drafted a post for, also
  *    when that post was moved to another time since.
@@ -95,6 +97,7 @@ final class PlanWeek
         /** @var array<int, array{channels: array<int, Channel>, slots: list<int>}> $open */
         $open = [];
         $past = 0;
+        $soon = 0;
         $occupied = 0;
         $unavailable = 0;
 
@@ -117,6 +120,14 @@ final class PlanWeek
 
             if ($at <= $now->getTimestamp()) {
                 $past++;
+
+                continue;
+            }
+
+            // Too close to be drafted, read and approved before it passes,
+            // and a draft whose time has passed cannot be approved as it is.
+            if ($at <= $now->getTimestamp() + DraftingLimits::leadSeconds()) {
+                $soon++;
 
                 continue;
             }
@@ -164,7 +175,7 @@ final class PlanWeek
             $posts[$position] = $post->about($pillar, $idea);
         }
 
-        return new WeekPlan($week, $from, $until, $posts, $past, $occupied, $unavailable, $leftOut, $short);
+        return new WeekPlan($week, $from, $until, $posts, $past, $occupied, $unavailable, $leftOut, $short, $soon);
     }
 
     /**

@@ -251,6 +251,13 @@ function start(): void {
                             {{ plan.past === 1 ? 'time has' : 'times have' }}
                             passed.
                         </li>
+                        <li v-if="plan.soon > 0">
+                            {{ plan.soon }} slot
+                            {{ plan.soon === 1 ? 'time is' : 'times are' }}
+                            less than {{ plan.lead_minutes }} minutes away and
+                            {{ plan.soon === 1 ? 'is' : 'are' }} left out: a
+                            draft could not be read and approved before then.
+                        </li>
                         <li v-if="plan.unavailable > 0">
                             {{ plan.unavailable }}
                             {{

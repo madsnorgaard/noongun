@@ -57,6 +57,9 @@ export type WeekPlan = {
     fingerprint: string;
     posts: PlannedPost[];
     past: number;
+    /** Slot times closer than the lead time, which are left out too. */
+    soon: number;
+    lead_minutes: number;
     taken: number;
     unavailable: number;
     left_out: number;
