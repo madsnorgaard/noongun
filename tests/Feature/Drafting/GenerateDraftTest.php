@@ -6,6 +6,7 @@ use App\Domain\Content\Models\Post;
 use App\Domain\Content\PostState;
 use App\Domain\Drafting\Actions\CreateDraftFromResult;
 use App\Domain\Drafting\Actions\GenerateDraft;
+use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftRunStatus;
 use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
 use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
@@ -245,7 +246,11 @@ describe('GenerateDraft', function () {
     it('uses the key the workspace brought', function () {
         inWorkspace($this->workspace, fn () => LlmCredential::store(DRAFT_TEST_PROVIDER, 'own-workspace-llm-key'));
         $request = draftRequestIn($this->workspace, [$this->facebook]);
-        $run = draftRunIn($this->workspace, $this->editor);
+        // Opened the way the application does, with the key that resolves.
+        $run = inWorkspace($this->workspace, fn () => DraftRun::start(
+            $this->editor,
+            app(DraftGenerators::class)->contextFor($this->workspace),
+        ));
 
         inWorkspace($this->workspace, fn () => app(GenerateDraft::class)->handle($this->editor, $run, $request));
 

@@ -7,6 +7,7 @@ use App\Domain\Drafting\CostEstimator;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftRequest;
 use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
+use App\Domain\Drafting\Exceptions\DraftingContextChanged;
 use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\Exceptions\DraftingNotAllowed;
 use App\Domain\Drafting\Models\DraftRun;
@@ -26,7 +27,8 @@ use Throwable;
  * called at once or from a queued job, with the current workspace set.
  *
  * Nothing is asked of a provider, and so nothing is spent, unless the actor
- * may write posts in the workspace.
+ * may write posts in the workspace and the provider, model, prompt version
+ * and payer that resolve now are the ones the run was opened with.
  *
  * Returns null, and does nothing, when the run was already started: a job
  * that is delivered twice generates once.
@@ -61,6 +63,13 @@ final class GenerateDraft
             }
 
             $context = $this->generators->contextFor($workspace);
+
+            // The run says which model was asked for and whose key pays.
+            // If that is no longer what resolves, nothing is spent.
+            if (($changed = DraftingContextChanged::between($run, $context)) !== null) {
+                throw $changed;
+            }
+
             $result = $this->generators->for($context)->generate($request, $context);
 
             return $this->createDraft->handle($actor, $run, $result, $plannedAt);

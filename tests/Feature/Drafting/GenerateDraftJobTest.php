@@ -3,8 +3,11 @@
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Drafting\Console\RecoverStuckDraftRuns;
+use App\Domain\Drafting\CredentialScope;
+use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\GenerateDraftJob;
 use App\Domain\Drafting\Models\DraftRun;
+use App\Domain\Drafting\Models\LlmCredential;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
 use Illuminate\Queue\MaxAttemptsExceededException;
@@ -343,6 +346,58 @@ describe('failures', function () {
             ->and(freshRun($run)->failure_reason)->toContain('No API key is set');
         Queue::assertNothingPushed();
     });
+
+    it('spends nothing when who pays changed after the run was opened', function (Closure $change, string $what) {
+        $run = $change($this);
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        $this->generator->assertNothingGenerated();
+
+        $stored = freshRun($run);
+
+        expect($stored->status)->toBe('failed')
+            ->and($stored->failure_reason)->toContain('The drafting settings changed after this draft was asked for')
+            ->and($stored->failure_reason)->toContain($what)
+            ->and($stored->failure_reason)->toContain('nothing was spent')
+            ->and($stored->input_tokens)->toBeNull()
+            ->and(DB::table('draft_runs')->count())->toBe(1)
+            ->and(DB::table('posts')->count())->toBe(0);
+        Queue::assertNothingPushed();
+    })->with([
+        'the workspace key was removed, so the instance would pay' => [function ($test) {
+            inWorkspace($test->workspace, fn () => LlmCredential::store(DRAFT_TEST_PROVIDER, 'a-workspace-llm-key'));
+            $run = inWorkspace($test->workspace, fn () => DraftRun::start(
+                $test->owner,
+                app(DraftGenerators::class)->contextFor($test->workspace),
+                ['channel_ids' => [$test->channel->id]],
+                $test->brief,
+            ));
+
+            expect($run->credential_scope)->toBe(CredentialScope::Workspace);
+            DB::table('llm_credentials')->where('workspace_id', $test->workspace->id)->delete();
+
+            return $run;
+        }, 'the API key that pays for it'],
+        'a workspace key was added, so the workspace would pay' => [function ($test) {
+            $run = proposedRun();
+            inWorkspace($test->workspace, fn () => LlmCredential::store(DRAFT_TEST_PROVIDER, 'a-workspace-llm-key'));
+
+            return $run;
+        }, 'the API key that pays for it'],
+        'the model was changed' => [function () {
+            $run = proposedRun();
+            config(['noongun.drafting.providers.'.DRAFT_TEST_PROVIDER.'.model' => 'a-dearer-model']);
+
+            return $run;
+        }, 'the model'],
+        'the prompt version was changed' => [function () {
+            $run = proposedRun();
+            config(['noongun.drafting.prompt_version' => 'v2']);
+
+            return $run;
+        }, 'the prompt version'],
+    ]);
 
     it('fails the run without calling a provider when the person who asked may no longer write', function () {
         $run = proposedRun();
