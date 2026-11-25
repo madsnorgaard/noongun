@@ -219,8 +219,10 @@ configure another one. There are two places for a key:
 A workspace key is stored encrypted with `APP_KEY` and is write-only: after it
 is saved, the page shows the provider, the last four characters, when it was
 stored and whose key drafting uses, and never the key. Editors and viewers see
-whether drafting is available and nothing about keys. Each draft run records
-whether the instance key or the workspace key paid for it.
+whether drafting is available and nothing about keys. Storing, replacing
+and removing the key needs a recently confirmed password, like the security
+settings, so a session that someone else got hold of cannot swap the key. Each
+draft run records whether the instance key or the workspace key paid for it.
 
 To create a key, sign in to the Claude Console at `platform.claude.com`, add
 credit to the account and create an API key. Set a spending limit for the

@@ -54,7 +54,18 @@ function storedKey(Workspace $workspace, string $provider = 'anthropic'): ?LlmCr
 
 function storeKeyAs(User $user, mixed $key = PAGE_TEST_KEY): TestResponse
 {
-    return test()->actingAs($user)->from(route('llm-key.edit'))->put(route('llm-key.update'), ['api_key' => $key]);
+    return test()->actingAs($user)
+        ->withSession(['auth.password_confirmed_at' => time()])
+        ->from(route('llm-key.edit'))
+        ->put(route('llm-key.update'), ['api_key' => $key]);
+}
+
+function removeKeyAs(User $user): TestResponse
+{
+    return test()->actingAs($user)
+        ->withSession(['auth.password_confirmed_at' => time()])
+        ->from(route('llm-key.edit'))
+        ->delete(route('llm-key.destroy'));
 }
 
 /**
@@ -224,7 +235,7 @@ describe('storing a key', function () {
         storeKeyAs($this->owner);
         storeKeyAs($this->owner, PAGE_OTHER_KEY.' with a space');
         storeKeyAs(workspaceMember($this->workspace, Role::Editor), PAGE_OTHER_KEY);
-        $this->actingAs($this->owner)->delete(route('llm-key.destroy'));
+        removeKeyAs($this->owner);
 
         expect($handler->getRecords())->not->toBeEmpty();
 
@@ -295,11 +306,64 @@ describe('storing a key', function () {
     });
 });
 
+describe('changing the key needs a confirmed password', function () {
+    it('sends a store without a recent confirmation to the password page, and stores nothing', function () {
+        $response = $this->actingAs($this->owner)->from(route('llm-key.edit'))
+            ->put(route('llm-key.update'), ['api_key' => PAGE_TEST_KEY]);
+
+        $response->assertRedirect(route('password.confirm'));
+
+        expect(DB::table('llm_credentials')->count())->toBe(0)
+            ->and(session('url.intended'))->toBe(route('llm-key.edit'))
+            ->and(everythingSentBack($response))->not->toContain('PageTestKey');
+    });
+
+    it('does not let a session without a recent confirmation replace or remove the key', function (array $session) {
+        storeKeyAs($this->owner);
+
+        $this->flushSession();
+
+        $this->actingAs($this->owner)->withSession($session)->from(route('llm-key.edit'))
+            ->put(route('llm-key.update'), ['api_key' => PAGE_OTHER_KEY])
+            ->assertRedirect(route('password.confirm'));
+
+        $this->actingAs($this->owner)->withSession($session)->from(route('llm-key.edit'))
+            ->delete(route('llm-key.destroy'))
+            ->assertRedirect(route('password.confirm'));
+
+        expect(storedKey($this->workspace)?->api_key)->toBe(PAGE_TEST_KEY);
+    })->with([
+        'never confirmed' => [[]],
+        'confirmed too long ago' => [['auth.password_confirmed_at' => 1]],
+    ]);
+
+    it('answers a request that expects JSON with 423 and changes nothing', function () {
+        $this->actingAs($this->owner)->putJson(route('llm-key.update'), ['api_key' => PAGE_TEST_KEY])->assertStatus(423);
+
+        expect(DB::table('llm_credentials')->count())->toBe(0);
+    });
+
+    it('lets the owner through after the password was confirmed', function () {
+        $this->actingAs($this->owner)->post(route('password.confirm.store'), ['password' => 'password'])
+            ->assertSessionHasNoErrors();
+
+        $this->actingAs($this->owner)->from(route('llm-key.edit'))
+            ->put(route('llm-key.update'), ['api_key' => PAGE_TEST_KEY])
+            ->assertRedirect(route('llm-key.edit'));
+
+        expect(storedKey($this->workspace)?->api_key)->toBe(PAGE_TEST_KEY);
+    });
+
+    it('still shows the page without a confirmation, to every member', function (Role $role) {
+        $this->actingAs(workspaceMember($this->workspace, $role))->get(route('llm-key.edit'))->assertOk();
+    })->with([Role::Owner, Role::Editor, Role::Viewer]);
+});
+
 describe('removing a key', function () {
     it('removes the key of the workspace', function () {
         storeKeyAs($this->owner);
 
-        $this->actingAs($this->owner)->delete(route('llm-key.destroy'))->assertRedirect(route('llm-key.edit'));
+        removeKeyAs($this->owner)->assertRedirect(route('llm-key.edit'));
 
         expect(DB::table('llm_credentials')->count())->toBe(0);
 
@@ -311,7 +375,7 @@ describe('removing a key', function () {
         InstanceLlmCredential::store('anthropic', PAGE_OTHER_KEY);
         storeKeyAs($this->owner);
 
-        $this->actingAs($this->owner)->delete(route('llm-key.destroy'))->assertRedirect();
+        removeKeyAs($this->owner)->assertRedirect();
 
         expect(DB::table('llm_credentials')->sole()->scope)->toBe('instance');
 
@@ -320,13 +384,13 @@ describe('removing a key', function () {
     });
 
     it('does nothing when there is no key', function () {
-        $this->actingAs($this->owner)->delete(route('llm-key.destroy'))->assertRedirect(route('llm-key.edit'));
+        removeKeyAs($this->owner)->assertRedirect(route('llm-key.edit'));
     });
 
     it('is for owners only', function (Role $role) {
         storeKeyAs($this->owner);
 
-        $this->actingAs(workspaceMember($this->workspace, $role))->delete(route('llm-key.destroy'))->assertForbidden();
+        removeKeyAs(workspaceMember($this->workspace, $role))->assertForbidden();
 
         expect(storedKey($this->workspace))->not->toBeNull();
     })->with([Role::Editor, Role::Viewer]);
@@ -362,14 +426,15 @@ describe('another workspace', function () {
     it('keeps its key when a key is removed', function () {
         storeKeyAs($this->owner);
 
-        $this->actingAs($this->owner)->delete(route('llm-key.destroy'));
+        removeKeyAs($this->owner);
 
         expect(storedKey($this->other)?->api_key)->toBe(PAGE_OTHER_KEY)
             ->and(storedKey($this->workspace))->toBeNull();
     });
 
     it('cannot be reached by naming it in the session', function () {
-        $this->actingAs($this->owner)->withSession(['workspace_id' => $this->other->id])
+        $this->actingAs($this->owner)
+            ->withSession(['workspace_id' => $this->other->id, 'auth.password_confirmed_at' => time()])
             ->delete(route('llm-key.destroy'));
 
         expect(storedKey($this->other)?->api_key)->toBe(PAGE_OTHER_KEY);
@@ -424,7 +489,7 @@ describe('a stored key that can no longer be read', function () {
     });
 
     it('can be removed', function () {
-        $this->actingAs($this->owner)->delete(route('llm-key.destroy'))->assertRedirect(route('llm-key.edit'));
+        removeKeyAs($this->owner)->assertRedirect(route('llm-key.edit'));
 
         expect(DB::table('llm_credentials')->count())->toBe(0);
     });

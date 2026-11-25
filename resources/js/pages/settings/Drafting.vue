@@ -189,6 +189,12 @@ function remove(): void {
                 <InputError class="mt-2" :message="errors.api_key" />
             </div>
 
+            <p class="text-sm text-muted-foreground">
+                Changing or removing the key needs your password. If you have
+                not given it for a while, you are asked for it first and then
+                brought back here to enter the key again.
+            </p>
+
             <div class="flex flex-wrap items-center gap-3">
                 <Button :disabled="processing" data-test="store-llm-key">
                     {{ credential ? 'Replace key' : 'Store key' }}
