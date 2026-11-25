@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "49e4ec63-2951-41ee-9f76-e545962b281f",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:39.947Z",
+  "payload": {
+    "name": "ChannelPages",
+    "type": "ui",
+    "description": "Channels page, OAuth connect and callback, selection step, ChannelPolicy",
+    "responsibility": "Let a person connect, confirm and disconnect channels",
+    "path": "resources/js/pages/channels/Index.vue",
+    "status": "active"
+  },
+  "seq": 1
+}

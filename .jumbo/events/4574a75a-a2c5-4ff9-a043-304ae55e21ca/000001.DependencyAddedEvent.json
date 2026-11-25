@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "4574a75a-a2c5-4ff9-a043-304ae55e21ca",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:26.715Z",
+  "payload": {
+    "name": "Larastan",
+    "ecosystem": "composer",
+    "packageName": "larastan/larastan",
+    "versionConstraint": "^3.9",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

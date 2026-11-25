@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "f911278f-820f-497d-9bf5-46a6a6897e01",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:40.328Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "invariant",
+    "toEntityId": "e94a084b-89c4-4410-a552-864488b8dac3",
+    "relationType": "must-respect",
+    "strength": null,
+    "description": "M3 must respect: Every tenant row carries workspace_id"
+  },
+  "seq": 1
+}

@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "e459eb33-c174-4c71-94e6-7d27a2e4f742",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:31.754Z",
+  "payload": {
+    "name": "TrustedProxyConfig",
+    "type": "lib",
+    "description": "Reads NOONGUN_TRUSTED_PROXIES into trustedproxy.proxies, which the framework TrustProxies middleware uses. Default trusts none",
+    "responsibility": "Decide which reverse proxies may set forwarded scheme and host",
+    "path": "config/trustedproxy.php",
+    "status": "active"
+  },
+  "seq": 1
+}

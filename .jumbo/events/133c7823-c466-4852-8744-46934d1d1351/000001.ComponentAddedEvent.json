@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "133c7823-c466-4852-8744-46934d1d1351",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:38.270Z",
+  "payload": {
+    "name": "FacebookAdapter",
+    "type": "service",
+    "description": "Facebook Pages adapter and GraphClient. Tokens and appsecret_proof per call, safeToRepeat classification, error mapping. Fixtures are hand-written until the M1 spike is run",
+    "responsibility": "Publish to and connect Facebook Pages behind ChannelAdapter",
+    "path": "app/Domain/Channels/Adapters/Facebook/FacebookAdapter.php",
+    "status": "active"
+  },
+  "seq": 1
+}

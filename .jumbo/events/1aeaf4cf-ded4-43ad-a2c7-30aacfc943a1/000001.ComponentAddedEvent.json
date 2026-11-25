@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "1aeaf4cf-ded4-43ad-a2c7-30aacfc943a1",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:38.603Z",
+  "payload": {
+    "name": "Post",
+    "type": "db",
+    "description": "Post and PostVariant with PostState. Transitions are conditional updates: approve, reject, returnToDraft, schedule, unschedule, claimForPublishing, beginPublishingStep, finishPublishing, retry. State and approval columns cannot be saved directly",
+    "responsibility": "Unit of approval and scheduling; variants record per-channel outcome",
+    "path": "app/Domain/Content/Models/Post.php",
+    "status": "active"
+  },
+  "seq": 1
+}

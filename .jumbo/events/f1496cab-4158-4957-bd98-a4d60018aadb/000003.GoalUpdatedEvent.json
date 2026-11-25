@@ -1,0 +1,19 @@
+{
+  "type": "GoalUpdatedEvent",
+  "aggregateId": "f1496cab-4158-4957-bd98-a4d60018aadb",
+  "version": 3,
+  "timestamp": "2026-11-24T19:56:23.348Z",
+  "payload": {
+    "successCriteria": [
+      "linkedin.md confirms which self-serve product grants w_member_social, token lifetime and refresh token behaviour",
+      "linkedin.md findings confirmed in a LinkedIn spike (self-serve /rest/posts, sub as person id, permalink form)",
+      "LinkedIn adapter implementing ChannelAdapter for personal profile posting via Share on LinkedIn and OpenID Connect",
+      "Link posts supply title, description and thumbnail since LinkedIn builds no preview",
+      "One idea produces one variant per channel within capabilities",
+      "Editor shows and edits variants side by side",
+      "OpenAI selectable per workspace as a second provider through PrismDraftGenerator",
+      "Recorded LinkedIn fixtures and isolation tests for new models"
+    ]
+  },
+  "seq": 3
+}

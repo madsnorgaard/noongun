@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "e92a188d-c224-45af-bd1b-cddbca891aa0",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:43.079Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "decision",
+    "toEntityId": "6f85a522-9d2c-46cc-8794-333ba0cffabb",
+    "relationType": "follows",
+    "strength": null,
+    "description": "M3 follows: Pinned versions for M2 (ADR 0006)"
+  },
+  "seq": 1
+}

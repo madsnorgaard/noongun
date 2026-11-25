@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "c0699ef3-84ad-41b0-99d1-ab13109c5068",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:32.823Z",
+  "payload": {
+    "name": "SetupAndDevScripts",
+    "type": "lib",
+    "description": "./setup builds and starts the development stack; ./dev wraps test, lint, stan, check, migrations, artisan, composer and npm",
+    "responsibility": "One-command setup and day-to-day commands",
+    "path": "dev",
+    "status": "active"
+  },
+  "seq": 1
+}

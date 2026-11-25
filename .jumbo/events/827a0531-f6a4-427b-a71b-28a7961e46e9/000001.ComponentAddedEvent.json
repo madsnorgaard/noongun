@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "827a0531-f6a4-427b-a71b-28a7961e46e9",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:37.290Z",
+  "payload": {
+    "name": "ChannelAdapter",
+    "type": "lib",
+    "description": "Contract for a platform: authorizationUrl, connect, publish, delete, refreshToken, capabilities. Value objects ChannelCapabilities and PublishResult; ChannelException carries retryable, retryAfterSeconds, requiresReconnect and redacts secrets",
+    "responsibility": "The only way application code reaches a social platform",
+    "path": "app/Domain/Channels/Contracts/ChannelAdapter.php",
+    "status": "active"
+  },
+  "seq": 1
+}

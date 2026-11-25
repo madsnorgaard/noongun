@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "cff4d3cd-a165-4db8-8f58-a7b3ebe54618",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:39.240Z",
+  "payload": {
+    "name": "PublishPostJob",
+    "type": "worker",
+    "description": "One job per post and round; per-variant lock, external_id check, publish step runs once, retry only on retryable failures, SettleInterruptedPost for recovery. Commands noongun:dispatch-due-posts and noongun:recover-stuck-posts",
+    "responsibility": "Publish approved, due posts exactly once",
+    "path": "app/Domain/Scheduling/PublishPostJob.php",
+    "status": "active"
+  },
+  "seq": 1
+}

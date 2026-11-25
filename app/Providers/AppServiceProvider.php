@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Domain\Channels\ChannelManager;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Support\Health\CheckBackingServices;
 use Carbon\CarbonImmutable;
@@ -20,6 +21,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->scoped(CurrentWorkspace::class);
+        $this->app->singleton(ChannelManager::class);
     }
 
     /**

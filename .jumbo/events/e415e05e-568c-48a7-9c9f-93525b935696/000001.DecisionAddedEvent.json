@@ -1,0 +1,16 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "e415e05e-568c-48a7-9c9f-93525b935696",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:36.951Z",
+  "payload": {
+    "title": "A platform failure is retryable only when nothing was created",
+    "context": "PublishPostJob re-sends automatically on retryable failures. Timeouts and server errors on a publish call are ambiguous: the platform may have created the post.",
+    "rationale": "Adapters mark a publish failure retryable only for a definite rejection (rate limit) or a connection that was never made. Everything ambiguous is permanent with outcome_unknown in the context. GraphClient calls default to not safe to repeat.",
+    "alternatives": [
+      "Retry timeouts and 5xx"
+    ],
+    "consequences": "Some posts that could have been retried safely end as failed and need a human. A duplicate public post is treated as worse than a missed one."
+  },
+  "seq": 1
+}

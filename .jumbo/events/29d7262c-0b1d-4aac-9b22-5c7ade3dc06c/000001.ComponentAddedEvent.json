@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "29d7262c-0b1d-4aac-9b22-5c7ade3dc06c",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:30.818Z",
+  "payload": {
+    "name": "CurrentWorkspace",
+    "type": "lib",
+    "description": "Holds the workspace for the current request or job. ResolveCurrentWorkspace sets it for web requests; jobs must wrap work in CurrentWorkspace::run()",
+    "responsibility": "Provide the workspace context that scoped queries depend on",
+    "path": "app/Domain/Workspaces/CurrentWorkspace.php",
+    "status": "active"
+  },
+  "seq": 1
+}

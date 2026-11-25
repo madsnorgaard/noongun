@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "a8a8b420-3ed1-4af7-b5f1-0a936180533c",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:27.747Z",
+  "payload": {
+    "name": "Vue",
+    "ecosystem": "npm",
+    "packageName": "vue",
+    "versionConstraint": "^3.5.13",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

@@ -84,6 +84,89 @@ docker compose -f docker-compose.yml up -d --build
 
 The health endpoint `/up` returns 200 only when PostgreSQL and Redis respond.
 
+## Publishing
+
+Nothing is published without a human approval. A post goes
+`draft -> approved -> scheduled -> publishing -> published` (or `failed`), and
+only a signed-in owner or editor can approve it. See
+`docs/adr/0009-post-state-machine.md`.
+
+The `scheduler` container runs two commands:
+
+| Command | Runs | What it does |
+|---|---|---|
+| `noongun:dispatch-due-posts` | every minute | Finds scheduled posts whose time has come, claims each one and queues a `PublishPostJob` for it. A post is claimed once, however often the command runs. |
+| `noongun:recover-stuck-posts` | every five minutes | Finds posts that have been in the publishing state with no sign of life from their job, and settles them: published if every variant is out, otherwise failed. It never sends anything. |
+
+Both can be run by hand, for example `./dev artisan noongun:dispatch-due-posts`.
+
+`PublishPostJob` runs in the `horizon` container. It sends each variant of
+the post once, under a lock for that variant, and never sends a variant that
+already has an id from its platform. It tries again by itself only when the
+platform certainly made no post: it refused the call because of a rate limit,
+or the connection to it was never made. It then waits as set in
+`NOONGUN_PUBLISH_BACKOFF`. Every other error fails the post at once,
+including a timeout or a server error after the request was sent, because
+the post may be public by then. A failed post is only sent again when a
+person chooses to retry it, and then only the variants that are still missing
+are sent.
+
+Four things to know when operating it:
+
+- **Never retry a `PublishPostJob` by hand** with `queue:retry` or the retry
+  button in Horizon. A job that failed may have reached the platform, and the
+  way to send a post again is the retry button on the post, which a person
+  presses after looking at the channel. If someone does retry the job, nothing
+  happens: every run of the job takes a numbered step on the post row in the
+  database, each step is given out once, and a job whose step is taken does
+  nothing. Failed publishing jobs can be removed with `queue:flush` or
+  `queue:forget`.
+- The cache store holds the publishing locks, so it must be shared by all
+  workers. Keep `CACHE_STORE=redis` (or `database`). With `array`, `file` or
+  `null` the scheduler commands and the job refuse to run and say why, and
+  nothing is published until the store is changed.
+- `REDIS_QUEUE_RETRY_AFTER` (and `DB_QUEUE_RETRY_AFTER` for the database
+  queue) must be greater than the longest time limit of a publishing job,
+  which is `NOONGUN_PUBLISH_TIMEOUT` x `NOONGUN_PUBLISH_CALLS_PER_JOB` + 15
+  seconds. The defaults are 180 against 105. If it is lower, the queue hands
+  a job that is still running to a second worker; that copy does nothing, but
+  it is listed as a failed job.
+- If a worker dies in the middle of a platform call, or the platform does
+  not answer, the post may be public without the app knowing. The variant is
+  marked for that before the call is made, and the post ends as failed with
+  a text that says to check the channel. Look at the channel before you retry
+  the post, or it can appear twice. Such a post cannot be deleted, and the
+  channel in doubt cannot be removed from it.
+
+### Queue, calendar and editor
+
+- **Queue** (`/queue`) is the working list: drafts that wait for approval,
+  then approved and scheduled posts in time order, then posts that failed.
+  A draft can be approved or rejected right there, one at a time or as a
+  selection that you tick yourself. Nothing is ever ticked for you. Published
+  and rejected posts are under History.
+- **Calendar** (`/calendar`) shows a week or a month in the timezone of the
+  workspace. A draft or an approved post with a planned time is drawn with a
+  dashed outline: it is a plan and does not go out until it is scheduled.
+- **Editor** (`/posts/{id}`) is where a post is written: one text per channel,
+  an optional link and an optional planned time. It shows the characters that
+  are left for each channel and what stands in the way of approval.
+
+Times are entered and shown on the clock of the workspace and stored in UTC.
+
+A post can only be edited while it is a draft. To change an approved or
+scheduled post, return it to draft. That removes the approval, and the post
+must be approved again. Approving is refused when the post was changed after
+the page was opened, so that nobody approves a text they have not read.
+
+Only drafts and rejected posts can be deleted, and only when none of their
+texts is on a platform. Everything that is approved or later is kept, because
+it is, or is about to become, the record of something public. Deleting a post
+in Noon Gun never deletes anything from a platform. See
+`docs/adr/0010-post-editing-and-deletion.md`.
+
+Owners and editors write, approve, schedule and delete. Viewers can look.
+
 ## Running on a home server
 
 `./setup` gives a development stack: it mounts the source code and runs in debug
@@ -176,13 +259,77 @@ Do not change `APP_KEY` on an instance that has data.
 | `APP_URL` | `http://localhost:8080` | Public address of the app. |
 | `DB_*` | `pgsql`, host `postgres` | Database connection. The compose file uses the same values to create the database. |
 | `REDIS_HOST` | `redis` | Redis host. |
+| `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` | empty | Credentials of the Meta app this instance connects Pages with. |
+| `FACEBOOK_GRAPH_VERSION` | `v27.0` | Graph API version used for every Facebook call. |
+| `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
+| `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
+| `NOONGUN_PUBLISH_MAX_ATTEMPTS` | `5` | How many times one variant is sent before the post is marked as failed. Only retryable errors are tried again. |
+| `NOONGUN_PUBLISH_BACKOFF` | `60,300,900,3600` | Seconds to wait before each retry, comma separated. The last value repeats. The largest value is also the longest wait a platform may ask for; a longer one fails the post. |
+| `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
+| `NOONGUN_PUBLISH_CALLS_PER_JOB` | `3` | How many variants one run of the publishing job sends before it hands the rest to a successor. Bounds the time limit of a job; see "Publishing" for what the queue needs. |
+| `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Shortest lifetime of the lock on one variant. The lock always lives at least 30 seconds longer than the longest job. |
+| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `180` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of a publishing job. |
+| `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
+| `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
 
 Times are stored in UTC. Each workspace has its own timezone for display and
 scheduling. The application timezone is fixed to UTC in `config/app.php` and
 is not an environment setting.
 
-Other settings (timezone list, locales, plan limits, feature flags) live in
-`config/noongun.php`.
+Other settings (timezone list, locales, plan limits, feature flags, the list
+of platforms and their adapters) live in `config/noongun.php`.
+
+## Connecting a Facebook Page
+
+Each instance connects through a Meta app that its owner creates. The app
+needs no review as long as only people with a role on it use it.
+`docs/platform-notes/meta.md` has the full checklist for creating the app; the
+short version:
+
+1. Create the app at developers.facebook.com with the use case **Manage
+   everything on your Page** and add the permissions listed in
+   `FACEBOOK_SCOPES`.
+2. In the app, under **Facebook Login for Business > Settings** (or **Facebook
+   Login > Settings**), add this address to **Valid OAuth Redirect URIs**:
+
+   ```
+   <APP_URL>/auth/facebook/callback
+   ```
+
+   Meta compares the address character by character, so it must match
+   `APP_URL` exactly, including `https` and any port. The Channels page shows
+   the address this instance uses. If `APP_URL` changes, change it in the app
+   as well. Meta requires HTTPS; plain `http://localhost` is accepted only
+   while the app is in Development mode.
+3. Put the App ID and App secret in `.env` as `FACEBOOK_APP_ID` and
+   `FACEBOOK_APP_SECRET`, then restart with `docker compose up -d`.
+4. Open **Channels** in Noon Gun and choose **Connect Facebook**. Sign in,
+   pick the Pages and allow every permission that is asked for.
+
+What happens when Facebook sends you back:
+
+- A single Page that is new to the workspace is connected at once.
+- A Page that is already connected gets a fresh token and keeps publishing
+  without a pause. Nothing is asked.
+- Every other Page is shown for you to tick: several new Pages, or a Page you
+  disconnected earlier, which Facebook can return again because it still
+  remembers the grant. Nothing is ticked for you. Until you choose, such a
+  Page is listed as **Not confirmed** and nothing is published to it.
+- If you choose **Connect none of them**, leave the page or wait longer than
+  15 minutes, the Pages you did not confirm are removed again and their access
+  is erased. A Page you had disconnected stays disconnected. The scheduled
+  command `noongun:discard-pending-channels` does this every five minutes, so
+  it also happens when nobody opens Noon Gun.
+
+Noon Gun stores one access token for each connected Page, encrypted with
+`APP_KEY`. It does not store your own Facebook token. A Page token has no
+expiry date, but Facebook withdraws it when you change your password, lose
+your role on the Page or remove the app. The channel then shows **Needs
+reconnecting**; choose **Connect again**. **Disconnect** erases the token and
+keeps the history of what was published.
+
+Owners and editors of a workspace can connect and disconnect channels. Viewers
+can only see them.
 
 ## Tests
 

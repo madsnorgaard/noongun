@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "538c03ca-3d75-4dc9-ba11-4acd4f217e9b",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:46.799Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "dependency",
+    "toEntityId": "2c98123b-7a9a-4e32-a7ce-825708d8c454",
+    "relationType": "uses",
+    "strength": null,
+    "description": "M3 uses Pest"
+  },
+  "seq": 1
+}

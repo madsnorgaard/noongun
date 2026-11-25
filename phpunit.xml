@@ -26,6 +26,8 @@
         <env name="DB_CONNECTION" value="pgsql" force="true"/>
         <env name="DB_DATABASE" value="noongun_testing" force="true"/>
         <env name="DB_URL" value="" force="true"/>
+        <env name="FACEBOOK_APP_ID" value="" force="true"/>
+        <env name="FACEBOOK_APP_SECRET" value="" force="true"/>
         <env name="MAIL_MAILER" value="array" force="true"/>
         <env name="NOONGUN_MODE" value="self_hosted" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync" force="true"/>

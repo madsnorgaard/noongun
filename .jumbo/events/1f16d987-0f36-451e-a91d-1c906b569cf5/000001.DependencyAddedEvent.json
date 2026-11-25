@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "1f16d987-0f36-451e-a91d-1c906b569cf5",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:28.091Z",
+  "payload": {
+    "name": "Tailwind CSS",
+    "ecosystem": "npm",
+    "packageName": "tailwindcss",
+    "versionConstraint": "^4.1.1",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

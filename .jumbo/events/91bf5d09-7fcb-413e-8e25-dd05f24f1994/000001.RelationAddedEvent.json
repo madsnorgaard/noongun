@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "91bf5d09-7fcb-413e-8e25-dd05f24f1994",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:45.894Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "component",
+    "toEntityId": "52b38ec3-e269-4b1c-90d6-e657c48ff9bc",
+    "relationType": "involves",
+    "strength": null,
+    "description": "M3 builds on Workspaces"
+  },
+  "seq": 1
+}

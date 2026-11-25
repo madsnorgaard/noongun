@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "da185a01-b8a8-4997-9592-7c6e7086ae64",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:37.950Z",
+  "payload": {
+    "name": "Channel",
+    "type": "db",
+    "description": "Connected Page or profile with encrypted, hidden tokens; statuses active, needs_reconnect, disconnected, pending; recordConnection, confirm, disconnect, discardPending",
+    "responsibility": "Hold platform credentials and say whether a channel can publish",
+    "path": "app/Domain/Channels/Models/Channel.php",
+    "status": "active"
+  },
+  "seq": 1
+}

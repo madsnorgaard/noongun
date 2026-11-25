@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "2c98123b-7a9a-4e32-a7ce-825708d8c454",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:26.410Z",
+  "payload": {
+    "name": "Pest",
+    "ecosystem": "composer",
+    "packageName": "pestphp/pest",
+    "versionConstraint": "^5.3",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "1ec7609c-e783-4107-8ba4-8a0e27b8ff2b",
+  "version": 1,
+  "timestamp": "2026-11-24T21:42:38.920Z",
+  "payload": {
+    "name": "PostActions",
+    "type": "service",
+    "description": "ApprovePost, RejectPost, SchedulePost, UnschedulePost, ReturnPostToDraft, RetryPost, SaveDraft, DeletePost, with PostPreconditions. ApprovePost is the only caller of Post::approve()",
+    "responsibility": "Human-initiated changes to posts, with authorization and readiness checks",
+    "path": "app/Domain/Content/Actions",
+    "status": "active"
+  },
+  "seq": 1
+}

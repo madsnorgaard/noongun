@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "69d0a9f4-19e2-44b4-9717-7c5f054c7a64",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:29.101Z",
+  "payload": {
+    "name": "PostgreSQL",
+    "ecosystem": "docker",
+    "packageName": "postgres",
+    "versionConstraint": "19-alpine",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

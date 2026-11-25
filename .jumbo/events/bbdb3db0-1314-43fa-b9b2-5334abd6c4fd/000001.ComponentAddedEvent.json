@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "bbdb3db0-1314-43fa-b9b2-5334abd6c4fd",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:31.137Z",
+  "payload": {
+    "name": "FirstRunSetup",
+    "type": "service",
+    "description": "Self-hosted first run: RedirectToFirstRunSetup middleware, FirstRunSetupController and CompleteFirstRunSetup action create the owner and the single workspace, then registration stays closed",
+    "responsibility": "Create the owner account and workspace exactly once",
+    "path": "app/Domain/Workspaces/Actions/CompleteFirstRunSetup.php",
+    "status": "active"
+  },
+  "seq": 1
+}

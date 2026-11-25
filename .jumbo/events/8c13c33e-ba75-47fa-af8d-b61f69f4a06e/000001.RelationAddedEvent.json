@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "8c13c33e-ba75-47fa-af8d-b61f69f4a06e",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:42.180Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "invariant",
+    "toEntityId": "25d30c33-1e80-4075-852c-f6c64a30e7d3",
+    "relationType": "must-respect",
+    "strength": null,
+    "description": "M3 must respect: Publishing is idempotent"
+  },
+  "seq": 1
+}

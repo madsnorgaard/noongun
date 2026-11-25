@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "b00ac595-5bfc-4ed0-9764-0ec1e16d69b7",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:40.009Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "invariant",
+    "toEntityId": "be31df64-0809-4bd7-ad60-69ceae537cc0",
+    "relationType": "must-respect",
+    "strength": null,
+    "description": "M3 must respect: Nothing publishes without human approval"
+  },
+  "seq": 1
+}

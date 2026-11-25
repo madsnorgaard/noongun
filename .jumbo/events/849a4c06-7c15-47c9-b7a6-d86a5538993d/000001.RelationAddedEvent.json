@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "849a4c06-7c15-47c9-b7a6-d86a5538993d",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:41.277Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "invariant",
+    "toEntityId": "c827fa5a-dbde-4dab-8b0e-e6bbe2134663",
+    "relationType": "must-respect",
+    "strength": null,
+    "description": "M3 must respect: No model names, API versions or prices in logic"
+  },
+  "seq": 1
+}

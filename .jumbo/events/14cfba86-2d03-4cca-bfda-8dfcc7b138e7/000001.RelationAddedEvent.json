@@ -1,0 +1,16 @@
+{
+  "type": "RelationAddedEvent",
+  "aggregateId": "14cfba86-2d03-4cca-bfda-8dfcc7b138e7",
+  "version": 1,
+  "timestamp": "2026-11-24T20:07:41.582Z",
+  "payload": {
+    "fromEntityType": "goal",
+    "fromEntityId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+    "toEntityType": "invariant",
+    "toEntityId": "5e004169-390b-43e4-9ad8-0617ffcd4d4e",
+    "relationType": "must-respect",
+    "strength": null,
+    "description": "M3 must respect: Tests never call real external APIs"
+  },
+  "seq": 1
+}

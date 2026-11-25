@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "6481b5b7-3557-46cf-b705-fda7ecf8a0d2",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:32.076Z",
+  "payload": {
+    "name": "HealthCheck",
+    "type": "api",
+    "description": "/up endpoint backed by CheckBackingServices; returns 200 only when PostgreSQL and Redis respond",
+    "responsibility": "Report whether the app and its backing services are usable",
+    "path": "app/Support/Health/CheckBackingServices.php",
+    "status": "active"
+  },
+  "seq": 1
+}

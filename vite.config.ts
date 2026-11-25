@@ -3,7 +3,7 @@ import { wayfinder } from '@laravel/vite-plugin-wayfinder';
 import tailwindcss from '@tailwindcss/vite';
 import vue from '@vitejs/plugin-vue';
 import laravel from 'laravel-vite-plugin';
-import { bunny } from 'laravel-vite-plugin/fonts';
+import { fontsource } from 'laravel-vite-plugin/fonts';
 import { defineConfig, lazyPlugins } from 'vite-plus';
 
 export default defineConfig({
@@ -11,9 +11,19 @@ export default defineConfig({
         laravel({
             input: ['resources/css/app.css', 'resources/js/app.ts'],
             refresh: true,
+            // Both families are read from the @fontsource packages at build
+            // time and served from this instance. Nothing is fetched from a
+            // font service, at build time or in the browser.
             fonts: [
-                bunny('Instrument Sans', {
-                    weights: [400, 500, 600],
+                fontsource('Instrument Sans', {
+                    weights: [400, 600, 700],
+                    preload: [{ weight: 400 }, { weight: 600 }],
+                    optimizedFallbacks: false,
+                }),
+                fontsource('JetBrains Mono', {
+                    weights: [400, 500],
+                    preload: false,
+                    optimizedFallbacks: false,
                 }),
             ],
         }),
@@ -33,7 +43,10 @@ export default defineConfig({
     ]),
     server: {
         hmr: process.env.VITE_HMR_PORT
-            ? { host: 'localhost', clientPort: Number(process.env.VITE_HMR_PORT) }
+            ? {
+                  host: 'localhost',
+                  clientPort: Number(process.env.VITE_HMR_PORT),
+              }
             : undefined,
         origin: process.env.VITE_HMR_PORT
             ? `http://localhost:${process.env.VITE_HMR_PORT}`

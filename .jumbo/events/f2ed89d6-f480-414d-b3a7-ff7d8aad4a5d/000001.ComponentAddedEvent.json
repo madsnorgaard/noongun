@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "f2ed89d6-f480-414d-b3a7-ff7d8aad4a5d",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:32.473Z",
+  "payload": {
+    "name": "DockerStack",
+    "type": "service",
+    "description": "Five services: app (FrankenPHP), horizon, scheduler, postgres, redis. Image targets dev and prod; compose.override.yml is the development override",
+    "responsibility": "Run the application the same way in every environment",
+    "path": "docker-compose.yml",
+    "status": "active"
+  },
+  "seq": 1
+}

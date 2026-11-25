@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "a73e36a7-bd89-4b85-84f1-85406bd49d80",
+  "version": 1,
+  "timestamp": "2026-11-24T19:56:27.396Z",
+  "payload": {
+    "name": "Inertia Vue",
+    "ecosystem": "npm",
+    "packageName": "@inertiajs/vue3",
+    "versionConstraint": "^3.0.0",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

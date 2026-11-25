@@ -1,0 +1,19 @@
+{
+    "data": [
+        {
+            "access_token": "test-page-token-table-bay-coffee",
+            "category": "Coffee shop",
+            "category_list": [{"id": "197871390225897", "name": "Coffee shop"}],
+            "name": "Table Bay Coffee",
+            "id": "100000000000001",
+            "tasks": ["ADVERTISE", "ANALYZE", "CREATE_CONTENT", "MESSAGING", "MODERATE", "MANAGE"]
+        }
+    ],
+    "paging": {
+        "cursors": {
+            "before": "QVFIUtestBefore",
+            "after": "QVFIUtestSecondPage"
+        },
+        "next": "https://graph.facebook.test/v99.0/me/accounts?access_token=test-long-lived-user-token&limit=100&after=QVFIUtestSecondPage"
+    }
+}
