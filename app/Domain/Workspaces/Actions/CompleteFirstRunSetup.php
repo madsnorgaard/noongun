@@ -51,8 +51,13 @@ class CompleteFirstRunSetup
         });
     }
 
+    /**
+     * Setup is done once a workspace exists, and it stays done if every
+     * account is gone: the workspace and what it holds must not fall to
+     * whoever opens the setup screen next. An account alone closes it too.
+     */
     public static function isComplete(): bool
     {
-        return User::query()->exists();
+        return Workspace::query()->exists() || User::query()->exists();
     }
 }

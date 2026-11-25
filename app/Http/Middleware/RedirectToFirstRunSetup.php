@@ -10,7 +10,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 /**
  * On a fresh self-hosted instance, sends every request to the setup screen
- * until the owner account exists.
+ * until the workspace and its owner account exist.
  */
 class RedirectToFirstRunSetup
 {

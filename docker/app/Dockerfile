@@ -58,5 +58,7 @@ ARG GID=1000
 ENV APP_ENV=production \
     APP_DEBUG=false
 
+RUN cp "$PHP_INI_DIR/php.ini-production" "$PHP_INI_DIR/php.ini"
+
 USER noongun
 COPY --from=build --chown=${UID}:${GID} /app /app

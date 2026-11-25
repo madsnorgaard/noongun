@@ -1,6 +1,71 @@
 <?php
 
+use App\Domain\Workspaces\Models\Workspace;
+use App\Domain\Workspaces\Role;
 use App\Models\User;
+
+require_once __DIR__.'/../../Support/members.php';
+
+test('the only owner of a workspace cannot delete their account', function () {
+    $workspace = Workspace::factory()->create(['name' => 'Signal Hill']);
+    $owner = workspaceMember($workspace, Role::Owner);
+    workspaceMember($workspace, Role::Editor);
+
+    $this->actingAs($owner)
+        ->from(route('profile.edit'))
+        ->delete(route('profile.destroy'), ['password' => 'password'])
+        ->assertRedirect(route('profile.edit'))
+        ->assertSessionHasErrors([
+            'account' => 'You are the only owner of Signal Hill. A workspace must keep an owner, so this account cannot be deleted.',
+        ]);
+
+    $this->assertAuthenticatedAs($owner);
+    expect($owner->fresh())->not->toBeNull()
+        ->and($workspace->roleOf($owner))->toBe(Role::Owner);
+
+    $this->get(route('setup.create'))->assertNotFound();
+});
+
+test('an owner can delete their account when the workspace has another owner', function () {
+    $workspace = Workspace::factory()->create();
+    $owner = workspaceMember($workspace, Role::Owner);
+    $other = workspaceMember($workspace, Role::Owner);
+
+    $this->actingAs($owner)
+        ->delete(route('profile.destroy'), ['password' => 'password'])
+        ->assertSessionHasNoErrors()
+        ->assertRedirect(route('home'));
+
+    $this->assertGuest();
+    expect($owner->fresh())->toBeNull()
+        ->and($workspace->roleOf($other))->toBe(Role::Owner);
+});
+
+test('the only owner of one workspace cannot delete their account, whatever they are elsewhere', function () {
+    $shared = Workspace::factory()->create();
+    $owner = workspaceMember($shared, Role::Owner);
+    workspaceMember($shared, Role::Owner);
+    $alone = Workspace::factory()->create();
+    $alone->memberships()->create(['user_id' => $owner->id, 'role' => Role::Owner]);
+
+    $this->actingAs($owner)
+        ->delete(route('profile.destroy'), ['password' => 'password'])
+        ->assertSessionHasErrors('account');
+
+    expect($owner->fresh())->not->toBeNull();
+});
+
+test('an editor can delete their account', function () {
+    $workspace = Workspace::factory()->create();
+    workspaceMember($workspace, Role::Owner);
+    $editor = workspaceMember($workspace, Role::Editor);
+
+    $this->actingAs($editor)
+        ->delete(route('profile.destroy'), ['password' => 'password'])
+        ->assertSessionHasNoErrors();
+
+    expect($editor->fresh())->toBeNull();
+});
 
 test('profile page is displayed', function () {
     $user = User::factory()->create();

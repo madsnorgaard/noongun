@@ -221,7 +221,7 @@ function access(channel: Channel): string {
                     and then brought back here.
                 </template>
                 <template v-else>
-                    An owner or editor of this workspace can connect one.
+                    Only an owner of this workspace can connect one.
                 </template>
             </p>
         </section>
@@ -364,9 +364,11 @@ function access(channel: Channel): string {
         <p
             v-if="!can.manage && channels.length"
             class="text-sm text-muted-foreground"
+            data-test="channels-owner-only"
         >
-            Owners and editors of this workspace can connect and disconnect
-            channels.
+            Only owners of this workspace can connect and disconnect channels,
+            because a channel holds the access to an account. Ask an owner if
+            one needs to be connected again.
         </p>
 
         <section

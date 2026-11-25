@@ -70,6 +70,17 @@ it('closes the setup screen once an owner exists', function () {
     expect(User::count())->toBe(1);
 });
 
+it('keeps the setup screen closed while a workspace exists, even with no account left', function () {
+    Workspace::factory()->create();
+
+    $this->get(route('setup.create'))->assertNotFound();
+    $this->post(route('setup.store'), setupInput())->assertNotFound();
+    $this->get('/login')->assertOk();
+
+    expect(User::count())->toBe(0)
+        ->and(Workspace::count())->toBe(1);
+});
+
 it('keeps registration closed in self-hosted mode', function () {
     User::factory()->create();
 

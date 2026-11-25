@@ -81,13 +81,13 @@ describe('list', function () {
             ->not->toContain(FACEBOOK_TEST_APP_SECRET);
     });
 
-    it('lets every role look, and only owners and editors manage', function (Role $role, bool $manage) {
+    it('lets every role look, and only owners manage', function (Role $role, bool $manage) {
         $this->actingAs(workspaceMember($this->workspace, $role))->get(route('channels.index'))
             ->assertOk()
             ->assertInertia(fn (Assert $page) => $page->where('can.manage', $manage));
     })->with([
         'owner' => [Role::Owner, true],
-        'editor' => [Role::Editor, true],
+        'editor' => [Role::Editor, false],
         'viewer' => [Role::Viewer, false],
     ]);
 
@@ -109,10 +109,10 @@ describe('list', function () {
 });
 
 describe('disconnect', function () {
-    it('erases the tokens and keeps the row', function (Role $role) {
+    it('erases the tokens and keeps the row', function () {
         $channel = inWorkspace($this->workspace, fn () => Channel::factory()->withRefreshToken()->create(['display_name' => 'Alpha']));
 
-        $this->actingAs(workspaceMember($this->workspace, $role))
+        $this->actingAs($this->owner)
             ->delete(route('channels.destroy', $channel->id))
             ->assertRedirect(route('channels.index'))
             ->assertInertiaFlash('toast', ['type' => 'success', 'message' => 'Alpha is disconnected.']);
@@ -125,7 +125,7 @@ describe('disconnect', function () {
             ->and($row->token_expires_at)->toBeNull();
 
         Http::assertNothingSent();
-    })->with(['owner' => Role::Owner, 'editor' => Role::Editor]);
+    });
 
     it('works for a channel that has published variants', function () {
         $channel = inWorkspace($this->workspace, fn () => Channel::factory()->create());
@@ -137,15 +137,18 @@ describe('disconnect', function () {
             ->and(DB::table('post_variants')->where('id', $variant->id)->value('channel_id'))->toBe($channel->id);
     });
 
-    it('is refused for viewers', function () {
+    it('is refused for editors and viewers', function (Role $role) {
         $channel = inWorkspace($this->workspace, fn () => Channel::factory()->create());
 
-        $this->actingAs(workspaceMember($this->workspace, Role::Viewer))
+        $this->actingAs(workspaceMember($this->workspace, $role))
             ->delete(route('channels.destroy', $channel->id))
             ->assertForbidden();
 
-        expect(DB::table('channels')->where('id', $channel->id)->value('status'))->toBe('active');
-    });
+        $row = DB::table('channels')->where('id', $channel->id)->first();
+
+        expect($row->status)->toBe('active')
+            ->and($row->access_token)->not->toBeNull();
+    })->with(['editor' => Role::Editor, 'viewer' => Role::Viewer]);
 
     it('cannot reach a channel of another workspace', function () {
         $theirs = inWorkspace(Workspace::factory()->create(), fn () => Channel::factory()->create());
@@ -182,6 +185,6 @@ it('gives each role the channel abilities it should have', function (Role $role,
     });
 })->with([
     'owner' => [Role::Owner, true],
-    'editor' => [Role::Editor, true],
+    'editor' => [Role::Editor, false],
     'viewer' => [Role::Viewer, false],
 ]);
