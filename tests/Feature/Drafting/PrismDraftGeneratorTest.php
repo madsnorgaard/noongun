@@ -291,6 +291,7 @@ describe('the answer', function () {
             'rationale' => 'It fits the brief.',
         ], input: 1234, output: 567)]);
 
+        $this->request = plainDraftRequest(channels: 2, sourceUrl: 'https://example.com/coffee');
         $result = $this->generator->generate($this->request, $this->context);
 
         expect($result->bodies)->toBe([1 => 'First channel.', 2 => 'Second channel.'])
@@ -614,7 +615,8 @@ describe('what the model writes is data', function () {
         $storedRun = DB::table('draft_runs')->where('id', $run->id)->first();
 
         expect($stored->body)->toBe($body)
-            ->and($stored->link)->toBe('https://example.com/a?b=<script>&c=%0d%0aX-Injected:1')
+            ->and($stored->link)->toBeNull()
+            ->and($storedRun->link_dropped)->toBeTrue()
             ->and($storedRun->rationale)->toBe($rationale)
             ->and($storedRun->alt_text)->toBe($altText)
             ->and($storedRun->status)->toBe('succeeded');
@@ -629,23 +631,20 @@ describe('what the model writes is data', function () {
         Http::assertNothingSent();
     });
 
-    it('refuses a link that is not an http or https address', function (string $link) {
-        $fake = Prism::fake([
-            prismAnswer([...FakeDraftGenerator::outputFor($this->request), 'link' => $link]),
-            prismAnswer([...FakeDraftGenerator::outputFor($this->request), 'link' => $link]),
-        ]);
+    it('drops a link the author did not give, once, without failing the draft', function (string $link) {
+        $fake = Prism::fake([prismAnswer([...FakeDraftGenerator::outputFor($this->request), 'link' => $link])]);
 
-        $failure = generationFailure(fn () => $this->generator->generate($this->request, $this->context));
+        $result = $this->generator->generate($this->request, $this->context);
 
-        $fake->assertCallCount(2);
+        $fake->assertCallCount(1);
 
-        expect($failure)->toBeInstanceOf(InvalidDraftOutput::class)
-            ->and($failure->getMessage())->toContain('The link is not an http or https address.')->not->toContain($link);
+        expect($result->link)->toBeNull()->and($result->linkDropped)->toBeTrue();
     })->with([
         'javascript:alert(1)',
         'data:text/html,<script>alert(1)</script>',
         'file:///etc/passwd',
         '//evil.example/path',
+        'https://evil.example/landing',
         "https://example.com/\r\nX-Injected: 1",
         '/settings/drafting',
     ]);

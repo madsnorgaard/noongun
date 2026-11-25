@@ -171,8 +171,10 @@ function draftRequestIn(Workspace $workspace, int|array $channels = 1, ?Pillar $
 /**
  * A request that needs no database: channels 1 to $channels on the given
  * platform, each with the given body limit.
+ *
+ * @param  list<array{text: string, url?: string|null}>  $callsToAction
  */
-function plainDraftRequest(int $channels = 1, int $maxBodyLength = 500, string $platform = 'facebook'): DraftRequest
+function plainDraftRequest(int $channels = 1, int $maxBodyLength = 500, string $platform = 'facebook', ?string $sourceUrl = null, array $callsToAction = []): DraftRequest
 {
     $targets = [];
 
@@ -185,6 +187,8 @@ function plainDraftRequest(int $channels = 1, int $maxBodyLength = 500, string $
         briefBody: 'We roast coffee in Cape Town and write about it.',
         voiceRules: new VoiceRules(['No contractions.']),
         channels: $targets,
+        callsToAction: $callsToAction,
+        sourceUrl: $sourceUrl,
     );
 }
 

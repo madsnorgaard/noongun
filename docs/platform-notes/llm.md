@@ -259,9 +259,18 @@ The output is untrusted. Followed through the code on 2026-11-25:
 - `variants[].body`, `alt_text`, `rationale`: stored as text. No page prints
   post text with `v-html`; Vue's text interpolation escapes it. A page that
   shows the rationale or the alternative text must do the same.
-- `link`: must be http or https (`DraftResult`), and the page builds the `href`
+- `link`: kept only when it is the request's source URL or the URL of a call
+  to action of the brief, both of which the author wrote and both of which must
+  be http or https (`DraftResult::fromArray()`, see ADR 0011). Anything else
+  is dropped, the draft has no link, and `draft_runs.link_dropped` is set. The
+  run does not fail for it. The comparison is deliberately plain: trim, scheme
+  and host in lower case, an empty path as `/`, the rest exactly as written.
+  So `https://allowed.example@evil.example/`, a lookalike host, another path,
+  an added query or another port are all dropped. The page builds the `href`
   through `webAddress()`, which checks the scheme again. The server never opens
   the address; the Facebook adapter passes it to the Graph API as a parameter.
+  The prompt (v1) already tells the model to take the link from the source URL
+  or a call to action and never to make one up, so its wording is unchanged.
 - `variants[].channel_id`: an integer that must be one of the requested
   channels, and those were read from the current workspace when the request
   was built. An id the model makes up fails validation before anything is

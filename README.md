@@ -269,9 +269,15 @@ the brief what you would not send to it.
 The model answers in a fixed format: one text for each channel, at most one
 link, a suggestion for alternative text and one line on why the post fits. The
 answer is treated as data. It is checked (a text for each channel that was
-asked for and for no other, no text over the limit of its platform, a link
-that is an http or https address), stored as plain text and shown as plain
-text. Nothing in it is followed, opened or run.
+asked for and for no other, no text over the limit of its platform), stored as
+plain text and shown as plain text. Nothing in it is followed, opened or run.
+
+A draft only ever carries a link that you gave: the source address of the
+request, or the address of a call to action in the brief. If the model
+suggests any other address, the draft is created without a link and the draft
+run records that a link was left out. Text that is pasted into an idea can
+therefore not make a post point somewhere you did not choose. Add the link by
+hand in the editor when you do want another one.
 
 When an answer does not pass the check, the model is asked once more. After a
 second answer that cannot be used the run fails and says why. A run also fails,

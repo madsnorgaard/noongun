@@ -63,6 +63,7 @@ use Illuminate\Support\Str;
  * @property string|null $cost_currency
  * @property string|null $rationale
  * @property string|null $alt_text
+ * @property bool $link_dropped the model suggested a link the author never gave, and it was left out
  * @property string|null $failure_reason
  * @property CarbonImmutable|null $started_at
  * @property CarbonImmutable|null $finished_at
@@ -84,7 +85,7 @@ class DraftRun extends Model
     /** Attributes that only the mark methods may change. */
     private const GUARDED_BY_TRANSITIONS = [
         'status', 'attempts', 'input_tokens', 'output_tokens', 'cost_estimate', 'cost_currency',
-        'rationale', 'alt_text', 'failure_reason', 'started_at', 'finished_at',
+        'rationale', 'alt_text', 'link_dropped', 'failure_reason', 'started_at', 'finished_at',
     ];
 
     /** @var array<string, mixed> */
@@ -117,6 +118,7 @@ class DraftRun extends Model
             'attempts' => 'integer',
             'input_tokens' => 'integer',
             'output_tokens' => 'integer',
+            'link_dropped' => 'boolean',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
         ];
@@ -232,6 +234,7 @@ class DraftRun extends Model
             ...self::usageColumns($result->usage, $cost),
             'rationale' => $result->rationale,
             'alt_text' => $result->altText,
+            'link_dropped' => $result->linkDropped,
             'finished_at' => now(),
         ]);
     }
