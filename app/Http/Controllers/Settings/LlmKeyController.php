@@ -37,6 +37,24 @@ use Inertia\Response;
  */
 class LlmKeyController extends Controller
 {
+    /**
+     * What a provider is sent for a draft, in the words of the page: one
+     * entry for each part of DraftRequest::toArray(), which is all a prompt
+     * is built from. A test holds the two together, so a part that is
+     * added to the request has to be named here.
+     *
+     * @var array<string, string>
+     */
+    public const SENT_TO_PROVIDER = [
+        'brief' => 'the brief with its calls to action',
+        'voice_rules' => 'the voice rules',
+        'pillar' => 'the pillar of the post',
+        'idea' => 'the idea with its notes',
+        'source_url' => 'the source link',
+        'channels' => 'the platform and the limits of each target channel',
+        'examples' => 'earlier posts of this workspace as examples, once there are any',
+    ];
+
     public function edit(Request $request, CurrentWorkspace $current, DraftGenerators $generators, LlmCredentialResolver $keys): Response
     {
         $workspace = $current->get();
@@ -59,6 +77,8 @@ class LlmKeyController extends Controller
             'chosen_not_offered' => $provider === null && $workspace->drafting_provider !== null
                 ? DraftingConfig::label($workspace->drafting_provider)
                 : null,
+            'follows_default' => $workspace->drafting_provider === null,
+            'sent_to_provider' => array_values(self::SENT_TO_PROVIDER),
             'providers' => $canManage ? $this->providerRows($workspace, $provider, $generators, $keys, $credentials) : [],
             'can' => [
                 'manage' => $canManage,
@@ -79,7 +99,9 @@ class LlmKeyController extends Controller
 
     public function update(LlmKeyRequest $request, CurrentWorkspace $current, DraftGenerators $generators): RedirectResponse
     {
-        $provider = $request->provider() ?? $this->providerOf($current->getOrFail(), $generators);
+        $workspace = $current->getOrFail();
+        $inUse = $this->providerOf($workspace, $generators);
+        $provider = $request->provider() ?? $inUse;
 
         if ($provider === null) {
             throw ValidationException::withMessages([
@@ -94,6 +116,13 @@ class LlmKeyController extends Controller
         }
 
         LlmCredential::store($provider, $request->key());
+
+        // A key for the provider in use says that the workspace means to
+        // draft with it. It stays with that provider from here on, also
+        // when the operator changes the default of the instance.
+        if ($provider === $inUse) {
+            $generators->settleOn($workspace, $provider);
+        }
 
         Inertia::flash('toast', ['type' => 'success', 'message' => $existing === null
             ? __('The API key is stored. Drafting with :provider uses it from now on.', ['provider' => DraftingConfig::label($provider)])

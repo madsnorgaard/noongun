@@ -9,11 +9,16 @@
  * would use without ever showing one.
  */
 
+use App\Domain\Content\Models\Post;
 use App\Domain\Drafting\Generators\PrismDraftGenerator;
+use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Drafting\Models\InstanceLlmCredential;
 use App\Domain\Drafting\Models\LlmCredential;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
+use App\Http\Controllers\Settings\LlmKeyController;
+use App\Http\Presenters\PostPresenter;
+use App\Http\Presenters\ProposalPresenter;
 use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -246,6 +251,88 @@ describe('a key for each provider', function () {
 
         expect(keyStoredFor($other, 'openai'))->toBe(OPENAI_PAGE_KEY)
             ->and(keyStoredFor($other, 'anthropic'))->toBeNull();
+    });
+});
+
+describe('a workspace settles on the provider in use', function () {
+    it('when an owner stores a key for it', function () {
+        storeProviderKeyAs($this->owner, 'anthropic', ANTHROPIC_PAGE_KEY)->assertSessionHasNoErrors();
+
+        expect(chosenProviderOf($this->workspace))->toBe('anthropic');
+
+        config(['noongun.drafting.provider' => 'openai', 'noongun.drafting.offered' => ['anthropic'], 'noongun.drafting.providers.openai.api_key' => OPENAI_PAGE_KEY]);
+
+        $this->actingAs($this->owner)->get(route('llm-key.edit'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('provider.name', 'anthropic')
+                ->where('key_source', 'workspace')
+                ->where('follows_default', false));
+    });
+
+    it('and not when the key is for another provider', function () {
+        storeProviderKeyAs($this->owner, 'openai', OPENAI_PAGE_KEY)->assertSessionHasNoErrors();
+
+        expect(chosenProviderOf($this->workspace))->toBeNull();
+    });
+
+    it('and not when the key is refused', function () {
+        storeProviderKeyAs($this->owner, 'anthropic', 'too short')->assertSessionHasErrors('api_key');
+
+        expect(chosenProviderOf($this->workspace))->toBeNull();
+    });
+
+    it('and keeps a choice an owner made when a key for it is replaced', function () {
+        chooseProviderAs($this->owner, 'openai');
+        storeProviderKeyAs($this->owner, 'anthropic', ANTHROPIC_PAGE_KEY);
+        storeProviderKeyAs($this->owner, 'openai', OPENAI_PAGE_KEY);
+
+        expect(chosenProviderOf($this->workspace))->toBe('openai');
+    });
+});
+
+describe('what the page says is sent', function () {
+    it('names every part of a draft request, and no part that is not in one', function () {
+        expect(array_keys(LlmKeyController::SENT_TO_PROVIDER))->toBe(array_keys(plainDraftRequest()->toArray()));
+    });
+
+    it('is given to the page as that list', function () {
+        $this->actingAs($this->owner)->get(route('llm-key.edit'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('sent_to_provider', array_values(LlmKeyController::SENT_TO_PROVIDER))
+                ->where('follows_default', true));
+    });
+
+    it('is not written into the page a second time', function () {
+        $page = (string) file_get_contents(resource_path('js/pages/settings/Drafting.vue'));
+
+        expect($page)->not->toContain('and nothing else')
+            ->and($page)->toContain('sentToProvider');
+    });
+});
+
+describe('the name of a provider', function () {
+    it('is spelled as the configuration spells it, on the plan page and on a drafted post', function () {
+        config(['noongun.drafting.providers.openai.api_key' => OPENAI_PAGE_KEY]);
+        chooseProviderAs($this->owner, 'openai');
+
+        expect(app(ProposalPresenter::class)->generator($this->workspace->refresh()))->toBe(['provider' => 'OpenAI', 'model' => 'configured-openai-model']);
+
+        $post = inWorkspace($this->workspace, function () {
+            $run = DraftRun::factory()->succeeded()->create(['provider' => 'openai', 'model' => 'configured-openai-model']);
+            $post = Post::factory()->create();
+            $post->attributeTo($run);
+
+            return $post->refresh();
+        });
+
+        expect(inWorkspace($this->workspace, fn () => app(PostPresenter::class)->origin($post))['provider'] ?? null)->toBe('OpenAI');
+    });
+
+    it('is spelled right in the configuration that ships', function () {
+        $config = require config_path('noongun.php');
+
+        expect($config['drafting']['providers']['openai']['label'])->toBe('OpenAI')
+            ->and($config['drafting']['providers']['anthropic']['label'])->toBe('Anthropic');
     });
 });
 

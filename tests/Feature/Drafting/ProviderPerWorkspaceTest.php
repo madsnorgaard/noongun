@@ -32,6 +32,7 @@ use App\Domain\Drafting\Models\LlmCredential;
 use App\Domain\Drafting\Planning\ProposalCost;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
+use App\Http\Presenters\ProposalPresenter;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\Facades\Schema;
@@ -88,6 +89,11 @@ function secondDraftProvider(?string $instanceKey = SECOND_INSTANCE_KEY): FakeDr
     app(DraftGenerators::class)->extend(SECOND_PROVIDER, fn () => $fake);
 
     return $fake;
+}
+
+function chosenOf(Workspace $workspace): ?string
+{
+    return DB::table('workspaces')->where('id', $workspace->id)->value('drafting_provider');
 }
 
 function chooseProvider(Workspace $workspace, string $provider): void
@@ -190,11 +196,35 @@ describe('the choice', function () {
             $refusal = $caught;
         }
 
-        expect($refusal?->reason)->toBe(ProposalRefused::NOT_CONFIGURED)
+        expect($refusal?->reason)->toBe(ProposalRefused::CHOICE_NOT_OFFERED)
+            ->and($refusal?->getMessage())->toBe(DraftGeneratorNotAvailable::CHOICE_NOT_OFFERED)
+            ->and($refusal?->getMessage())->toContain('An owner of this workspace can choose another one under Settings, Drafting')
+            ->and(app(ProposalPresenter::class)->refusals([$refusal])[0]['href'])->toBe(route('llm-key.edit'))
             ->and(DB::table('draft_runs')->count())->toBe(0);
 
         $this->first->assertNothingGenerated();
         $this->second->assertNothingGenerated();
+    });
+
+    it('tells the members what to do when a draft that was asked for meets a choice that is no longer offered', function () {
+        chooseProvider($this->workspace, SECOND_PROVIDER);
+        $this->workspace->refresh();
+        $run = inWorkspace($this->workspace, fn () => DraftRun::start($this->owner, $this->generators->contextFor($this->workspace), [], Brief::current()));
+
+        config(['noongun.drafting.offered' => []]);
+
+        expect(fn () => inWorkspace($this->workspace, fn () => app(GenerateDraft::class)->handle($this->owner, $run, draftRequestIn($this->workspace, [$this->channel]))))
+            ->toThrow(DraftGeneratorNotAvailable::class);
+
+        expect(freshRun($run)->failure_reason)->toBe(DraftGeneratorNotAvailable::CHOICE_NOT_OFFERED);
+
+        $this->second->assertNothingGenerated();
+    });
+
+    it('keeps the sentence about the operator for what only the operator can put right', function () {
+        expect(DraftGeneratorNotAvailable::modelMissing('fake')->forMembers())->toBe(DraftGeneratorNotAvailable::FOR_MEMBERS)
+            ->and(DraftGeneratorNotAvailable::noDefaultProvider()->isChoiceNotOffered())->toBeFalse()
+            ->and(DraftGeneratorNotAvailable::CHOICE_NOT_OFFERED)->not->toMatch('/NOONGUN|\[|#\d/');
     });
 
     it('is a column that can be taken away and added again', function () {
@@ -206,6 +236,93 @@ describe('the choice', function () {
         $migration->up();
         expect(Schema::hasColumn('workspaces', 'drafting_provider'))->toBeTrue()
             ->and(DB::table('workspaces')->where('id', $this->workspace->id)->value('drafting_provider'))->toBeNull();
+    });
+});
+
+describe('a workspace that has drafted stays with its provider', function () {
+    it('settles on the provider of its first draft', function () {
+        expect(chosenOf($this->workspace))->toBeNull();
+
+        draftOnce($this->workspace);
+
+        expect(chosenOf($this->workspace))->toBe(DRAFT_TEST_PROVIDER);
+    });
+
+    it('is not moved to another vendor when the operator changes the default afterwards', function () {
+        draftOnce($this->workspace);
+
+        config(['noongun.drafting.provider' => SECOND_PROVIDER, 'noongun.drafting.offered' => [DRAFT_TEST_PROVIDER]]);
+        $this->workspace->refresh();
+
+        expect($this->generators->providerFor($this->workspace))->toBe(DRAFT_TEST_PROVIDER);
+
+        draftOnce($this->workspace);
+
+        $this->first->assertGeneratedTimes(2);
+        $this->second->assertNothingGenerated();
+    });
+
+    it('stops, and is not moved, when the operator changes the default and no longer offers the provider it drafted with', function () {
+        draftOnce($this->workspace);
+
+        config(['noongun.drafting.provider' => SECOND_PROVIDER, 'noongun.drafting.offered' => []]);
+        $this->workspace->refresh();
+
+        expect(fn () => $this->generators->contextFor($this->workspace))->toThrow(DraftGeneratorNotAvailable::class, 'does not offer')
+            ->and($this->generators->availableFor($this->workspace))->toBeFalse();
+
+        $this->second->assertNothingGenerated();
+    });
+
+    it('follows a new default while it has never drafted, stored a key or chosen', function () {
+        config(['noongun.drafting.provider' => SECOND_PROVIDER]);
+
+        expect($this->generators->providerFor($this->workspace))->toBe(SECOND_PROVIDER)
+            ->and(chosenOf($this->workspace))->toBeNull();
+    });
+
+    it('is not settled by looking: the settings, the plan and the cost settle nothing', function () {
+        $this->generators->providerFor($this->workspace);
+        $this->generators->contextFor($this->workspace);
+        $this->generators->availableFor($this->workspace);
+        planFor($this->workspace, '2026-11-30');
+
+        expect(chosenOf($this->workspace))->toBeNull();
+    });
+
+    it('is not settled by a draft that never went to a provider', function () {
+        config(['noongun.drafting.providers.'.DRAFT_TEST_PROVIDER.'.api_key' => 'another-instance-key']);
+        $run = inWorkspace($this->workspace, fn () => DraftRun::start($this->owner, $this->generators->contextFor($this->workspace), [], Brief::current()));
+        inWorkspace($this->workspace, fn () => LlmCredential::store(DRAFT_TEST_PROVIDER, 'own-key-added-in-between'));
+
+        expect(fn () => inWorkspace($this->workspace, fn () => app(GenerateDraft::class)->handle($this->owner, $run, draftRequestIn($this->workspace, [$this->channel]))))
+            ->toThrow(DraftingContextChanged::class);
+
+        $this->first->assertNothingGenerated();
+
+        expect(chosenOf($this->workspace))->toBeNull();
+    });
+
+    it('does not replace a choice, and settles on nothing the instance does not offer', function () {
+        chooseProvider($this->workspace, SECOND_PROVIDER);
+        $this->workspace->refresh();
+
+        $this->generators->settleOn($this->workspace, DRAFT_TEST_PROVIDER);
+
+        expect(chosenOf($this->workspace))->toBe(SECOND_PROVIDER);
+
+        $other = Workspace::factory()->create();
+        $this->generators->settleOn($other, 'nobody');
+
+        expect(chosenOf($other))->toBeNull();
+    });
+
+    it('settles one workspace only', function () {
+        $other = Workspace::factory()->create();
+
+        draftOnce($this->workspace);
+
+        expect(chosenOf($other))->toBeNull();
     });
 });
 

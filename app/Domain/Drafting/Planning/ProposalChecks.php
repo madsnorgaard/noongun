@@ -180,7 +180,10 @@ final class ProposalChecks
                 'detail' => $unavailable->getMessage(),
             ]);
 
-            return ProposalRefused::because(ProposalRefused::NOT_CONFIGURED, (string) __(DraftGeneratorNotAvailable::FOR_MEMBERS));
+            return ProposalRefused::because(
+                $unavailable->isChoiceNotOffered() ? ProposalRefused::CHOICE_NOT_OFFERED : ProposalRefused::NOT_CONFIGURED,
+                (string) __($unavailable->forMembers()),
+            );
         }
 
         return ProposalRefused::because(ProposalRefused::NOT_CONFIGURED, (string) __('Drafting is not available right now.'));

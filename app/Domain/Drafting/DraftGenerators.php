@@ -39,9 +39,16 @@ class DraftGenerators
     ) {}
 
     /**
-     * The provider a workspace drafts with: the one its owner chose, or the
-     * default of the instance when none was chosen. This is the one place
-     * that decides it.
+     * The provider a workspace drafts with: the one it is settled on, or
+     * the default of the instance while it is settled on none. This is the
+     * one place that decides it.
+     *
+     * A workspace is settled on a provider when an owner chooses it, when
+     * an owner stores a key for the provider in use, and when its first
+     * draft is asked of a provider (settleOn()). From then on a change of
+     * the default by the operator does not move it: its brief has gone to
+     * one company and does not go to another without an owner saying so.
+     * Only a workspace that has done none of these follows the default.
      *
      * A choice the instance does not offer (any more) is not replaced by
      * the default: the brief would go to a vendor the workspace did not
@@ -91,6 +98,19 @@ class DraftGenerators
 
         $workspace->drafting_provider = $provider;
         $workspace->save();
+    }
+
+    /**
+     * Settles a workspace that follows the default on the given provider,
+     * and leaves one that is settled as it is. Not a choice: it records
+     * the provider the workspace is using already.
+     */
+    public function settleOn(Workspace $workspace, string $provider): void
+    {
+        if ($workspace->drafting_provider === null && in_array($provider, $this->offered(), true)) {
+            $workspace->drafting_provider = $provider;
+            $workspace->save();
+        }
     }
 
     /**

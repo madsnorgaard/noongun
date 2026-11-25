@@ -13,8 +13,8 @@ use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Content\PostPreconditions;
 use App\Domain\Content\PostState;
+use App\Domain\Drafting\DraftingConfig;
 use App\Domain\Workspaces\CurrentWorkspace;
-use Illuminate\Support\Str;
 
 /**
  * What the queue, the calendar and the editor show of a post. Times go out
@@ -87,7 +87,7 @@ final class PostPresenter
         return [
             'pillar' => $run->pillar?->name,
             'idea' => $run->idea?->title,
-            'provider' => Str::headline($run->provider),
+            'provider' => DraftingConfig::label($run->provider),
             'model' => $run->model,
             'rationale' => $run->rationale,
             'alt_text' => $run->alt_text,

@@ -174,6 +174,7 @@ describe('the page that shows the plan', function () {
             ProposalRefused::NO_CHANNEL,
             ProposalRefused::NO_SLOT,
             ProposalRefused::NO_KEY,
+            ProposalRefused::CHOICE_NOT_OFFERED,
             ProposalRefused::NOTHING_TO_DRAFT,
             ProposalRefused::IN_PROGRESS,
         ]);
