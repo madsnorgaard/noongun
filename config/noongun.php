@@ -130,6 +130,17 @@ return [
     | adds or replaces entries, as JSON in the same shape:
     | {"anthropic":{"some-model":{"input":1.5,"output":7.5}}}
     | A model without a price gives a run without a cost estimate.
+    |
+    | "limits" bounds what "Propose a week" may spend. "posts_per_proposal"
+    | is the most posts one proposal drafts, "runs_per_day" the most draft
+    | runs a workspace may open in 24 hours. "max_attempts" is how many times
+    | one planned post is asked for when the provider fails in a way worth
+    | trying again, and "backoff" the wait in seconds before each retry,
+    | comma separated; the last value repeats. "stuck_after_minutes" is how
+    | long a draft run may stay unfinished before it is marked as failed.
+    | "estimate_input_tokens" is the prompt size assumed for the cost ceiling
+    | shown before a proposal starts. "weeks_ahead" is how far ahead a week
+    | can be proposed.
     */
 
     'drafting' => [
@@ -158,6 +169,16 @@ return [
             ],
             (array) json_decode((string) env('NOONGUN_DRAFT_PRICES', '{}'), true),
         ),
+
+        'limits' => [
+            'posts_per_proposal' => (int) env('NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL', 14),
+            'runs_per_day' => (int) env('NOONGUN_DRAFT_MAX_RUNS_PER_DAY', 50),
+            'max_attempts' => (int) env('NOONGUN_DRAFT_MAX_ATTEMPTS', 3),
+            'backoff' => array_map(intval(...), explode(',', (string) env('NOONGUN_DRAFT_BACKOFF', '30,120'))),
+            'stuck_after_minutes' => (int) env('NOONGUN_DRAFT_STUCK_AFTER_MINUTES', 15),
+            'estimate_input_tokens' => (int) env('NOONGUN_DRAFT_ESTIMATE_INPUT_TOKENS', 8000),
+            'weeks_ahead' => 8,
+        ],
     ],
 
 ];
