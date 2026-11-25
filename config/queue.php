@@ -40,8 +40,9 @@ return [
             'connection' => env('DB_QUEUE_CONNECTION'),
             'table' => env('DB_QUEUE_TABLE', 'jobs'),
             'queue' => env('DB_QUEUE', 'default'),
-            // Must stay above the time limit of the longest job. See README, "Publishing".
-            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 180),
+            // Must stay above the time limit of the longest job, which is the
+            // drafting job. See README, "Publishing" and "Proposing a week".
+            'retry_after' => (int) env('DB_QUEUE_RETRY_AFTER', 300),
             'after_commit' => false,
         ],
 
@@ -69,8 +70,9 @@ return [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'default'),
             'queue' => env('REDIS_QUEUE', 'default'),
-            // Must stay above the time limit of the longest job. See README, "Publishing".
-            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 180),
+            // Must stay above the time limit of the longest job, which is the
+            // drafting job. See README, "Publishing" and "Proposing a week".
+            'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 300),
             'block_for' => null,
             'after_commit' => false,
         ],

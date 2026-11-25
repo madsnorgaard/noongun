@@ -128,9 +128,10 @@ Four things to know when operating it:
 - `REDIS_QUEUE_RETRY_AFTER` (and `DB_QUEUE_RETRY_AFTER` for the database
   queue) must be greater than the longest time limit of a publishing job,
   which is `NOONGUN_PUBLISH_TIMEOUT` x `NOONGUN_PUBLISH_CALLS_PER_JOB` + 15
-  seconds. The defaults are 180 against 105. If it is lower, the queue hands
-  a job that is still running to a second worker; that copy does nothing, but
-  it is listed as a failed job.
+  seconds, and of a drafting job (see "Proposing a week"). The defaults are
+  300 against 105 for publishing and 255 for drafting. If it is lower, the
+  queue hands a job that is still running to a second worker; that copy does
+  nothing, but it is listed as a failed job.
 - If a worker dies in the middle of a platform call, or the platform does
   not answer, the post may be public without the app knowing. The variant is
   marked for that before the call is made, and the post ends as failed with
@@ -400,11 +401,12 @@ Two things to know when operating it:
   does nothing: a draft run is started once, by one conditional update in the
   database.
 - The time limit of the job is `NOONGUN_DRAFT_TIMEOUT` x 2 + 15 seconds, which
-  is 255 with the defaults and above the default `REDIS_QUEUE_RETRY_AFTER` of
-  180. When a draft takes longer than `REDIS_QUEUE_RETRY_AFTER`, the queue
-  hands the job to a second worker; that copy does nothing, but it is listed
-  as a failed job. Set `REDIS_QUEUE_RETRY_AFTER=300` (and
-  `DB_QUEUE_RETRY_AFTER` for the database queue) to avoid that.
+  is 255 with the defaults. `REDIS_QUEUE_RETRY_AFTER` (and
+  `DB_QUEUE_RETRY_AFTER` for the database queue) must stay above it; the
+  default is 300. If you raise `NOONGUN_DRAFT_TIMEOUT`, raise those too.
+  When a draft takes longer than `REDIS_QUEUE_RETRY_AFTER`, the queue hands
+  the job to a second worker; that copy does nothing, but it is listed as a
+  failed job.
 
 ## Running on a home server
 
@@ -510,7 +512,7 @@ it there.
 | `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
 | `NOONGUN_PUBLISH_CALLS_PER_JOB` | `3` | How many variants one run of the publishing job sends before it hands the rest to a successor. Bounds the time limit of a job; see "Publishing" for what the queue needs. |
 | `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Shortest lifetime of the lock on one variant. The lock always lives at least 30 seconds longer than the longest job. |
-| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `180` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of a publishing job. |
+| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `300` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of any job: 255 seconds for a drafting job with the defaults, 105 for a publishing job. Raise it when you raise `NOONGUN_DRAFT_TIMEOUT`. |
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |

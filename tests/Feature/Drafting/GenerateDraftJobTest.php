@@ -138,6 +138,18 @@ describe('one run', function () {
             ->and($payload)->not->toContain(DRAFT_TEST_MODEL);
     });
 
+    it('has a time limit below the retry_after of the queue, so a running job is not handed to a second worker', function (string $connection) {
+        // The defaults an instance runs with, not the short timeout of the tests.
+        config(['noongun.drafting.timeout' => (require config_path('noongun.php'))['drafting']['timeout']]);
+
+        $retryAfter = config("queue.connections.{$connection}.retry_after");
+
+        expect((new GenerateDraftJob(1, 1))->timeout)->toBe(255)
+            ->and($retryAfter)->toBeInt()
+            ->and($retryAfter)->toBeGreaterThan((new GenerateDraftJob(1, 1))->timeout)
+            ->and($retryAfter)->toBeGreaterThan(DraftingLimits::jobSeconds());
+    })->with(['redis', 'database']);
+
     it('is never run again by the queue, and has a time limit from the configuration', function () {
         config(['noongun.drafting.timeout' => 40]);
 
