@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "6f4b643b-3f58-41c5-bb60-56effb43646f",
+  "version": 1,
+  "timestamp": "2026-11-25T16:34:07.001Z",
+  "payload": {
+    "title": "ADR 0011: Drafting contract",
+    "context": "M4 needs LLM drafting behind our own interface, with keys from the workspace or the instance, and cost recorded per run.",
+    "rationale": "DraftGenerator::generate(DraftRequest, DraftingContext) returns one DraftResult with a body per channel. One request is one post is one draft run. Generated posts are created only by CreateDraftFromResult through SaveDraft and are always drafts. Briefs are immutable versioned rows with one current version. Key order: workspace key, instance row, environment key; an unreadable workspace key does not fall back. Cost is tokens times a price table in config. PromptRenderer is the only place that decides what is sent. A suggested link is kept only when it equals the source URL or a call to action. Source URLs are never fetched by the server.",
+    "alternatives": [],
+    "consequences": "Prism (^0.103) is used only inside PrismDraftGenerator. Instance credential rows have a null workspace_id, guarded by a CHECK constraint and a separate model."
+  },
+  "seq": 1
+}

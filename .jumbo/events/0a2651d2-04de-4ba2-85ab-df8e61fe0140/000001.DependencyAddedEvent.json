@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "0a2651d2-04de-4ba2-85ab-df8e61fe0140",
+  "version": 1,
+  "timestamp": "2026-11-25T16:34:07.594Z",
+  "payload": {
+    "name": "Prism",
+    "ecosystem": "composer",
+    "packageName": "prism-php/prism",
+    "versionConstraint": "^0.103",
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

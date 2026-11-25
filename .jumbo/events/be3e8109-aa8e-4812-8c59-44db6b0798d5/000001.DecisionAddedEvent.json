@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "be3e8109-aa8e-4812-8c59-44db6b0798d5",
+  "version": 1,
+  "timestamp": "2026-11-25T16:34:07.295Z",
+  "payload": {
+    "title": "ADR 0012: Proposing a week",
+    "context": "A person needs a week of drafts from the brief, pillars and slots, without unbounded spend and without anything publishing unapproved.",
+    "rationale": "Each slot of a publishable channel gives one time in the week; past times, times inside the lead time and slots already drafted are skipped; channels sharing an instant share one post. Pillars take turns by weekly target; ideas are taken oldest unused first, then loose ideas. A retry is a new run opened under the workspace lock. The daily limit counts only runs that reached a provider or are open, plus an instance-wide cap for the instance key. Stuck runs are failed by a scheduled command or by Stop waiting, never re-sent. The planned time is fixed at request time.",
+    "alternatives": [],
+    "consequences": "The instance cap can overshoot by one proposal across workspaces. A stopped run loses the usage of an answer in flight. Queue retry_after default is 300 seconds."
+  },
+  "seq": 1
+}
