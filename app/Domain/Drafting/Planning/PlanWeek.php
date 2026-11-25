@@ -8,6 +8,8 @@ use App\Domain\Content\Models\Idea;
 use App\Domain\Content\Models\Pillar;
 use App\Domain\Content\PostState;
 use App\Domain\Drafting\DraftingLimits;
+use App\Domain\Drafting\DraftRunStatus;
+use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Scheduling\Models\Slot;
 use App\Domain\Scheduling\PlannedTimes;
 use App\Domain\Workspaces\Models\Workspace;
@@ -23,7 +25,9 @@ use Illuminate\Database\Eloquent\Builder;
  * 1. Times. Every slot of a channel that can publish gives one time in the
  *    week (Slot::occurrenceInWeekOf(), on the workspace calendar). A time
  *    that has passed is left out. So is a time at which that channel
- *    already has a post that is not rejected.
+ *    already has a post that is not rejected, and the time of a slot that
+ *    an earlier proposal for the week already drafted a post for, also
+ *    when that post was moved to another time since.
  * 2. Posts. Channels whose open slots fall on the same instant share one
  *    post, with a text for each of them: the post is what a person
  *    approves (ADR 0009). The posts are put in time order, and only the
@@ -86,6 +90,7 @@ final class PlanWeek
         $inWeek = $monday->addHours(12);
 
         $taken = $this->plannedTimes->takenBetween($from, $until);
+        $drafted = $this->slotsDraftedFor($week);
 
         /** @var array<int, array{channels: array<int, Channel>, slots: list<int>}> $open */
         $open = [];
@@ -116,7 +121,7 @@ final class PlanWeek
                 continue;
             }
 
-            if (in_array($at, $taken[$channel->id] ?? [], true)) {
+            if (isset($drafted[$slot->id]) || in_array($at, $taken[$channel->id] ?? [], true)) {
                 $occupied++;
 
                 continue;
@@ -160,6 +165,36 @@ final class PlanWeek
         }
 
         return new WeekPlan($week, $from, $until, $posts, $past, $occupied, $unavailable, $leftOut, $short);
+    }
+
+    /**
+     * The slots that already got a draft for this week from an earlier
+     * proposal, as long as that post exists and is not rejected, wherever
+     * its time is now. Moving a drafted post to another time does not open
+     * its slot again: the slot was answered, and a second proposal would
+     * write the same post twice.
+     *
+     * @return array<int, true> keyed by slot id
+     */
+    private function slotsDraftedFor(string $week): array
+    {
+        $runs = DraftRun::query()
+            ->inStatus(DraftRunStatus::Succeeded)
+            ->where('request->week', $week)
+            ->whereHas('post', fn (Builder $posts) => $posts->whereIn('state', self::holdingStates()))
+            ->get();
+
+        $slots = [];
+
+        foreach ($runs as $run) {
+            foreach ((array) ($run->request['slot_ids'] ?? []) as $slotId) {
+                if (is_numeric($slotId)) {
+                    $slots[(int) $slotId] = true;
+                }
+            }
+        }
+
+        return $slots;
     }
 
     /**

@@ -223,6 +223,70 @@ describe('what must be in place first', function () {
     });
 });
 
+describe('proposing the same week again', function () {
+    beforeEach(function () {
+        proposeWeek($this->workspace, $this->owner);
+        runQueuedDraftJobs();
+        Queue::fake();
+
+        $this->monday = DB::table('posts')->orderBy('scheduled_at')->value('id');
+    });
+
+    it('repeats nothing while the drafts are where they were planned', function () {
+        $plan = planFor($this->workspace, '2026-11-30');
+
+        expect($plan->posts)->toBe([])->and($plan->taken)->toBe(3);
+    });
+
+    it('does not open a slot again because its draft was moved to another time', function (?string $movedTo) {
+        DB::table('posts')->where('id', $this->monday)->update(['scheduled_at' => $movedTo]);
+
+        $plan = planFor($this->workspace, '2026-11-30');
+
+        expect($plan->posts)->toBe([])->and($plan->taken)->toBe(3);
+        expect(fn () => proposeWeek($this->workspace, $this->owner))->toThrow(ProposalRefused::class, 'nothing to draft');
+    })->with([
+        'later the same day' => ['2026-11-30 15:00:00'],
+        'another day of the week' => ['2026-12-03 12:00:00'],
+        'another week' => ['2026-12-10 08:00:00'],
+        'no time at all' => [null],
+    ]);
+
+    it('still treats the slot as answered when the moved draft was approved, scheduled or published', function (PostState $state) {
+        DB::table('posts')->where('id', $this->monday)->update([
+            'state' => $state->value,
+            'scheduled_at' => '2026-11-30 15:00:00',
+            'approved_at' => now(),
+        ]);
+
+        expect(planFor($this->workspace, '2026-11-30')->posts)->toBe([]);
+    })->with([PostState::Approved, PostState::Scheduled, PostState::Published, PostState::Failed]);
+
+    it('opens the slot again when its draft was rejected or deleted', function (Closure $remove) {
+        $remove($this->monday);
+
+        $plan = planFor($this->workspace, '2026-11-30');
+
+        expect(count($plan->posts))->toBe(1)
+            ->and($plan->posts[0]->at->toDateTimeString())->toBe('2026-11-30 08:00:00')
+            ->and($plan->taken)->toBe(2);
+    })->with([
+        'rejected' => [fn (int $post) => DB::table('posts')->where('id', $post)->update(['state' => 'rejected'])],
+        'deleted' => [fn (int $post) => DB::table('posts')->where('id', $post)->delete()],
+    ]);
+
+    it('does not hold the slot in another week', function () {
+        expect(count(planFor($this->workspace, '2026-12-07')->posts))->toBe(3);
+    });
+
+    it('does not hold a slot for a run that failed', function () {
+        DB::table('posts')->where('id', $this->monday)->delete();
+        DB::table('draft_runs')->orderBy('id')->limit(1)->update(['status' => 'failed', 'failure_reason' => 'The provider refused the request.']);
+
+        expect(count(planFor($this->workspace, '2026-11-30')->posts))->toBe(1);
+    });
+});
+
 describe('limits', function () {
     it('refuses a second proposal while the first is pending or running', function (Closure $advance) {
         $first = proposeWeek($this->workspace, $this->owner);
@@ -258,12 +322,15 @@ describe('limits', function () {
     });
 
     it('locks the workspace before it reads or writes a draft run, so two requests cannot both pass the checks', function () {
+        // The page worked the plan out earlier; only the start is watched.
+        $seen = planFor($this->workspace, '2026-11-30')->fingerprint();
+
         $statements = [];
         DB::listen(function ($query) use (&$statements) {
             $statements[] = strtolower($query->sql);
         });
 
-        proposeWeek($this->workspace, $this->owner);
+        proposeWeek($this->workspace, $this->owner, '2026-11-30', $seen);
 
         $position = function (Closure $matches) use (&$statements): ?int {
             foreach ($statements as $index => $sql) {
