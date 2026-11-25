@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Drafting\DraftGenerators;
+use App\Domain\Drafting\PromptRenderer;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Support\Health\CheckBackingServices;
 use Carbon\CarbonImmutable;
@@ -11,6 +12,7 @@ use Illuminate\Foundation\Events\DiagnosingHealth;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -34,6 +36,8 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
 
         Event::listen(DiagnosingHealth::class, CheckBackingServices::class);
+
+        View::addNamespace(PromptRenderer::NAMESPACE, resource_path('prompts'));
     }
 
     /**
