@@ -29,7 +29,8 @@ use App\Domain\Drafting\PromptRenderer;
  * one token for every byte of the prompt and the schema plus an allowance
  * for what the provider wraps around them. A token is never shorter than a
  * byte, so this cannot be exceeded by a longer brief: a longer brief is a
- * longer prompt, and is measured.
+ * longer prompt, and is measured. Input is counted at the dearest input
+ * price of the model, which for some providers is writing to their cache.
  *
  * Both are estimates of the price table, not an invoice. Without a price
  * for the model there is neither.
@@ -87,7 +88,7 @@ final class ProposalCost
             $posts * min(DraftingLimits::expectedOutputTokens(), $context->maxTokens),
         ));
 
-        $worst = $this->costs->estimate(new DraftUsage(
+        $worst = $this->costs->atMost(new DraftUsage(
             $context->provider,
             $context->model,
             $worstInput * $answers,
