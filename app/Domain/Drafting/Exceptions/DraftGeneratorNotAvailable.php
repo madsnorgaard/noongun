@@ -27,6 +27,11 @@ class DraftGeneratorNotAvailable extends RuntimeException
         return new self('No default drafting provider is set. Set NOONGUN_DRAFT_PROVIDER.');
     }
 
+    public static function notOffered(string $provider, int $workspaceId): self
+    {
+        return new self("Workspace #{$workspaceId} chose provider [{$provider}], which this instance does not offer. Add it to NOONGUN_DRAFT_PROVIDERS, or an owner of the workspace chooses another provider under Settings, Drafting.");
+    }
+
     public static function modelMissing(string $provider): self
     {
         return new self("No model is configured for provider [{$provider}]. Set it in config/noongun.php under drafting.providers.{$provider}.model.");

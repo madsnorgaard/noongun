@@ -39,15 +39,58 @@ class DraftGenerators
     ) {}
 
     /**
-     * The provider a workspace drafts with. Every workspace uses the
-     * configured default for now; a choice per workspace (M5) is added here
-     * and nowhere else.
+     * The provider a workspace drafts with: the one its owner chose, or the
+     * default of the instance when none was chosen. This is the one place
+     * that decides it.
+     *
+     * A choice the instance does not offer (any more) is not replaced by
+     * the default: the brief would go to a vendor the workspace did not
+     * choose. Drafting stops until an owner chooses again.
      *
      * @throws DraftGeneratorNotAvailable
      */
     public function providerFor(Workspace $workspace): string
     {
-        return DraftingConfig::defaultProvider() ?? throw DraftGeneratorNotAvailable::noDefaultProvider();
+        $chosen = $workspace->drafting_provider;
+
+        if ($chosen === null) {
+            return DraftingConfig::defaultProvider() ?? throw DraftGeneratorNotAvailable::noDefaultProvider();
+        }
+
+        if (! in_array($chosen, $this->offered(), true)) {
+            throw DraftGeneratorNotAvailable::notOffered($chosen, $workspace->id);
+        }
+
+        return $chosen;
+    }
+
+    /**
+     * The providers a workspace may choose from: those the operator offers
+     * (the default one and NOONGUN_DRAFT_PROVIDERS) that are configured.
+     *
+     * @return list<string>
+     */
+    public function offered(): array
+    {
+        return array_values(array_intersect(DraftingConfig::offeredProviders(), $this->providers()));
+    }
+
+    /**
+     * Makes the provider the one the workspace drafts with from now on.
+     * Runs that were opened for another provider are not drafted with this
+     * one (DraftingContextChanged), and the daily limits count runs
+     * whatever their provider, so a change opens no new allowance.
+     *
+     * @throws DraftGeneratorNotAvailable when the instance does not offer the provider
+     */
+    public function choose(Workspace $workspace, string $provider): void
+    {
+        if (! in_array($provider, $this->offered(), true)) {
+            throw DraftGeneratorNotAvailable::notOffered($provider, $workspace->id);
+        }
+
+        $workspace->drafting_provider = $provider;
+        $workspace->save();
     }
 
     /**
