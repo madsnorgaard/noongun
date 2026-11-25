@@ -54,6 +54,7 @@ final class PostPresenter
             'version' => $this->version($post),
             'variants' => $post->variants->sortBy('id')->values()->map($this->variant(...))->all(),
             'problems' => (object) $this->problems($post),
+            'origin' => $this->origin($post),
             'can' => [
                 'update' => $mayChange && $state === PostState::Draft,
                 'approve' => $mayChange && $state === PostState::Draft,
@@ -64,6 +65,32 @@ final class PostPresenter
                 'retry' => $mayChange && $state === PostState::Failed,
                 'delete' => $mayChange && DeletePost::allows($post),
             ],
+        ];
+    }
+
+    /**
+     * Where a generated post came from, read from its draft run, or null
+     * for a post written by hand. The rationale and the alternative text
+     * are what a model wrote: the pages show them as plain text.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function origin(Post $post): ?array
+    {
+        $run = $post->draftRun;
+
+        if ($run === null) {
+            return null;
+        }
+
+        return [
+            'pillar' => $run->pillar?->name,
+            'idea' => $run->idea?->title,
+            'provider' => Str::headline($run->provider),
+            'model' => $run->model,
+            'rationale' => $run->rationale,
+            'alt_text' => $run->alt_text,
+            'generated_at' => $run->finished_at?->toIso8601String(),
         ];
     }
 

@@ -46,7 +46,23 @@ export type Post = {
     variants: PostVariant[];
     /** Why the post cannot go out as it stands, keyed by field. */
     problems: Record<string, string[]>;
+    /** Where a generated post came from. Null for one written by hand. */
+    origin: PostOrigin | null;
     can: PostAbilities;
+};
+
+/**
+ * What the draft run of a generated post recorded. The rationale and the
+ * alternative text are what a model wrote: show them as text only.
+ */
+export type PostOrigin = {
+    pillar: string | null;
+    idea: string | null;
+    provider: string;
+    model: string;
+    rationale: string | null;
+    alt_text: string | null;
+    generated_at: string | null;
 };
 
 export type ChannelOption = {

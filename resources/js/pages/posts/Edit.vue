@@ -916,6 +916,67 @@ const locked = computed(() => {
                     Owners and editors of this workspace can change posts.
                 </p>
 
+                <!-- What a model wrote about its own draft. Shown as text
+                     only, never as markup or a link. -->
+                <section
+                    v-if="post?.origin"
+                    class="grid gap-3 rounded-xl bg-card p-5.5 shadow-xs"
+                    data-test="post-origin"
+                >
+                    <div class="grid gap-1">
+                        <h2 class="text-sm text-muted-foreground">
+                            Where this draft came from
+                        </h2>
+                        <p class="text-base">
+                            Generated from your brief
+                            <template v-if="post.origin.generated_at">
+                                on
+                                <span class="font-mono">{{
+                                    formatDateTime(
+                                        post.origin.generated_at,
+                                        timezone,
+                                    )
+                                }}</span>
+                            </template>
+                            by
+                            <span class="font-mono">{{
+                                post.origin.model
+                            }}</span>
+                            ({{ post.origin.provider }}). Nobody has checked it
+                            yet: read it before you approve it.
+                        </p>
+                    </div>
+                    <dl class="grid gap-3 text-base">
+                        <div v-if="post.origin.pillar" class="grid gap-0.5">
+                            <dt class="text-sm text-muted-foreground">
+                                Pillar
+                            </dt>
+                            <dd>{{ post.origin.pillar }}</dd>
+                        </div>
+                        <div v-if="post.origin.idea" class="grid gap-0.5">
+                            <dt class="text-sm text-muted-foreground">Idea</dt>
+                            <dd class="break-words">{{ post.origin.idea }}</dd>
+                        </div>
+                        <div v-if="post.origin.rationale" class="grid gap-0.5">
+                            <dt class="text-sm text-muted-foreground">
+                                Why it was drafted this way, in the words of the
+                                model
+                            </dt>
+                            <dd class="break-words whitespace-pre-line">
+                                {{ post.origin.rationale }}
+                            </dd>
+                        </div>
+                        <div v-if="post.origin.alt_text" class="grid gap-0.5">
+                            <dt class="text-sm text-muted-foreground">
+                                Suggested alternative text for an image
+                            </dt>
+                            <dd class="break-words whitespace-pre-line">
+                                {{ post.origin.alt_text }}
+                            </dd>
+                        </div>
+                    </dl>
+                </section>
+
                 <p v-if="post" class="px-1 text-base">
                     <Link
                         :href="create()"
