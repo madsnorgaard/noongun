@@ -4,6 +4,7 @@ use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Http\Middleware\RedirectToFirstRunSetup;
 use App\Http\Middleware\ResolveCurrentWorkspace;
+use App\Http\Middleware\SecurityHeaders;
 use App\Support\TrustedHosts;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
@@ -33,7 +34,7 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
 
-        $middleware->web(append: [
+        $middleware->web(prepend: [SecurityHeaders::class], append: [
             RedirectToFirstRunSetup::class,
             ResolveCurrentWorkspace::class,
             HandleAppearance::class,

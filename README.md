@@ -246,6 +246,14 @@ health check uses. A request for any other host gets a 400 response. If every
 page answers 400 after an update, `APP_URL` does not match the address in the
 browser, or the proxy rewrites the `Host` header.
 
+Every page is sent with `X-Content-Type-Options: nosniff`,
+`X-Frame-Options: DENY`, `Content-Security-Policy: frame-ancestors 'none'` and
+`Referrer-Policy: same-origin`, so the app cannot be shown inside a frame on
+another site. Over HTTPS it also sends `Strict-Transport-Security` for one
+year, without subdomains: a browser that has opened the app over HTTPS refuses
+plain HTTP for that host name from then on. The Content-Security-Policy does
+not restrict scripts or styles yet.
+
 To update, pull and rebuild. Migrations run when the `app` container starts.
 
 ```sh
