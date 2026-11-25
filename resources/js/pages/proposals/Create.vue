@@ -354,11 +354,11 @@ function start(): void {
                                 </span>
                             </dd>
                             <dd v-else class="text-muted-foreground">
-                                Drafting is not available.
+                                None yet. See what is missing on the left.
                             </dd>
                         </div>
 
-                        <div v-if="count > 0" class="grid gap-0.5">
+                        <div v-if="count > 0 && generator" class="grid gap-0.5">
                             <dt class="text-sm text-muted-foreground">
                                 Expected cost, about
                             </dt>
