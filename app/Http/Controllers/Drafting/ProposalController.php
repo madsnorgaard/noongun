@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Drafting;
 
 use App\Domain\Drafting\Actions\ProposeWeek;
+use App\Domain\Drafting\DraftBudget;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\Models\DraftRun;
@@ -32,7 +33,7 @@ class ProposalController extends Controller
         private readonly ProposalPresenter $presenter,
     ) {}
 
-    public function create(Request $request, PlanWeek $planWeek, ProposalChecks $checks): Response
+    public function create(Request $request, PlanWeek $planWeek, ProposalChecks $checks, DraftBudget $budget): Response
     {
         Gate::authorize('create', DraftRun::class);
 
@@ -61,7 +62,7 @@ class ProposalController extends Controller
             'limits' => [
                 'posts_per_proposal' => DraftingLimits::postsPerProposal(),
                 'runs_per_day' => DraftingLimits::runsPerDay(),
-                'runs_used' => $checks->runsInLastDay(),
+                'runs_used' => $budget->usedByWorkspace(),
                 'max_attempts' => DraftingLimits::maxAttempts(),
             ],
             'links' => $this->presenter->links(),

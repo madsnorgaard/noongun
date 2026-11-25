@@ -4,6 +4,7 @@ namespace App\Domain\Drafting\Planning;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Drafting\DraftBudget;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\DraftRunStatus;
@@ -26,6 +27,7 @@ final class ProposalChecks
     public function __construct(
         private readonly DraftGenerators $generators,
         private readonly ChannelManager $channels,
+        private readonly DraftBudget $budget,
     ) {}
 
     /**
@@ -92,16 +94,16 @@ final class ProposalChecks
         }
 
         $limit = DraftingLimits::runsPerDay();
-        $used = $this->runsInLastDay();
+        $used = $this->budget->usedByWorkspace();
 
         if ($posts > 0 && $used + $posts > $limit) {
             $refusals[] = ProposalRefused::because(
                 ProposalRefused::DAILY_LIMIT,
-                (string) __('This workspace may generate :limit drafts in 24 hours and has generated :used. This proposal needs :posts. Try again later, or ask the operator of this instance to raise the limit.', [
+                (string) __('This workspace can draft :limit posts in 24 hours and has used :used. This proposal needs :posts.', [
                     'limit' => $limit,
                     'used' => $used,
                     'posts' => $posts,
-                ]),
+                ]).' '.self::howToGetMore('NOONGUN_DRAFT_MAX_RUNS_PER_DAY'),
             );
         }
 
@@ -109,12 +111,15 @@ final class ProposalChecks
     }
 
     /**
-     * How many draft runs the workspace opened in the last 24 hours,
-     * whatever became of them: a failed run may have been paid for.
+     * What a person can do about a limit. On a self-hosted instance the
+     * reader runs the instance, so the setting is named; a tenant can only
+     * wait.
      */
-    public function runsInLastDay(): int
+    private static function howToGetMore(string $setting): string
     {
-        return DraftRun::query()->where('created_at', '>', now()->subDay())->count();
+        return config('noongun.mode') === 'self_hosted'
+            ? (string) __('Try again later, or raise :setting in the environment of this instance.', ['setting' => $setting])
+            : (string) __('Try again later.');
     }
 
     private function whyNotAvailable(Workspace $workspace): ProposalRefused

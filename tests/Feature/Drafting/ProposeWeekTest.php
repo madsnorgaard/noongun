@@ -3,6 +3,8 @@
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Content\PostState;
 use App\Domain\Drafting\Actions\ProposeWeek;
+use App\Domain\Drafting\Console\RecoverStuckDraftRuns;
+use App\Domain\Drafting\DraftBudget;
 use App\Domain\Drafting\Exceptions\DraftingNotAllowed;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\GenerateDraftJob;
@@ -293,15 +295,66 @@ describe('limits', function () {
     it('refuses a proposal that would take the workspace over its draft runs for 24 hours', function () {
         config(['noongun.drafting.limits.runs_per_day' => 5]);
 
-        inWorkspace($this->workspace, fn () => DraftRun::factory()->count(2)->succeeded()->create());
-        inWorkspace($this->workspace, fn () => DraftRun::factory()->failed()->create());
+        inWorkspace($this->workspace, fn () => DraftRun::factory()->count(3)->succeeded()->create());
 
         $refusal = expectRefused(ProposalRefused::DAILY_LIMIT);
 
-        expect($refusal->getMessage())->toContain('may generate 5 drafts in 24 hours')
-            ->and($refusal->getMessage())->toContain('has generated 3')
+        expect($refusal->getMessage())->toContain('can draft 5 posts in 24 hours')
+            ->and($refusal->getMessage())->toContain('has used 3')
             ->and($refusal->getMessage())->toContain('needs 3');
     });
+
+    it('counts a run that reached a provider or may still do so, and no other', function (Closure $make, bool $counts) {
+        // Three posts are planned and three runs are allowed: one more that counts is one too many.
+        config(['noongun.drafting.limits.runs_per_day' => 3]);
+
+        $run = inWorkspace($this->workspace, fn () => $make()->create());
+
+        if ($counts) {
+            expectRefused(ProposalRefused::DAILY_LIMIT, fn () => proposeWeek($this->workspace, $this->owner));
+
+            return;
+        }
+
+        // An open run would stand in the way for another reason.
+        expect(DB::table('draft_runs')->where('id', $run->id)->value('status'))->toBe('failed')
+            ->and(proposeWeek($this->workspace, $this->owner))->toHaveCount(3);
+    })->with([
+        'written' => [fn () => DraftRun::factory()->succeeded(), true],
+        'failed after the provider answered' => [fn () => DraftRun::factory()->failed()->afterCreating(
+            fn (DraftRun $run) => DB::table('draft_runs')->where('id', $run->id)->update(['attempts' => 2, 'input_tokens' => 2400, 'output_tokens' => 600]),
+        ), true],
+        'could not be queued' => [fn () => DraftRun::factory()->failed(ProposeWeek::NOT_QUEUED), false],
+        'never picked up' => [fn () => DraftRun::factory()->failed(RecoverStuckDraftRuns::NEVER_STARTED), false],
+        'turned away for a wrong key' => [fn () => DraftRun::factory()->failed('The provider did not accept the API key.'), false],
+        'turned away for an unknown model' => [fn () => DraftRun::factory()->failed('The provider does not know this model.'), false],
+    ]);
+
+    it('counts a run that is still open towards the day', function (string $status) {
+        config(['noongun.drafting.limits.runs_per_day' => 3]);
+
+        inWorkspace($this->workspace, fn () => $status === 'running' ? DraftRun::factory()->running()->create() : DraftRun::factory()->create());
+
+        expect(inWorkspace($this->workspace, fn () => app(DraftBudget::class)->usedByWorkspace()))->toBe(1);
+    })->with(['pending', 'running']);
+
+    it('does not lock a person out for a day who tried a wrong key three times', function () {
+        config(['noongun.drafting.limits.runs_per_day' => 5]);
+
+        inWorkspace($this->workspace, fn () => DraftRun::factory()->count(9)->failed('The provider did not accept the API key.')->create());
+
+        expect(proposeWeek($this->workspace, $this->owner))->toHaveCount(3);
+    });
+
+    it('names the setting to a person who runs the instance, and not to a tenant', function (string $mode, bool $named) {
+        config(['noongun.mode' => $mode, 'noongun.drafting.limits.runs_per_day' => 2]);
+
+        $message = expectRefused(ProposalRefused::DAILY_LIMIT)->getMessage();
+
+        expect(str_contains($message, 'NOONGUN_DRAFT_MAX_RUNS_PER_DAY'))->toBe($named)
+            ->and($message)->toContain('Try again later')
+            ->and($message)->not->toContain('ask the operator');
+    })->with([['self_hosted', true], ['saas', false]]);
 
     it('counts only the runs of the last 24 hours and only those of the workspace', function () {
         config(['noongun.drafting.limits.runs_per_day' => 5]);

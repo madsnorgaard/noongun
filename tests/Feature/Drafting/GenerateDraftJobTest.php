@@ -308,14 +308,27 @@ describe('failures', function () {
     it('does not try again once the workspace has used its draft runs for the day', function () {
         config(['noongun.drafting.limits.runs_per_day' => 1]);
 
+        inWorkspace($this->workspace, fn () => DraftRun::factory()->succeeded()->create());
         $run = proposedRun();
         $this->generator->failRetryable();
 
         runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
 
-        expect(DB::table('draft_runs')->count())->toBe(1)
+        expect(DB::table('draft_runs')->count())->toBe(2)
             ->and(freshRun($run)->status)->toBe('failed');
         Queue::assertNothingPushed();
+    });
+
+    it('does try again when the only run of the day is the one that failed without spending', function () {
+        config(['noongun.drafting.limits.runs_per_day' => 1]);
+
+        $run = proposedRun();
+        $this->generator->failRetryable();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        expect(retriesOf($run))->toHaveCount(1);
+        Queue::assertPushed(GenerateDraftJob::class, 1);
     });
 
     it('fails the run with words a person can act on when the key is gone, without calling a provider', function () {

@@ -185,7 +185,7 @@ final class GenerateDraftJob implements ShouldQueue
             return;
         }
 
-        if (DraftRun::query()->where('created_at', '>', now()->subDay())->count() >= DraftingLimits::runsPerDay()) {
+        if (app(DraftBudget::class)->usedByWorkspace() >= DraftingLimits::runsPerDay()) {
             return;
         }
 
