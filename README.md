@@ -37,6 +37,12 @@ If port 8080 is taken, choose another before the first run:
 NOONGUN_HTTP_PORT=8081 ./setup
 ```
 
+The app is published on `127.0.0.1` only, so other machines on the network
+cannot reach it. To open it to them, set `NOONGUN_HTTP_PORT` in `.env` to an
+address and a port, for example `0.0.0.0:8080`, and run `./dev up`. Docker
+bypasses host firewalls for published ports, so do this only on a network you
+trust.
+
 ## Daily commands
 
 ```sh
@@ -250,7 +256,7 @@ Do not change `APP_KEY` on an instance that has data.
 | Variable | Default | Meaning |
 |---|---|---|
 | `NOONGUN_MODE` | `self_hosted` | `self_hosted`: one workspace, created on first run, registration closed. `saas` is not built yet. |
-| `NOONGUN_HTTP_PORT` | `8080` | Host port for the web app. Keep `APP_URL` in step. Accepts an address too, for example `127.0.0.1:8090`. |
+| `NOONGUN_HTTP_PORT` | `127.0.0.1:8080` | Where the web app is published on the host, as `address:port`. Keep the port of `APP_URL` in step. A bare port, for example `8080`, is published on every network interface; an `.env` from before this default still has that form. |
 | `NOONGUN_VITE_PORT` | `5173` | Host port for `./dev vite`. |
 | `NOONGUN_AUTO_MIGRATE` | `true` | Run migrations when the `app` container starts. |
 | `NOONGUN_TRUSTED_PROXIES` | empty | Reverse proxies whose forwarded headers are trusted: comma separated addresses or CIDR ranges, or `*`. |

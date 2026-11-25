@@ -39,3 +39,12 @@ trust the proxy's forwarded headers.
   session cookie name if two instances share one hostname.
 - Backups of the database, the volumes and `.env` are not covered here. They
   belong to M7.
+
+## Update, 2026-11-25
+
+The development stack no longer publishes the web port on every interface.
+`docker-compose.yml` defaults `NOONGUN_HTTP_PORT` to `127.0.0.1:8080`, and
+`./setup` writes a bare port as `127.0.0.1:<port>` when it creates `.env`. A
+bare port in an existing `.env` is still published on every interface, because
+Compose cannot tell a port from an address and a port inside one variable.
+Change it to `127.0.0.1:<port>` by hand.

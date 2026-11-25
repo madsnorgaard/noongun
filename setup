@@ -7,6 +7,9 @@
 # Set NOONGUN_HTTP_PORT before the first run to use another port than 8080:
 #
 #   NOONGUN_HTTP_PORT=8081 ./setup
+#
+# A bare port is published on 127.0.0.1 only. Give an address as well to
+# publish it elsewhere, for example NOONGUN_HTTP_PORT=0.0.0.0:8081.
 
 set -euo pipefail
 
@@ -39,9 +42,13 @@ docker info > /dev/null 2>&1 || fail "Cannot talk to the Docker daemon. Is it ru
 say "Preparing .env"
 if [ ! -f .env ]; then
     cp .env.example .env
-    port="${NOONGUN_HTTP_PORT:-8080}"
-    env_set NOONGUN_HTTP_PORT "$port"
-    env_set APP_URL "http://localhost:$port"
+    publish="${NOONGUN_HTTP_PORT:-8080}"
+    case "$publish" in
+        *:*) ;;
+        *) publish="127.0.0.1:$publish" ;;
+    esac
+    env_set NOONGUN_HTTP_PORT "$publish"
+    env_set APP_URL "http://localhost:${publish##*:}"
     echo "Created .env from .env.example"
 else
     echo ".env already exists, keeping it"
@@ -56,6 +63,7 @@ fi
 
 port="$(env_get NOONGUN_HTTP_PORT)"
 port="${port:-8080}"
+port="${port##*:}"
 
 if [ -z "$(docker compose ps -q app 2> /dev/null)" ] && (exec 3<> "/dev/tcp/127.0.0.1/$port") 2> /dev/null; then
     fail "Port $port is already in use. Set NOONGUN_HTTP_PORT and APP_URL in .env to a free port and run ./setup again."
