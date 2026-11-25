@@ -20,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withCommands([
         __DIR__.'/../app/Domain/Scheduling/Console',
         __DIR__.'/../app/Domain/Channels/Console',
+        __DIR__.'/../app/Domain/Drafting/Console',
     ])
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->prependToPriorityList(
