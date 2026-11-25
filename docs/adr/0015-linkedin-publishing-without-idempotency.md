@@ -1,6 +1,6 @@
 # 0015 - LinkedIn: publishing without an idempotency key, and the typed link card
 
-Date: 2026-11-25. Status: proposed.
+Date: 2026-11-25. Status: accepted.
 
 ## Context
 

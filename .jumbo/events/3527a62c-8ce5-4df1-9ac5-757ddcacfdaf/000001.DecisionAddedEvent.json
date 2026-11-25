@@ -1,0 +1,17 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "3527a62c-8ce5-4df1-9ac5-757ddcacfdaf",
+  "version": 1,
+  "timestamp": "2026-11-25T18:53:17.554Z",
+  "payload": {
+    "title": "ADR 0015: LinkedIn publishing without idempotency",
+    "context": "M5 (#5): LinkedIn has no idempotency key and a self-serve app cannot read posts back, and it builds no link preview.",
+    "rationale": "A publish is retried only when the connection was never made or LinkedIn answered 429 in its own format. A timeout after sending, 5xx, 409 or an unreadable answer is outcome unknown: the post fails and nothing is resent without a member confirming the post is not there. The link card title and description are typed by the author or drafted with the post, never scraped, are part of the approval fingerprint and block approval when missing. No thumbnail until the media model exists.",
+    "alternatives": [
+      "Retry on 5xx and timeouts",
+      "Fetch the link to build a preview"
+    ],
+    "consequences": "A post that did go out after an unknown outcome stays listed as failed until M7 adds a way to mark it as published."
+  },
+  "seq": 1
+}
