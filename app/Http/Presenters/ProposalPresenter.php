@@ -44,7 +44,7 @@ final class ProposalPresenter
         ProposalRefused::BRIEF_MISSING => ['routes' => ['brief.edit'], 'label' => 'Write the brief'],
         ProposalRefused::NO_CHANNEL => ['routes' => ['channels.index'], 'label' => 'Go to Channels'],
         ProposalRefused::NO_SLOT => ['routes' => ['slots.index'], 'label' => 'Set the slots'],
-        ProposalRefused::NO_KEY => ['routes' => ['settings.drafting.edit', 'settings.llm.edit', 'llm-credentials.edit'], 'label' => 'Add an API key'],
+        ProposalRefused::NO_KEY => ['routes' => ['llm-key.edit'], 'label' => 'Add an API key'],
         ProposalRefused::NOTHING_TO_DRAFT => ['routes' => ['slots.index'], 'label' => 'Look at the slots'],
         ProposalRefused::IN_PROGRESS => ['routes' => ['queue.index'], 'label' => 'See the progress in the queue'],
     ];
