@@ -32,7 +32,11 @@ const props = defineProps<{
     provider: { name: string; label: string } | null;
     available: boolean;
     key_source: 'workspace' | 'instance' | null;
-    credential: { last_four: string; set_at: string | null } | null;
+    credential: {
+        unreadable: boolean;
+        last_four: string;
+        set_at: string | null;
+    } | null;
     can: { manage: boolean };
 }>();
 
@@ -55,6 +59,10 @@ const explanation = computed(() => {
         return props.available
             ? 'Drafts can be requested in this workspace.'
             : 'Drafts cannot be requested yet. An owner of this workspace can add an API key.';
+    }
+
+    if (props.credential?.unreadable) {
+        return 'The stored key can no longer be read, so drafts cannot be requested. Enter the key again below, or remove it.';
     }
 
     if (props.key_source === 'workspace') {
@@ -126,7 +134,14 @@ function remove(): void {
             </div>
             <div class="grid gap-0.5">
                 <dt class="text-muted-foreground">Key of this workspace</dt>
-                <dd v-if="credential" class="text-base">
+                <dd
+                    v-if="credential?.unreadable"
+                    class="text-base text-destructive"
+                    data-test="llm-key-unreadable"
+                >
+                    Cannot be read
+                </dd>
+                <dd v-else-if="credential" class="text-base">
                     Ends in
                     <span class="font-mono text-xs">{{
                         credential.last_four

@@ -7,12 +7,15 @@
  * log line.
  */
 
+use App\Domain\Drafting\Exceptions\LlmCredentialMissing;
 use App\Domain\Drafting\Generators\PrismDraftGenerator;
+use App\Domain\Drafting\LlmCredentialResolver;
 use App\Domain\Drafting\Models\InstanceLlmCredential;
 use App\Domain\Drafting\Models\LlmCredential;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
 use App\Models\User;
+use Illuminate\Encryption\Encrypter;
 use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -87,7 +90,7 @@ describe('the page', function () {
         $response->assertOk()->assertInertia(fn (Assert $page) => $page
             ->where('available', true)
             ->where('key_source', 'workspace')
-            ->where('credential', ['last_four' => 'wxyz', 'set_at' => '2026-11-25T10:00:00+00:00'])
+            ->where('credential', ['unreadable' => false, 'last_four' => 'wxyz', 'set_at' => '2026-11-25T10:00:00+00:00'])
             ->where('can.manage', true));
 
         expect(everythingSentBack($response))->not->toContain(PAGE_TEST_KEY)->not->toContain('PageTestKey');
@@ -196,7 +199,7 @@ describe('storing a key', function () {
 
         $this->actingAs($this->owner)->get(route('llm-key.edit'))
             ->assertInertia(fn (Assert $page) => $page
-                ->where('credential', ['last_four' => 'abcd', 'set_at' => '2026-11-25T11:00:00+00:00']));
+                ->where('credential', ['unreadable' => false, 'last_four' => 'abcd', 'set_at' => '2026-11-25T11:00:00+00:00']));
     });
 
     it('sends the key nowhere: not to the page, the session, the redirect or the next page', function () {
@@ -370,5 +373,101 @@ describe('another workspace', function () {
             ->delete(route('llm-key.destroy'));
 
         expect(storedKey($this->other)?->api_key)->toBe(PAGE_OTHER_KEY);
+    });
+});
+
+/*
+ * After APP_KEY is changed, or a database is restored next to another key,
+ * the stored key cannot be decrypted any more. The owner must still be able
+ * to see that, enter the key again or remove it.
+ */
+describe('a stored key that can no longer be read', function () {
+    beforeEach(function () {
+        storeKeyAs($this->owner);
+
+        $this->ciphertext = (new Encrypter(random_bytes(32), 'AES-256-CBC'))->encryptString(PAGE_TEST_KEY);
+
+        DB::table('llm_credentials')->where('workspace_id', $this->workspace->id)->update(['api_key' => $this->ciphertext]);
+    });
+
+    it('is shown as such to the owner, and the page still opens', function () {
+        $response = $this->actingAs($this->owner)->get(route('llm-key.edit'));
+
+        $response->assertOk()->assertInertia(fn (Assert $page) => $page
+            ->where('available', false)
+            ->where('key_source', null)
+            ->where('credential.unreadable', true)
+            ->where('credential.last_four', '')
+            ->where('can.manage', true));
+
+        expect(everythingSentBack($response))->not->toContain($this->ciphertext)->not->toContain('PageTestKey');
+    });
+
+    it('does not break the page for editors and viewers', function (Role $role) {
+        $this->actingAs(workspaceMember($this->workspace, $role))->get(route('llm-key.edit'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page->where('available', false)->where('credential', null));
+    })->with([Role::Editor, Role::Viewer]);
+
+    it('can be replaced', function () {
+        storeKeyAs($this->owner, PAGE_OTHER_KEY)->assertSessionHasNoErrors()->assertRedirect(route('llm-key.edit'));
+
+        expect(DB::table('llm_credentials')->count())->toBe(1)
+            ->and(storedKey($this->workspace)?->api_key)->toBe(PAGE_OTHER_KEY);
+
+        $this->actingAs($this->owner)->get(route('llm-key.edit'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('available', true)
+                ->where('key_source', 'workspace')
+                ->where('credential.unreadable', false)
+                ->where('credential.last_four', 'abcd'));
+    });
+
+    it('can be removed', function () {
+        $this->actingAs($this->owner)->delete(route('llm-key.destroy'))->assertRedirect(route('llm-key.edit'));
+
+        expect(DB::table('llm_credentials')->count())->toBe(0);
+    });
+
+    it('counts as no key for drafting, with a message that says what to do, and is not replaced by the instance key', function () {
+        config(['noongun.drafting.providers.anthropic.api_key' => PAGE_OTHER_KEY]);
+
+        expect(fn () => app(LlmCredentialResolver::class)->resolve($this->workspace, 'anthropic'))
+            ->toThrow(function (LlmCredentialMissing $missing) {
+                expect($missing->getMessage())->toBe('The API key stored for this workspace can no longer be read. An owner of this workspace can enter it again under Settings, Drafting.')
+                    ->and(json_encode($missing->context()))->not->toContain($this->ciphertext)
+                    ->and($missing->operatorDetail())->toContain('APP_KEY');
+            });
+    });
+
+    it('is skipped for the environment key when it is the stored instance key that cannot be read', function () {
+        DB::table('llm_credentials')->delete();
+        InstanceLlmCredential::store('anthropic', PAGE_TEST_KEY);
+        DB::table('llm_credentials')->update(['api_key' => $this->ciphertext]);
+
+        expect(app(LlmCredentialResolver::class)->has($this->workspace, 'anthropic'))->toBeFalse();
+
+        config(['noongun.drafting.providers.anthropic.api_key' => PAGE_OTHER_KEY]);
+
+        expect(app(LlmCredentialResolver::class)->resolve($this->workspace, 'anthropic')->reveal())->toBe(PAGE_OTHER_KEY);
+    });
+
+    it('writes no ciphertext to the log', function () {
+        config([
+            'logging.default' => 'capture',
+            'logging.channels.capture' => ['driver' => 'monolog', 'handler' => TestHandler::class],
+        ]);
+
+        $handler = Log::channel('capture')->getLogger()->getHandlers()[0];
+
+        $this->actingAs($this->owner)->get(route('llm-key.edit'))->assertOk();
+        app(LlmCredentialResolver::class)->has($this->workspace, 'anthropic');
+        storeKeyAs($this->owner, PAGE_OTHER_KEY);
+
+        foreach ($handler->getRecords() as $record) {
+            expect(json_encode($record->toArray()))->not->toContain($this->ciphertext)->not->toContain(substr($this->ciphertext, 0, 40));
+        }
+
+        expect(true)->toBeTrue();
     });
 });

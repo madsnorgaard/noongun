@@ -17,6 +17,12 @@ use App\Domain\Workspaces\Models\Workspace;
  * 3. the instance key from the environment, config('noongun.drafting.providers.*.api_key').
  *
  * The scope of the result says who pays, and is recorded on the draft run.
+ *
+ * A stored key that cannot be decrypted (APP_KEY was changed) is no key. For
+ * the workspace's own key that ends the search: the workspace chose to pay
+ * itself, so the instance key does not step in silently, and the owner is
+ * told to enter the key again. An unreadable stored instance key is passed
+ * over for the one in the environment.
  */
 class LlmCredentialResolver
 {
@@ -32,14 +38,21 @@ class LlmCredentialResolver
             fn (): ?LlmCredential => LlmCredential::query()->where('provider', $provider)->first(),
         );
 
-        if ($own !== null && $own->api_key !== '') {
-            return new LlmKey($provider, $own->api_key, CredentialScope::Workspace);
+        $ownKey = $own?->readableKey();
+
+        if ($own !== null && $ownKey === null) {
+            throw LlmCredentialMissing::unreadable($provider, $workspace);
+        }
+
+        if ($ownKey !== null && $ownKey !== '') {
+            return new LlmKey($provider, $ownKey, CredentialScope::Workspace);
         }
 
         $stored = InstanceLlmCredential::query()->where('provider', $provider)->first();
+        $storedKey = $stored?->readableKey();
 
-        if ($stored !== null && $stored->api_key !== '') {
-            return new LlmKey($provider, $stored->api_key, CredentialScope::Instance);
+        if ($storedKey !== null && $storedKey !== '') {
+            return new LlmKey($provider, $storedKey, CredentialScope::Instance);
         }
 
         $fromEnvironment = DraftingConfig::instanceKey($provider);
@@ -48,7 +61,7 @@ class LlmCredentialResolver
             return new LlmKey($provider, $fromEnvironment, CredentialScope::Instance);
         }
 
-        throw LlmCredentialMissing::for($provider, $workspace);
+        throw LlmCredentialMissing::for($provider, $workspace, storedInstanceKeyUnreadable: $stored !== null && $storedKey === null);
     }
 
     public function has(Workspace $workspace, string $provider): bool

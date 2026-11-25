@@ -481,7 +481,10 @@ fills in:
 
 Keep `.env` private and back it up together with the database: without the
 `APP_KEY` encrypted values (platform tokens and LLM keys) cannot be read.
-Do not change `APP_KEY` on an instance that has data.
+Do not change `APP_KEY` on an instance that has data. If it was changed, a
+stored LLM key can no longer be read: drafting stops for that workspace, the
+Drafting settings page says so, and an owner enters the key again or removes
+it there.
 
 | Variable | Default | Meaning |
 |---|---|---|

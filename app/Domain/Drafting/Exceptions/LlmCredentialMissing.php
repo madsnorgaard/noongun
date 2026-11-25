@@ -11,7 +11,25 @@ use Illuminate\Support\Str;
  */
 class LlmCredentialMissing extends DraftingException
 {
-    public static function for(string $provider, Workspace $workspace): static
+    /**
+     * The workspace has a key of its own, but it cannot be decrypted any
+     * more. The stored value is not part of the exception.
+     */
+    public static function unreadable(string $provider, Workspace $workspace): static
+    {
+        return new static(
+            $provider,
+            'The API key stored for this workspace can no longer be read. An owner of this workspace can enter it again under Settings, Drafting.',
+            false,
+            null,
+            [
+                'workspace_id' => $workspace->id,
+                self::OPERATOR_DETAIL => "The key stored for provider [{$provider}] and workspace #{$workspace->id} cannot be decrypted. This happens when APP_KEY was changed or the database was restored next to another APP_KEY.",
+            ],
+        );
+    }
+
+    public static function for(string $provider, Workspace $workspace, bool $storedInstanceKeyUnreadable = false): static
     {
         return new static(
             $provider,
@@ -20,7 +38,7 @@ class LlmCredentialMissing extends DraftingException
             null,
             [
                 'workspace_id' => $workspace->id,
-                self::OPERATOR_DETAIL => "Provider [{$provider}] has no key: none stored for workspace #{$workspace->id}, none stored for the instance, and none in the environment.",
+                self::OPERATOR_DETAIL => "Provider [{$provider}] has no key: none stored for workspace #{$workspace->id}, ".($storedInstanceKeyUnreadable ? 'the one stored for the instance cannot be decrypted (APP_KEY was changed)' : 'none stored for the instance').', and none in the environment.',
             ],
         );
     }
