@@ -487,6 +487,50 @@ is `<APP_URL>/auth/linkedin/callback`. There is no setup wizard: the Client ID
 and Client Secret go into `.env` as `LINKEDIN_CLIENT_ID` and
 `LINKEDIN_CLIENT_SECRET`, and the Channels page shows the redirect address.
 
+## 2026-11-25 - after the review of the combined M5 branch
+
+No new documentation was read. These are changes to what the adapter does
+with what was already known, and things that are still open.
+
+- **Scopes at sign-in.** The adapter no longer asks the token answer for every
+  configured scope. It is not known whether LinkedIn lists `openid` and
+  `profile` in `scope`, and refusing a correct app would send the member to
+  fix something that is not broken. Now: when the answer names scopes and the
+  one for posting (`publish_scope` in `config/noongun.php`, `w_member_social`)
+  is not among them, the sign-in is refused. When the answer names no scopes,
+  it is accepted. `openid` and `profile` are proven by the userinfo call that
+  follows. A token that cannot post after all is found out by the first
+  publish, which answers `403` and marks the channel. The same rule applies
+  to token introspection and to a renewed token from the refresh grant.
+- **Hashtags.** A hashtag is kept only at the start of the text or after
+  white space, made of letters and digits, and ending there. The `#` of an
+  address fragment (`page#section`), of `C#`, and of a tag with an underscore
+  (`#cape_town`) is escaped and sent as plain text, because the underscore is
+  reserved too and nothing documents how the two meet. Still unverified:
+  whether LinkedIn turns an unescaped `#word` from the API into a hashtag at
+  all, how a tag in a non-Latin alphabet behaves, whether an escaped `\#`
+  shows as a plain number sign, and whether a web address with escaped
+  characters in it (`a\_b`) is still recognised as a link in the text.
+- **Text that is not valid UTF-8** is refused before anything is sent. The
+  database does not store such text, so this is a second line.
+- **Messages.** What a member reads is written by the adapter, in plain words
+  with a next step. What LinkedIn itself wrote is kept in the log context as
+  `platform_message` and `code`, with the credentials of the request removed
+  and cut to 300 characters. Status codes and scope names are in the context
+  only.
+- **A post planned for after the access ends** cannot be approved or
+  scheduled. This is a refusal and not advice, because the publishing job
+  does not call a platform with an access that has run out, so the post would
+  fail for certain. The check compares the time with `token_expires_at` as
+  recorded at sign-in.
+- **Nothing calls `refreshToken()` yet.** Checking tokens on a schedule is M7.
+  Until then a token that the member revoked on LinkedIn is noticed only when
+  a publish fails with `401`, and `token_expires_at` is whatever the sign-in
+  reported.
+- **Outcome unknown.** A LinkedIn post can end as failed although it is
+  public, and there is no action yet to record that it is there. See
+  `docs/adr/0015-linkedin-publishing-without-idempotency.md`.
+
 ## Spike results
 
 To be filled in after running `scripts/spike/linkedin/publish-and-delete.sh`
@@ -506,5 +550,6 @@ and one real connect through the Channels page. Until then the fixtures under
 - `scope` in the token answer and in the introspection answer (values and separator):
 - Token introspection allowed for a self-serve app (yes or no):
 - How escaped reserved characters render, and whether the hashtag is one:
+- Whether an address with an escaped character in it is still a link in the text:
 - Length limit of `commentary`, and whether backslashes count:
 - Link post without a thumbnail: how the card looks:
