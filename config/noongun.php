@@ -107,4 +107,54 @@ return [
         'stuck_after_minutes' => (int) env('NOONGUN_PUBLISH_STUCK_AFTER_MINUTES', 30),
     ],
 
+    /*
+    | Drafting with an LLM. "provider" is the provider every workspace uses
+    | unless it is given another one. Each entry under "providers" names the
+    | DraftGenerator class, the instance API key and the model; adding a
+    | provider means one entry here. Model names, limits and prices are set
+    | here and nowhere else.
+    |
+    | "api_key" is the instance key, set by the operator. A key stored for
+    | the instance in the database goes before it, and a workspace's own key
+    | goes before both. See docs/adr/0011-drafting-contract.md.
+    |
+    | "max_tokens" limits one answer, including the tokens a model spends on
+    | thinking. "timeout" is the limit in seconds for one call.
+    | "prompt_version" names a folder under resources/prompts/draft/ and is
+    | stored on every draft run.
+    |
+    | "prices" is in "currency" per million tokens, per provider and model,
+    | and is only used to estimate the cost of a run. NOONGUN_DRAFT_PRICES
+    | adds or replaces entries, as JSON in the same shape:
+    | {"anthropic":{"some-model":{"input":1.5,"output":7.5}}}
+    | A model without a price gives a run without a cost estimate.
+    */
+
+    'drafting' => [
+        'provider' => env('NOONGUN_DRAFT_PROVIDER', 'anthropic'),
+        'max_tokens' => (int) env('NOONGUN_DRAFT_MAX_TOKENS', 16000),
+        'timeout' => (int) env('NOONGUN_DRAFT_TIMEOUT', 120),
+        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v1'),
+        'currency' => env('NOONGUN_DRAFT_PRICE_CURRENCY', 'USD'),
+
+        'providers' => [
+            'anthropic' => [
+                'generator' => 'App\\Domain\\Drafting\\Generators\\PrismDraftGenerator',
+                'api_key' => env('ANTHROPIC_API_KEY'),
+                'model' => env('NOONGUN_DRAFT_ANTHROPIC_MODEL', 'claude-opus-5-5'),
+            ],
+        ],
+
+        'prices' => array_replace_recursive(
+            [
+                'anthropic' => [
+                    'claude-opus-5-5' => ['input' => 4.00, 'output' => 20.00],
+                    'claude-sonnet-5-5' => ['input' => 2.00, 'output' => 10.00],
+                    'claude-haiku-5-5' => ['input' => 0.10, 'output' => 0.50],
+                ],
+            ],
+            (array) json_decode((string) env('NOONGUN_DRAFT_PRICES', '{}'), true),
+        ),
+    ],
+
 ];

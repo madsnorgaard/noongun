@@ -19,6 +19,7 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing" force="true"/>
+        <env name="ANTHROPIC_API_KEY" value="" force="true"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file" force="true"/>
         <env name="BCRYPT_ROUNDS" value="4" force="true"/>
         <env name="BROADCAST_CONNECTION" value="null" force="true"/>
@@ -29,6 +30,7 @@
         <env name="FACEBOOK_APP_ID" value="" force="true"/>
         <env name="FACEBOOK_APP_SECRET" value="" force="true"/>
         <env name="MAIL_MAILER" value="array" force="true"/>
+        <env name="NOONGUN_DRAFT_PRICES" value="" force="true"/>
         <env name="NOONGUN_MODE" value="self_hosted" force="true"/>
         <env name="QUEUE_CONNECTION" value="sync" force="true"/>
         <env name="SESSION_DRIVER" value="array" force="true"/>

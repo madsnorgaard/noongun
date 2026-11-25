@@ -17,6 +17,11 @@ class PostNotEditable extends LogicException
         return new self("Post #{$post->getKey()} is {$post->state->value} and can only be edited as a draft. Return it to draft first.");
     }
 
+    public static function originAlreadySet(Post $post): self
+    {
+        return new self("Post #{$post->getKey()} is not a draft without an origin, so no draft run can be recorded on it.");
+    }
+
     public static function missingPost(PostVariant $variant): self
     {
         return new self("Variant #{$variant->getKey()} has no post in the current workspace.");

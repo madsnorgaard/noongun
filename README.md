@@ -244,7 +244,7 @@ fills in:
   by the containers belong to you
 
 Keep `.env` private and back it up together with the database: without the
-`APP_KEY` encrypted values (such as platform tokens, later) cannot be read.
+`APP_KEY` encrypted values (platform tokens and LLM keys) cannot be read.
 Do not change `APP_KEY` on an instance that has data.
 
 | Variable | Default | Meaning |
@@ -271,13 +271,25 @@ Do not change `APP_KEY` on an instance that has data.
 | `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `180` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of a publishing job. |
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
+| `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
+| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider drafts are generated with. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The Claude model drafts are generated with. |
+| `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
+| `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call to the provider. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
+| `NOONGUN_DRAFT_PRICES` | empty | Prices per million tokens, as JSON, added to the table in `config/noongun.php`: `{"anthropic":{"model-name":{"input":4,"output":20}}}`. Only used to estimate what a draft run cost. |
+| `NOONGUN_DRAFT_PRICE_CURRENCY` | `USD` | Currency of the price table. |
 
 Times are stored in UTC. Each workspace has its own timezone for display and
 scheduling. The application timezone is fixed to UTC in `config/app.php` and
 is not an environment setting.
 
 Other settings (timezone list, locales, plan limits, feature flags, the list
-of platforms and their adapters) live in `config/noongun.php`.
+of platforms and their adapters, the LLM providers and their price table) live
+in `config/noongun.php`.
+
+The cost on a draft run is an estimate from that price table, not an invoice.
+Check the prices against the provider's price list when you change the model.
 
 ## Connecting a Facebook Page
 
