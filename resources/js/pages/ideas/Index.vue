@@ -122,7 +122,9 @@ function confirmDelete(): void {
         <header class="grid gap-1">
             <h1 class="text-title md:text-display">Ideas</h1>
             <p class="text-muted-foreground">
-                Topics to write about. A draft can be written from an idea.
+                Topics to draft posts from. When a week is proposed, each
+                drafted post takes the oldest unused idea of its pillar, then
+                the oldest unused idea without a pillar.
             </p>
         </header>
 
@@ -217,6 +219,17 @@ function confirmDelete(): void {
                                 class="rounded-sm bg-secondary px-2.5 py-1 text-sm"
                             >
                                 {{ idea.pillar_name }}
+                            </span>
+                            <span
+                                v-if="idea.posts_count > 0"
+                                class="text-sm text-muted-foreground"
+                                :data-test="`idea-used-${idea.id}`"
+                            >
+                                Used in
+                                <span class="font-mono">{{
+                                    idea.posts_count
+                                }}</span>
+                                {{ idea.posts_count === 1 ? 'post' : 'posts' }}
                             </span>
                         </div>
                         <!-- The address is shown as text. It becomes a link
