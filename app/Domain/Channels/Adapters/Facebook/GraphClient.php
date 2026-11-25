@@ -3,15 +3,12 @@
 namespace App\Domain\Channels\Adapters\Facebook;
 
 use App\Domain\Channels\Exceptions\ChannelException;
-use GuzzleHttp\Exception\ConnectException;
-use GuzzleHttp\Exception\ConnectTimeoutException;
-use GuzzleHttp\Exception\NetworkTimeoutException;
+use App\Domain\Channels\Support\NetworkFailure;
 use GuzzleHttp\Exception\TransferException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Response;
 use SensitiveParameter;
-use Throwable;
 
 /**
  * Sends one request to the Graph API and turns every failure into a
@@ -124,7 +121,7 @@ final class GraphClient
             };
         } catch (ConnectionException|TransferException $exception) {
             // Deliberately not chained: the original message holds the URL.
-            $neverConnected = $this->neverConnected($exception);
+            $neverConnected = NetworkFailure::neverConnected($exception);
             unset($exception);
 
             if ($safeToRepeat || $neverConnected) {
@@ -151,33 +148,6 @@ final class GraphClient
         }
 
         throw $this->failure($response, $failure, $endpoint, $secrets, $safeToRepeat);
-    }
-
-    /**
-     * True only when the connection was never established: the host or
-     * proxy did not resolve, the connection was refused, or the TLS
-     * handshake failed. No byte of the request left this machine then.
-     *
-     * This relies on Guzzle 8, where ConnectException means exactly that and
-     * timeouts have classes of their own. In Guzzle 7 a ConnectException
-     * could also be a timeout after the request was sent, so without the
-     * Guzzle 8 classes nothing is taken as "never connected". A timeout
-     * while connecting is not trusted either: Guzzle tells it apart from a
-     * later timeout by the text of the curl error.
-     */
-    private function neverConnected(Throwable $exception): bool
-    {
-        if (! class_exists(NetworkTimeoutException::class)) {
-            return false;
-        }
-
-        for ($cause = $exception; $cause !== null; $cause = $cause->getPrevious()) {
-            if ($cause instanceof TransferException) {
-                return $cause instanceof ConnectException && ! $cause instanceof ConnectTimeoutException;
-            }
-        }
-
-        return false;
     }
 
     /**
