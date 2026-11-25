@@ -16,11 +16,11 @@ Findings about OpenAI through Prism are in `docs/platform-notes/llm.md`.
 
 ### The choice is one nullable column
 
-`workspaces.drafting_provider` holds the name of the provider an owner chose.
-Null means "the default of the instance" (`NOONGUN_DRAFT_PROVIDER`), so an
-instance that never offers a second provider behaves as before, and nothing
-is migrated. `DraftGenerators::providerFor()` stays the one place that
-decides, and `DraftGenerators::choose()` the one place that writes.
+`workspaces.drafting_provider` holds the name of the provider a workspace is
+settled on. Null means "the default of the instance"
+(`NOONGUN_DRAFT_PROVIDER`), so nothing is migrated.
+`DraftGenerators::providerFor()` stays the one place that decides, and
+`choose()` and `settleOn()` in the same class are the only places that write.
 
 A settings table was not added: there is one value, and it belongs to the
 workspace row.
@@ -36,12 +36,43 @@ Choosing is for owners, behind a recently confirmed password and the throttle
 of the key form, because it decides who is sent the brief and whose account
 pays.
 
+### A workspace that has used a provider stays with it
+
+Null is for a workspace that has not used drafting. The column is filled, by
+`DraftGenerators::settleOn()`, at the first of these:
+
+- an owner chooses a provider;
+- an owner stores a key for the provider in use (a key for another provider
+  settles nothing: it is not in use);
+- a draft of the workspace is about to be asked of a provider, in
+  `GenerateDraft`, after every check that can still stop it without a call.
+
+From then on the operator changing `NOONGUN_DRAFT_PROVIDER` does not move the
+workspace. An earlier version left such a workspace on null, and a change of
+the default sent its brief to another company, on the instance key, without
+anyone in the workspace doing anything. That was the same harm the next
+section prevents for an explicit choice, so it gets the same protection.
+
+The first draft is the moment used, and not only the key, because a workspace
+on the instance key stores no key and still hands its brief to a vendor.
+Looking at a page, a plan or a cost settles nothing, and neither does a run
+that ends before a provider is called.
+
+There is no way back to "follow the default": once a workspace is settled,
+another provider is an owner's choice, behind a confirmation that says what
+is sent, who pays and what happens to drafts in progress. The settings page
+says which of the two states the workspace is in.
+
 ### A choice that is no longer offered stops drafting
 
 When a workspace chose a provider and the operator takes it off the list,
 `providerFor()` throws. The workspace is not moved to the default provider:
 its content would go to a company it did not choose. The settings page says
-so and an owner chooses again.
+so and an owner chooses again. Because an owner can put this right, members
+read a sentence of its own on the plan page and on a failed run
+(`DraftGeneratorNotAvailable::CHOICE_NOT_OFFERED`, refusal reason
+`provider_choice` with a link to the settings), and not the sentence that
+sends them to the operator.
 
 ### A key belongs to one provider
 
@@ -55,6 +86,11 @@ for that provider. On top of the lookup:
 - a generator reads the value with `LlmKey::revealFor($provider)`, which
   throws for another provider;
 - the key form refuses a key that starts the way another provider's keys do.
+
+For OpenAI, Prism reads an organization and a project for the whole instance
+from the environment and sends them as headers. They belong to the operator's
+account, so `PrismDialect::connectionOptions()` takes them out of a call that
+uses a key a workspace brought.
 
 A workspace can hold a key for each provider. Removing a key is possible for
 any provider it holds one for, also one that is no longer offered.
@@ -91,8 +127,13 @@ price (`CostEstimator::atMost()`).
 
 ## Consequences
 
-- With `NOONGUN_DRAFT_PROVIDERS` empty nothing changes for an existing
-  instance, and the page shows one provider.
+- With `NOONGUN_DRAFT_PROVIDERS` empty the page shows one provider. An
+  existing workspace is settled on the default at its next draft.
+- An operator who changes `NOONGUN_DRAFT_PROVIDER` moves only workspaces that
+  never drafted. To move the others, an owner of each chooses, or the
+  operator stops offering the old provider and they stop until one does.
+- A workspace cannot return to following the default. If that is wanted
+  later it is a deliberate action for an owner, not a default.
 - An operator who removes a provider from the list stops drafting for the
   workspaces that chose it until an owner acts. That is intended, and it is
   the one way a workspace can lose drafting without doing anything.

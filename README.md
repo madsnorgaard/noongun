@@ -240,6 +240,14 @@ workspaces that chose it stop drafting until an owner chooses again; they are
 not moved to the default provider, because their content would then go to a
 company they did not choose.
 
+A workspace follows `NOONGUN_DRAFT_PROVIDER` only until it is settled on a
+provider: when an owner chooses one, when an owner stores a key for the
+provider in use, or when its first draft is asked of a provider. From then on
+changing `NOONGUN_DRAFT_PROVIDER` does not move it. Its brief has gone to one
+company and goes to another only when an owner chooses that, with a
+confirmation that says what is sent and who pays. There is no setting to
+follow the default again.
+
 Changing the provider opens no new allowance: the daily limits count draft
 runs whatever provider wrote them. A draft that was asked for before the
 change is not written with the new provider; it fails and says so, and
@@ -308,7 +316,12 @@ conversation. The prompt is built in one place
 - a source address, when one is given. The address is sent as text. Noon Gun
   does not open it, and neither does the model;
 - for each target channel its number, its platform and the limits of that
-  platform, such as the longest text.
+  platform, such as the longest text;
+- earlier posts of the workspace as examples of its voice. None are sent
+  today: the list is filled from the insights milestone on.
+
+The Drafting settings page names the same parts to the owner who chooses a
+provider; a test holds that list against the request.
 
 Never sent: platform tokens, API keys, the names of your Pages and profiles,
 the name of the workspace, names or email addresses of users, and anything
@@ -457,7 +470,10 @@ was changed in between, the run fails with that reason and nothing is spent.
   hours. A run counts when it reached the provider, whether it succeeded or
   failed, or is still waiting or at work. A run that spent nothing does not
   count: one that could not be queued, one no worker picked up, one the
-  provider turned away for a wrong key or an unknown model.
+  provider turned away for a wrong key or an unknown model, one whose
+  provider could not be reached at all. A call that timed out counts as a
+  run that reached the provider, with no tokens known: the provider may have
+  billed it.
 - All workspaces together draft at most
   `NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY` posts in 24 hours on the key of the
   instance, counted the same way. A workspace with a key of its own is not
