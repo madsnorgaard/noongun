@@ -167,6 +167,36 @@ in Noon Gun never deletes anything from a platform. See
 
 Owners and editors write, approve, schedule and delete. Viewers can look.
 
+## Brief, pillars and slots
+
+Drafts are written from what a workspace keeps on these pages.
+
+- **Brief** (`/brief`) holds the title, the brief itself, the voice rules and
+  the calls to action. The brief is plain text or markdown and is kept exactly
+  as it is typed. Voice rules are lists: one for every channel and one for each
+  platform. A new workspace is offered a set of house rules to start from.
+  They are put in the form and are not saved until the brief is saved.
+- Saving the brief always adds a version. Earlier versions are listed, can be
+  read, and are never changed. There is no restore: to go back to an earlier
+  version, copy its text into the brief and save it as a new version.
+- **Pillars** (`/brief/pillars`) are the themes of the workspace, each with a
+  number of posts per week. Deleting a pillar keeps its ideas and posts and
+  leaves them without a pillar. The page says how many before it happens.
+- **Slots** (`/brief/slots`) are the preferred posting times of a channel: a
+  weekday and a time on the clock of the workspace. A slot stays at the same
+  time of day when the clocks change. It proposes a firing time for a draft
+  and schedules nothing. Channels that are disconnected or not yet confirmed
+  cannot be given slots.
+- **Ideas** (`/ideas`) is a list of topics: a title, and optionally a pillar,
+  a source and notes. The source is stored as an address and is given to a
+  draft as text. Noon Gun never opens it.
+
+Do not put passwords or private data about other people in the brief, an idea
+or a pillar. This text is what is sent to the drafting service.
+
+Owners and editors change these pages. Viewers can read them. See
+`docs/adr/0011-drafting-contract.md`.
+
 ## Drafting with an LLM
 
 Noon Gun can write drafts from the brief of a workspace with a language model.

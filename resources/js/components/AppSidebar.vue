@@ -10,8 +10,10 @@ import {
     SidebarHeader,
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
+import { edit as brief } from '@/routes/brief';
 import { index as calendar } from '@/routes/calendar';
 import { index as channels } from '@/routes/channels';
+import { index as ideas } from '@/routes/ideas';
 import { index as queue } from '@/routes/queue';
 import type { NavItem } from '@/types';
 
@@ -25,6 +27,14 @@ const mainNavItems: NavItem[] = [
     {
         title: 'Calendar',
         href: calendar(),
+    },
+    {
+        title: 'Brief',
+        href: brief(),
+    },
+    {
+        title: 'Ideas',
+        href: ideas(),
     },
     {
         title: 'Channels',
