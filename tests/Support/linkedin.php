@@ -44,6 +44,7 @@ function configureLinkedIn(array $overrides = []): void
             'api_url' => LINKEDIN_TEST_API,
             'web_url' => LINKEDIN_TEST_WEB,
             'scopes' => ['openid', 'profile', 'w_member_social'],
+            'publish_scope' => 'w_member_social',
             ...$overrides,
         ],
     ]);

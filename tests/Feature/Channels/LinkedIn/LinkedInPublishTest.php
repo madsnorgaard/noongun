@@ -108,6 +108,21 @@ describe('publish', function () {
             === "Prices \\(ZAR\\) are up 5% \\* see \\[the list\\] #coffee\nMail us \\@ a\\_b\\@example.com");
     });
 
+    it('refuses a text that is not valid UTF-8 before anything is sent, so it never goes out empty', function () {
+        fakeLinkedIn();
+
+        $variant = ($this->variant)();
+        $variant->setRawAttributes([...$variant->getAttributes(), 'body' => "Fresh beans \xC3\x28 on Thursday."]);
+
+        expect(fn () => ($this->publish)($variant))->toThrow(
+            fn (PublishFailed $exception) => expect($exception->retryable)->toBeFalse()
+                ->and($exception->getMessage())->toContain('characters that cannot be read')
+                ->and($exception->context())->not->toHaveKey('outcome_unknown'),
+        );
+
+        Http::assertNothingSent();
+    });
+
     it('sends a link as an article with the title and description the author gave, and the UTM values', function () {
         fakeLinkedIn();
 
@@ -190,6 +205,45 @@ describe('publish', function () {
         'throttled with advice: retry after it' => [fn () => linkedInResponse('error_rate_limit', 429, ['Retry-After' => '120']), true, false, 120, ['http_status' => 429]],
     ]);
 
+    it('tells the member what to do in plain words and keeps what LinkedIn wrote for the log', function (string $fixture, int $status, string $says, string $kept) {
+        fakeLinkedIn(['posts' => linkedInResponse($fixture, $status)]);
+
+        try {
+            ($this->publish)(($this->variant)());
+            $this->fail('Expected PublishFailed.');
+        } catch (PublishFailed $exception) {
+            expect($exception->getMessage())->toContain($says)
+                ->not->toContain('LinkedIn said')
+                ->not->toContain($kept)
+                ->not->toContain('HTTP')
+                ->and($exception->context()['platform_message'])->toBe($kept);
+        }
+    })->with([
+        'validation' => ['error_validation', 422, 'check the text and the link', 'com.linkedin.content.common.exception.BadRequestResponseException: Article title is required'],
+        'too long' => ['error_field_too_long', 400, 'shorten it', 'commentary length exceeds the allowed maximum'],
+        'missing scope' => ['error_permission', 403, 'Connect the profile again on the Channels page', 'Not enough permissions to access: partnerApiPostsExternal.CREATE.20261101'],
+        'expired token' => ['error_token_expired', 401, 'Connect the profile again on the Channels page', 'The token used in the request has expired'],
+    ]);
+
+    it('cuts what LinkedIn wrote to size and removes the credentials from every field it keeps', function () {
+        fakeLinkedIn(['posts' => Http::response([
+            'status' => 400,
+            'code' => 'BAD '.LINKEDIN_TEST_TOKEN.' '.str_repeat('c', 2000),
+            'message' => LINKEDIN_TEST_SECRET.' '.str_repeat('m', 5000),
+        ], 400)]);
+
+        try {
+            ($this->publish)(($this->variant)());
+            $this->fail('Expected PublishFailed.');
+        } catch (PublishFailed $exception) {
+            $context = $exception->context();
+
+            expect(mb_strlen($context['platform_message']))->toBeLessThanOrEqual(303)
+                ->and(mb_strlen($context['code']))->toBeLessThanOrEqual(303)
+                ->and(json_encode($context).$exception->getMessage())->not->toContain(LINKEDIN_TEST_TOKEN)->not->toContain(LINKEDIN_TEST_SECRET);
+        }
+    });
+
     it('says how to fix a sunset API version', function () {
         fakeLinkedIn(['posts' => linkedInResponse('error_version', 426)]);
 
@@ -206,7 +260,9 @@ describe('publish', function () {
             expect($exception->retryable)->toBeFalse()
                 ->and($exception->requiresReconnect)->toBeFalse()
                 ->and($exception->retryAfterSeconds)->toBeNull()
-                ->and($exception->getMessage())->toContain('Check the profile before trying again.')
+                ->and($exception->getMessage())->toContain('Look at the profile. If the post is there, leave this as it is. If it is not, send it again.')
+                // No status code and nothing LinkedIn wrote reaches the member.
+                ->and($exception->getMessage())->not->toContain('HTTP')->not->toContain('Internal Server Error')
                 ->and($exception->context())->toMatchArray(['endpoint' => 'POST /rest/posts', 'outcome_unknown' => true, ...$context])
                 ->and($exception->getPrevious())->toBeNull();
         }
@@ -286,9 +342,11 @@ describe('publish', function () {
 
         expect(fn () => ($this->publish)($facebook))->toThrow(PublishFailed::class, 'not addressed to a LinkedIn profile');
 
-        DB::table('channels')->where('id', $this->channel->id)->update(['external_id' => 'abc)(urn:li:organization:1']);
+        foreach (['abc)(urn:li:organization:1', "abc123\n"] as $stored) {
+            DB::table('channels')->where('id', $this->channel->id)->update(['external_id' => $stored]);
 
-        expect(fn () => ($this->publish)(($this->variant)()))->toThrow(PublishFailed::class, 'member id is not valid');
+            expect(fn () => ($this->publish)(($this->variant)()))->toThrow(PublishFailed::class, 'The connection to this profile is damaged');
+        }
 
         Http::assertNothingSent();
     });
@@ -406,6 +464,15 @@ describe('refreshToken', function () {
         'the expiry has passed' => ['introspect_active', '2027-03-01 10:00:00'],
     ]);
 
+    it('stays active when the answer lists only the scope for posting', function () {
+        fakeLinkedIn(['introspect' => Http::response([...linkedInFixture('introspect_active'), 'scope' => 'w_member_social'])]);
+        $this->travelTo('2026-11-25 10:00:00');
+
+        $channel = inWorkspace($this->workspace, fn () => linkedInAdapter()->refreshToken($this->channel));
+
+        expect($channel->status)->toBe(ChannelStatus::Active)->and($channel->scopes)->toBe(['w_member_social']);
+    });
+
     it('keeps the recorded scopes when the answer names none', function () {
         $report = linkedInFixture('introspect_active');
         unset($report['scope']);
@@ -462,6 +529,7 @@ describe('refreshToken', function () {
 
             $channel = inWorkspace($this->workspace, fn () => linkedInAdapter()->refreshToken($this->channel));
 
+            // The answer names no scopes: the recorded ones stand.
             expect($channel->access_token)->toBe('test-linkedin-access-token-renewed')
                 ->and($channel->refresh_token)->toBe('test-linkedin-refresh-token')
                 ->and($channel->token_expires_at?->toDateString())->toBe('2027-01-24')
@@ -476,6 +544,25 @@ describe('refreshToken', function () {
                     'client_id' => 'test-client-id',
                     'client_secret' => LINKEDIN_TEST_SECRET,
                 ]);
+        });
+
+        it('does not make the channel active with a renewed token that may no longer post', function () {
+            inWorkspace($this->workspace, fn () => $this->channel->markNeedsReconnect());
+            fakeLinkedIn(['token' => Http::response([...linkedInFixture('oauth_token_refreshed'), 'scope' => 'openid profile'])]);
+
+            $channel = inWorkspace($this->workspace, fn () => linkedInAdapter()->refreshToken($this->channel));
+
+            expect($channel->status)->toBe(ChannelStatus::NeedsReconnect)
+                ->and($channel->canPublish())->toBeFalse()
+                ->and(inWorkspace($this->workspace, fn () => $this->channel->fresh())->access_token)->toBe(LINKEDIN_TEST_TOKEN);
+        });
+
+        it('keeps the scopes a renewed token names when the one for posting is among them', function () {
+            fakeLinkedIn(['token' => Http::response([...linkedInFixture('oauth_token_refreshed'), 'scope' => 'w_member_social'])]);
+
+            $channel = inWorkspace($this->workspace, fn () => linkedInAdapter()->refreshToken($this->channel));
+
+            expect($channel->status)->toBe(ChannelStatus::Active)->and($channel->scopes)->toBe(['w_member_social']);
         });
 
         it('asks for a reconnect when the refresh token is refused', function () {
