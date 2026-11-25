@@ -2,14 +2,18 @@
 
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Drafting\Actions\ProposeWeek;
 use App\Domain\Drafting\Console\RecoverStuckDraftRuns;
 use App\Domain\Drafting\CredentialScope;
 use App\Domain\Drafting\DraftGenerators;
+use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
+use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\GenerateDraftJob;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Drafting\Models\LlmCredential;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
+use Illuminate\Contracts\Bus\Dispatcher;
 use Illuminate\Queue\MaxAttemptsExceededException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
@@ -319,6 +323,104 @@ describe('failures', function () {
 
         expect(DB::table('draft_runs')->count())->toBe(2)
             ->and(freshRun($run)->status)->toBe('failed');
+        Queue::assertNothingPushed();
+    });
+
+    it('does not try again once the key of the instance has no runs left for the day', function () {
+        config(['noongun.drafting.limits.instance_runs_per_day' => 2]);
+
+        $other = Workspace::factory()->create();
+        inWorkspace($other, fn () => DraftRun::factory()->count(2)->succeeded()->create());
+
+        $run = proposedRun();
+        $this->generator->failRetryable();
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        expect(retriesOf($run))->toBe([]);
+        Queue::assertNothingPushed();
+    });
+
+    it('opens the retry in the transaction that marks the run failed, under the lock a proposal takes', function () {
+        $run = proposedRun();
+        $this->generator->failRetryable();
+
+        $base = DB::transactionLevel();
+        $seen = [];
+        DB::listen(function ($query) use (&$seen) {
+            $seen[] = [strtolower($query->sql), DB::transactionLevel()];
+        });
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        $position = function (Closure $matches) use (&$seen): ?int {
+            foreach ($seen as $index => [$sql]) {
+                if ($matches($sql)) {
+                    return $index;
+                }
+            }
+
+            return null;
+        };
+
+        $lock = $position(fn (string $sql) => str_contains($sql, '"workspaces"') && str_contains($sql, 'for update'));
+        $failed = $position(fn (string $sql) => str_starts_with($sql, 'update "draft_runs"') && str_contains($sql, '"failure_reason"'));
+        $count = $position(fn (string $sql) => str_contains($sql, 'count(*)') && str_contains($sql, '"draft_runs"') && str_contains($sql, '"input_tokens" is not null'));
+        $opened = $position(fn (string $sql) => str_starts_with($sql, 'insert into "draft_runs"'));
+
+        expect($lock)->not->toBeNull()
+            ->and($failed)->toBeGreaterThan($lock)
+            ->and($count)->toBeGreaterThan($failed)
+            ->and($opened)->toBeGreaterThan($count)
+            // All four inside one transaction, which is over when the job returns.
+            ->and([$seen[$lock][1], $seen[$failed][1], $seen[$count][1], $seen[$opened][1]])->toBe(array_fill(0, 4, $base + 1))
+            ->and(DB::transactionLevel())->toBe($base);
+    });
+
+    it('lets no proposal start between a failed run and its retry', function () {
+        $run = proposedRun();
+        $this->generator->failRetryable();
+        slotIn($this->workspace, $this->channel, 1, '09:00');
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        // The failed run is closed and its retry is open: a workspace with a retry on its way is at work.
+        expect(fn () => proposeWeek($this->workspace, $this->owner))->toThrow(ProposalRefused::class, 'still being');
+        expect(DB::table('draft_runs')->count())->toBe(2);
+    });
+
+    it('closes the retry at once when it cannot be handed to the queue', function () {
+        $run = proposedRun();
+        $this->generator->failRetryable();
+
+        $this->mock(Dispatcher::class)
+            ->shouldReceive('dispatch')
+            ->andThrow(new RuntimeException('Connection refused: redis://user:secret@queue'));
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        $next = retriesOf($run)[0];
+
+        expect($next->status)->toBe('failed')
+            ->and($next->failure_reason)->toBe(ProposeWeek::NOT_QUEUED)
+            ->and(DB::table('draft_runs')->whereIn('status', ['pending', 'running'])->count())->toBe(0);
+    });
+
+    it('still closes the run when opening the retry goes wrong', function () {
+        $run = proposedRun();
+
+        // While the provider fails, the model name becomes one the database
+        // refuses, so the row for the retry cannot be written.
+        $this->generator->returnsOutput(function () {
+            config(['noongun.drafting.providers.'.DRAFT_TEST_PROVIDER.'.model' => str_repeat('m', 200)]);
+
+            throw DraftGenerationFailed::retryable(DRAFT_TEST_PROVIDER, 'The provider is busy.');
+        });
+
+        runDraftJob(new GenerateDraftJob($this->workspace->id, $run->id));
+
+        expect(freshRun($run))->toMatchObject(['status' => 'failed', 'failure_reason' => 'The provider is busy.'])
+            ->and(DB::table('draft_runs')->count())->toBe(1);
         Queue::assertNothingPushed();
     });
 

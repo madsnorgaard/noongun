@@ -12,8 +12,11 @@ use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\Exceptions\DraftingNotAllowed;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Workspaces\CurrentWorkspace;
+use App\Domain\Workspaces\Models\Workspace;
 use App\Models\User;
+use Closure;
 use DateTimeInterface;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
@@ -44,12 +47,13 @@ final class GenerateDraft
 
     /**
      * @param  User  $actor  the human who asked; an owner or editor of the workspace
+     * @param  (Closure(DraftRun, DraftingException): void)|null  $afterFailure  called once the run is marked failed for a DraftingException, in the same transaction and under the lock on the workspace row; a job opens the run for a retry here
      *
      * @throws DraftingException after the run was marked failed; its message is the stored reason
      * @throws DraftGeneratorNotAvailable after the run was marked failed
      * @throws DraftingNotAllowed after the run was marked failed, and before any provider was called
      */
-    public function handle(User $actor, DraftRun $run, DraftRequest $request, ?DateTimeInterface $plannedAt = null): ?Post
+    public function handle(User $actor, DraftRun $run, DraftRequest $request, ?DateTimeInterface $plannedAt = null, ?Closure $afterFailure = null): ?Post
     {
         if (! $run->markRunning()) {
             return null;
@@ -74,11 +78,7 @@ final class GenerateDraft
 
             return $this->createDraft->handle($actor, $run, $result, $plannedAt);
         } catch (DraftingException $failure) {
-            $run->markFailed(
-                $failure->getMessage(),
-                $failure->usage,
-                $failure->usage !== null ? $this->costs->estimate($failure->usage, $run->model) : null,
-            );
+            $this->settle($run, $failure, $afterFailure);
 
             throw $failure;
         } catch (Throwable $failure) {
@@ -87,6 +87,35 @@ final class GenerateDraft
                 : 'The draft could not be generated because of an unexpected error.');
 
             throw $failure;
+        }
+    }
+
+    /**
+     * Marks the run failed and lets the caller react, as one step for
+     * everyone else: under the lock on the workspace row that ProposeWeek
+     * takes, in one transaction. A run for a retry that $afterFailure opens
+     * therefore exists the moment the failed run stops being open, and no
+     * proposal can start in between.
+     *
+     * @param  (Closure(DraftRun, DraftingException): void)|null  $afterFailure
+     */
+    private function settle(DraftRun $run, DraftingException $failure, ?Closure $afterFailure): void
+    {
+        $cost = $failure->usage !== null ? $this->costs->estimate($failure->usage, $run->model) : null;
+
+        try {
+            DB::transaction(function () use ($run, $failure, $cost, $afterFailure): void {
+                Workspace::query()->lockForUpdate()->findOrFail($run->workspace_id);
+
+                if ($run->markFailed($failure->getMessage(), $failure->usage, $cost) && $afterFailure !== null) {
+                    $afterFailure($run, $failure);
+                }
+            });
+        } catch (Throwable $unexpected) {
+            // Whatever went wrong in the reaction, the run does not stay open.
+            $run->markFailed($failure->getMessage(), $failure->usage, $cost);
+
+            report($unexpected);
         }
     }
 }
