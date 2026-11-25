@@ -42,9 +42,10 @@ use Illuminate\Database\Eloquent\Builder;
  *    posts the end of the sequence is dropped; with fewer, the remaining
  *    posts are drafted from the brief alone, without a pillar.
  * 4. Ideas. A post takes the oldest idea of its pillar that no post that
- *    is not rejected has used. A post without a pillar takes one from the
- *    ideas without a pillar. When there is none it is drafted without an
- *    idea.
+ *    is not rejected has used, and when its pillar has none, or it has no
+ *    pillar, the oldest unused idea without a pillar. When there is none
+ *    either it is drafted without an idea. An idea of another pillar is
+ *    never borrowed.
  *
  * The same records give the same plan, which is what lets the page show it
  * before anything is spent.
@@ -165,11 +166,16 @@ final class PlanWeek
 
         foreach ($posts as $position => $post) {
             $pillar = $sequence[$position] ?? null;
-            $shelf = $pillar !== null ? $pillar->id : 0;
             $idea = null;
 
-            if (($ideas[$shelf] ?? []) !== []) {
-                $idea = array_shift($ideas[$shelf]);
+            // The ideas of the pillar first, then the ones without a
+            // pillar: an idea nobody filed is still an idea for the week.
+            foreach ([$pillar !== null ? $pillar->id : 0, 0] as $shelf) {
+                if (($ideas[$shelf] ?? []) !== []) {
+                    $idea = array_shift($ideas[$shelf]);
+
+                    break;
+                }
             }
 
             $posts[$position] = $post->about($pillar, $idea);

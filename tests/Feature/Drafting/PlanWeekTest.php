@@ -345,7 +345,32 @@ describe('ideas', function () {
 
         expect(plannedPillars($plan))->toBe(['Craft', 'Craft', null])
             ->and(array_map(fn (PlannedPost $post): ?int => $post->idea?->id, $plan->posts))
-            ->toBe([$rejectedOnly->id, null, $loose->id]);
+            // The second Craft post has no idea of its pillar left and takes the loose one.
+            ->toBe([$rejectedOnly->id, $loose->id, null]);
+    });
+
+    it('uses the ideas without a pillar when the pillar targets fill the week', function () {
+        foreach ([1, 2, 3, 4] as $weekday) {
+            slotIn($this->copenhagen, $this->channel, $weekday, '09:00');
+        }
+
+        $craft = pillarIn($this->copenhagen, ['name' => 'Craft', 'weekly_target' => 2]);
+        $offers = pillarIn($this->copenhagen, ['name' => 'Offers', 'weekly_target' => 2]);
+        $parked = pillarIn($this->copenhagen, ['name' => 'Parked', 'weekly_target' => 0]);
+
+        $looseOlder = ideaIn($this->copenhagen, null, ['title' => 'Loose, older']);
+        $ofCraft = ideaIn($this->copenhagen, $craft, ['title' => 'Of Craft']);
+        ideaIn($this->copenhagen, $parked, ['title' => 'Of a pillar that is not planned']);
+        $looseNewer = ideaIn($this->copenhagen, null, ['title' => 'Loose, newer']);
+
+        $plan = planFor($this->copenhagen, '2026-11-30');
+
+        // Every post has a pillar. Craft uses its own idea first; the rest
+        // take the loose ones, oldest first, and never one of another pillar.
+        expect(plannedPillars($plan))->toBe(['Craft', 'Offers', 'Craft', 'Offers'])
+            ->and(array_map(fn (PlannedPost $post): ?int => $post->idea?->id, $plan->posts))
+            ->toBe([$ofCraft->id, $looseOlder->id, $looseNewer->id, null])
+            ->and($offers->id)->not->toBe($craft->id);
     });
 });
 
