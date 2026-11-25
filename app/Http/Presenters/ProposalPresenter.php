@@ -5,6 +5,7 @@ namespace App\Http\Presenters;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\Pillar;
 use App\Domain\Drafting\DraftGenerators;
+use App\Domain\Drafting\DraftingConfig;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\DraftRunStatus;
 use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
@@ -19,7 +20,6 @@ use App\Domain\Workspaces\Models\Workspace;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Str;
 
 /**
  * What the pages show of a week proposal: the plan before it starts, and
@@ -46,6 +46,7 @@ final class ProposalPresenter
         ProposalRefused::NO_CHANNEL => ['routes' => ['channels.index'], 'label' => 'Go to Channels'],
         ProposalRefused::NO_SLOT => ['routes' => ['slots.index'], 'label' => 'Set the slots'],
         ProposalRefused::NO_KEY => ['routes' => ['llm-key.edit'], 'label' => 'Add an API key'],
+        ProposalRefused::CHOICE_NOT_OFFERED => ['routes' => ['llm-key.edit'], 'label' => 'Choose a provider'],
         ProposalRefused::NOTHING_TO_DRAFT => ['routes' => ['slots.index'], 'label' => 'Look at the slots'],
         ProposalRefused::IN_PROGRESS => ['routes' => ['queue.index'], 'label' => 'See the progress in the queue'],
     ];
@@ -141,7 +142,7 @@ final class ProposalPresenter
             return null;
         }
 
-        return ['provider' => Str::headline($context->provider), 'model' => $context->model];
+        return ['provider' => DraftingConfig::label($context->provider), 'model' => $context->model];
     }
 
     /**

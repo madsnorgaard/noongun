@@ -17,7 +17,7 @@ Each point is an assumption that the adapter or its tests rely on.
 
 | File | Assumption |
 |---|---|
-| `oauth_token.json` | `POST /oauth/v2/accessToken` as a form answers with `access_token`, `expires_in` (seconds) and `scope`. Documented. The documentation calls `scope` "space-delimited" and shows a single scope in its example; the adapter accepts spaces and commas. **The adapter refuses to connect when a configured scope is missing from `scope`**, so whether `openid` and `profile` are listed there next to `w_member_social` matters. |
+| `oauth_token.json` | `POST /oauth/v2/accessToken` as a form answers with `access_token`, `expires_in` (seconds) and `scope`. Documented. The documentation calls `scope` "space-delimited" and shows a single scope in its example; the adapter accepts spaces and commas. The adapter refuses to connect only when `scope` is present and lacks the scope for posting (`w_member_social`). It does not ask for `openid` and `profile` there, because it is not known whether LinkedIn lists them; the userinfo call proves those. An answer without `scope` is accepted. |
 | `oauth_token_with_refresh.json`, `oauth_token_refreshed.json` | An approved partner app also gets `refresh_token` and `refresh_token_expires_in`, and the refresh grant answers in the same shape. Documented. A self-serve app is documented not to get them; kept so the code path is tested. |
 | `oauth_token_missing_scope.json` | A scope that was not granted is absent from `scope`. Assumed. |
 | `userinfo.json` | `GET /v2/userinfo` with the bearer token answers with `sub`, `name`, `given_name`, `family_name`, `picture`, `locale`. Documented. The `sub` here is invented; the adapter accepts letters, digits, `_` and `-`. |
@@ -51,7 +51,8 @@ Not in a file, but assumed by the tests:
 - **Denied consent** comes back as `error=user_cancelled_authorize` or
   `error=user_cancelled_login`, with `state`. Documented.
 - **Escaping.** The commentary is sent in the "little" text format with every
-  reserved character escaped by a backslash, except the `#` of a hashtag. The
+  reserved character escaped by a backslash, except the `#` of a hashtag at
+  the start of a word that holds only letters and digits. The
   rule is documented; how escaped text renders, and whether LinkedIn counts
   the backslashes towards its length limit, is for the spike to show.
 - **The length limit of a post.** 3000 characters is not in the documentation

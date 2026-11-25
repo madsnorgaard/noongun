@@ -115,8 +115,8 @@ it('holds a post back until its link has a card the platform accepts', function 
     expect(fn () => inWorkspace($this->workspace, fn () => app(PostPreconditions::class)->assertReadyToPublish($post)))
         ->toThrow(PostNotPublishable::class);
 })->with([
-    'no title' => [[], 'link_title', 'The link for Alpha needs a title. This platform shows a link with the title you give it and reads nothing from the page.'],
-    'a title of spaces' => [['link_title' => '   '], 'link_title', 'The link for Alpha needs a title. This platform shows a link with the title you give it and reads nothing from the page.'],
+    'no title' => [[], 'link_title', 'The link for Alpha has no title. Facebook shows a link with the title you give it and reads nothing from the page. Open the post and type a title under the link.'],
+    'a title of spaces' => [['link_title' => '   '], 'link_title', 'The link for Alpha has no title. Facebook shows a link with the title you give it and reads nothing from the page. Open the post and type a title under the link.'],
     'a title that is too long' => [['link_title' => str_repeat('a', 21)], 'link_title', 'The link title for Alpha is 21 characters long. The limit is 20.'],
     'a description that is too long' => [['link_title' => 'Bread', 'link_description' => str_repeat('a', 41)], 'link_description', 'The link description for Alpha is 41 characters long. The limit is 40.'],
 ]);

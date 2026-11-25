@@ -335,7 +335,9 @@ describe('callback', function () {
         expect($message)->toContain('LinkedIn refused the sign-in.')
             ->not->toContain('test-auth-code')
             ->not->toContain(LINKEDIN_TEST_SECRET)
-            ->and($logged)->toContain('LinkedIn refused the sign-in.')
+            // What LinkedIn wrote is for the log, not for the member.
+            ->not->toContain('Refused:')
+            ->and($logged)->toContain('LinkedIn refused the sign-in.')->toContain('Refused:')
             ->not->toContain('test-auth-code')
             ->not->toContain(LINKEDIN_TEST_SECRET)
             ->and($response->headers->get('Location'))->not->toContain('test-auth-code')

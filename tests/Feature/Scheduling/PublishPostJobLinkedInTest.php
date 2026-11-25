@@ -134,7 +134,7 @@ it('never calls the Posts API again after an answer that leaves the outcome unkn
 
     expect(freshPost($this->post)->state)->toBe(PostState::Failed)
         ->and($variant->hasUnknownOutcome())->toBeTrue()
-        ->and($variant->error)->toContain('Check the profile before trying again')
+        ->and($variant->error)->toContain('Look at the profile. If the post is there, leave this as it is.')
         ->and($variant->error)->not->toContain(LINKEDIN_TEST_TOKEN)
         ->and($this->logged)->toContain('Publishing a variant failed.')
         ->and($this->logged)->not->toContain(LINKEDIN_TEST_TOKEN)->not->toContain(LINKEDIN_TEST_SECRET);

@@ -51,6 +51,8 @@ const props = defineProps<{
     key_source: 'workspace' | 'instance' | null;
     credential: Credential | null;
     chosen_not_offered: string | null;
+    follows_default: boolean;
+    sent_to_provider: string[];
     providers: ProviderRow[];
     can: { manage: boolean };
 }>();
@@ -65,6 +67,7 @@ const timezone = computed(
 const keyFor = ref<ProviderRow | null>(null);
 const removalOf = ref<ProviderRow | null>(null);
 const removing = ref(false);
+const choiceOf = ref<ProviderRow | null>(null);
 const choosing = ref<string | null>(null);
 const chooseError = ref<string | null>(null);
 
@@ -120,7 +123,33 @@ function keyLine(row: ProviderRow): string {
     return 'No key';
 }
 
-function choose(row: ProviderRow): void {
+const sentToProvider = computed(() => {
+    const parts = props.sent_to_provider;
+
+    if (parts.length < 2) {
+        return parts.join('');
+    }
+
+    return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`;
+});
+
+const stayLine = computed(() => {
+    if (props.provider === null) {
+        return null;
+    }
+
+    return props.follows_default
+        ? `This workspace has not drafted yet and follows the default of this instance, which is ${props.provider.label}. It stays with the provider of its first draft, of the key you store for it or of your choice here, also when the operator changes the default.`
+        : `This workspace stays with ${props.provider.label} until an owner chooses another provider here. A change of the default by the operator of this instance does not move it.`;
+});
+
+function choose(): void {
+    const row = choiceOf.value;
+
+    if (row === null) {
+        return;
+    }
+
     router.put(
         LlmKeyController.choose.url(),
         { provider: row.name },
@@ -131,7 +160,10 @@ function choose(row: ProviderRow): void {
                 chooseError.value = null;
             },
             onError: (errors) => (chooseError.value = errors.provider ?? null),
-            onFinish: () => (choosing.value = null),
+            onFinish: () => {
+                choosing.value = null;
+                choiceOf.value = null;
+            },
         },
     );
 }
@@ -207,8 +239,16 @@ function remove(): void {
         <Heading
             variant="small"
             title="Provider and keys"
-            description="The provider in use is sent your brief, your voice rules and the idea for each post, and nothing else. A key is used with its own provider only."
+            :description="`For each draft the provider in use is sent ${sentToProvider}. A key is used with its own provider only.`"
         />
+
+        <p
+            v-if="stayLine"
+            class="max-w-[72ch] text-base"
+            data-test="drafting-provider-stays"
+        >
+            {{ stayLine }}
+        </p>
 
         <ul class="grid gap-2" data-test="drafting-providers">
             <li
@@ -279,7 +319,7 @@ function remove(): void {
                         size="sm"
                         :disabled="choosing !== null"
                         :data-test="`use-provider-${row.name}`"
-                        @click="choose(row)"
+                        @click="choiceOf = row"
                     >
                         Draft with {{ row.label }}
                     </Button>
@@ -312,8 +352,8 @@ function remove(): void {
 
         <p class="max-w-[72ch] text-sm text-muted-foreground">
             Choosing a provider and changing or removing a key need your
-            password. If you have not given it for a while, you are asked for
-            it first and then brought back here to do it again.
+            password. If you have not given it for a while, you are asked for it
+            first and then brought back here to do it again.
         </p>
     </div>
 
@@ -374,6 +414,55 @@ function remove(): void {
     </div>
 
     <Dialog
+        :open="choiceOf !== null"
+        @update:open="(open: boolean) => !open && (choiceOf = null)"
+    >
+        <DialogContent>
+            <DialogHeader class="space-y-3">
+                <DialogTitle>Draft with {{ choiceOf?.label }}?</DialogTitle>
+                <DialogDescription class="space-y-3 text-base">
+                    <span class="block">
+                        From now on {{ choiceOf?.label }} is sent
+                        {{ sentToProvider }} for each draft, and
+                        {{
+                            choiceOf?.key_source === 'workspace'
+                                ? `the ${choiceOf.label} key of this workspace pays`
+                                : choiceOf?.key_source === 'instance'
+                                  ? `the ${choiceOf.label} key of this instance pays`
+                                  : `no draft can be requested until a ${choiceOf?.label} key is stored`
+                        }}.
+                    </span>
+                    <span class="block">
+                        Drafts that are being written or waiting right now were
+                        asked for with the provider in use until now. They are
+                        not written with {{ choiceOf?.label }}: they fail with a
+                        note and nothing is spent on them. Propose the week
+                        again afterwards to draft them.
+                    </span>
+                    <span class="block">
+                        This workspace then stays with {{ choiceOf?.label }}
+                        until an owner chooses another provider here. There is
+                        no setting that follows the default of the instance
+                        again.
+                    </span>
+                </DialogDescription>
+            </DialogHeader>
+            <DialogFooter class="gap-2">
+                <Button variant="secondary" @click="choiceOf = null">
+                    Cancel
+                </Button>
+                <Button
+                    :disabled="choosing !== null"
+                    data-test="confirm-use-provider"
+                    @click="choose"
+                >
+                    Draft with {{ choiceOf?.label }}
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
+
+    <Dialog
         :open="removalOf !== null"
         @update:open="(open: boolean) => !open && (removalOf = null)"
     >
@@ -385,8 +474,8 @@ function remove(): void {
                 >
                 <DialogDescription class="text-base">
                     Noon Gun erases the key. Drafts with
-                    {{ removalOf?.label }} are then written with the key of
-                    this instance, if its operator has set one for
+                    {{ removalOf?.label }} are then written with the key of this
+                    instance, if its operator has set one for
                     {{ removalOf?.label }}, and cannot be requested otherwise.
                     Posts and drafts that exist stay as they are.
                 </DialogDescription>

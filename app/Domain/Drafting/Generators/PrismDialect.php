@@ -2,6 +2,7 @@
 
 namespace App\Domain\Drafting\Generators;
 
+use App\Domain\Drafting\CredentialScope;
 use Prism\Prism\Enums\Provider;
 
 /**
@@ -51,6 +52,26 @@ final class PrismDialect
         }
 
         return $effort !== null ? ['effort' => $effort] : [];
+    }
+
+    /**
+     * What a call sets on the connection to the provider besides the key.
+     *
+     * OpenAI: Prism reads an organization and a project for the whole
+     * instance from the environment and sends them as headers. They belong
+     * to the operator's account, so they go with the key of the instance
+     * only. With a key a workspace brought they are taken out: the
+     * workspace's key decides which organization and project is billed.
+     *
+     * @return array<string, mixed>
+     */
+    public static function connectionOptions(string $provider, CredentialScope $keyOf): array
+    {
+        if ($provider === Provider::OpenAI->value && $keyOf === CredentialScope::Workspace) {
+            return ['organization' => null, 'project' => null];
+        }
+
+        return [];
     }
 
     public static function isTransient(?string ...$errorNames): bool

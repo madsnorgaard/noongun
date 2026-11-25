@@ -241,9 +241,18 @@ of M3 keeps "firing time" for posts that are approved.
   Two workspaces that start at the same instant can each pass it, so the cap
   can be exceeded by one proposal. It is a brake on the shared key, not an
   exact meter; metering by cost belongs to M8.
-- A run that fails without a reported usage does not count towards a limit,
-  also when the provider billed for it (a timeout after the request was
-  received). The limits bound what is known to be spent.
+- A run that fails without a reported usage does not count towards a limit.
+  The exception, added in M5, is a call that timed out: the provider may have
+  received and billed it, and such runs are retried, so a brief that makes a
+  model think past the timeout could otherwise spend on the instance key
+  without end. The generator records a timeout as an attempt with no known
+  tokens (`input_tokens` and `output_tokens` of 0), which makes the run count
+  as one that reached a provider. A provider that could not be reached at
+  all (the name does not resolve, the connection is refused) still records
+  nothing. The line between the two is the text of the HTTP client's error,
+  "timed out" or cURL error 28; a connection that timed out before anything
+  was sent is counted too, which errs on the side of the limit. The cost
+  estimate of such a run is zero and is a lower bound.
 - When a limit stops a retry, the failed run shows the provider's reason, not
   the limit.
 - A run that is stopped, or given up by the recovery, while its worker is

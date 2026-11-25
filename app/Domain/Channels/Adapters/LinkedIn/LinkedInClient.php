@@ -10,6 +10,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Str;
 use SensitiveParameter;
 
 /**
@@ -19,8 +20,12 @@ use SensitiveParameter;
  * Requests go to the two configured addresses and nowhere else: no address
  * from a response is ever called, and redirects are not followed, so a token
  * cannot be carried to another host. Nothing from the HTTP client is passed
- * on either. Failures are rebuilt from LinkedIn's own error fields, with
- * every credential of the request removed from the text.
+ * on either.
+ *
+ * The message of a failure is written here, in plain words with a next step,
+ * because a member reads it. What LinkedIn itself said goes into the context
+ * (`platform_message`, `code`), cut to size and with every credential of the
+ * request removed, where it reaches the log of the instance and nobody else.
  *
  * The status codes and error bodies are described in
  * docs/platform-notes/linkedin.md, with their sources.
@@ -29,6 +34,9 @@ final class LinkedInClient
 {
     /** Request parameters that hold a credential. */
     private const CREDENTIAL_PARAMETERS = ['client_secret', 'code', 'refresh_token', 'token'];
+
+    /** Longest text of LinkedIn's that is kept for the log. */
+    private const MESSAGE_LENGTH = 300;
 
     /**
      * @param  string  $platform  platform name for exceptions
@@ -194,7 +202,7 @@ final class LinkedInClient
     {
         return $failure::permanent(
             $this->platform,
-            $what.' The outcome is unknown: LinkedIn may have carried out the request. Check the profile before trying again.',
+            $what.' The outcome is unknown: the post may be on LinkedIn. Look at the profile. If the post is there, leave this as it is. If it is not, send it again.',
             [...$context, 'outcome_unknown' => true],
         );
     }
@@ -212,25 +220,24 @@ final class LinkedInClient
 
         // The API answers with message, status, serviceErrorCode and code;
         // the OAuth endpoints with error and error_description.
-        $said = $body['message'] ?? $body['error_description'] ?? null;
-        $said = is_string($said) && $said !== '' ? $this->scrub($said, $secrets) : null;
-        $readable = $said !== null || is_scalar($body['error'] ?? null) || is_scalar($body['code'] ?? null);
+        $said = $this->forLog($body['message'] ?? $body['error_description'] ?? null, $secrets);
+        $code = $this->forLog($body['code'] ?? $body['error'] ?? null, $secrets);
+        $readable = $said !== null || $code !== null;
 
         $context = [
             'endpoint' => $endpoint,
             'http_status' => $status,
-            'code' => is_scalar($body['code'] ?? null) ? (string) $body['code'] : (is_string($body['error'] ?? null) ? $body['error'] : null),
+            'code' => $code,
             'service_error_code' => is_numeric($body['serviceErrorCode'] ?? null) ? (int) $body['serviceErrorCode'] : null,
+            'platform_message' => $said,
         ];
-
-        $detail = $said === null ? '' : ' LinkedIn said: '.$said;
 
         if (! $signingIn && ($status === 401 || $status === 403)) {
             return $failure::reconnectRequired(
                 $this->platform,
                 $status === 401
-                    ? 'LinkedIn no longer accepts this connection: the access has expired or was withdrawn. Connect the profile again.'.$detail
-                    : 'LinkedIn refused the request because a permission is missing. Connect the profile again and allow everything that is asked for.'.$detail,
+                    ? 'LinkedIn no longer accepts this connection: the access has expired or was withdrawn. Connect the profile again on the Channels page.'
+                    : 'LinkedIn did not allow this. Connect the profile again on the Channels page and allow everything that is asked for.',
                 $context,
             );
         }
@@ -241,7 +248,7 @@ final class LinkedInClient
         if ($status === 429 && $readable) {
             return $failure::retryable(
                 $this->platform,
-                'LinkedIn is limiting requests at the moment.'.$detail,
+                'LinkedIn is limiting requests at the moment. Try again later.',
                 $this->retryAfter($response),
                 $context,
             );
@@ -254,7 +261,7 @@ final class LinkedInClient
         if ($temporary && $safeToRepeat) {
             return $failure::retryable(
                 $this->platform,
-                $status === 429 ? 'LinkedIn is limiting requests at the moment.'.$detail : 'LinkedIn had a temporary problem.'.$detail,
+                $status === 429 ? 'LinkedIn is limiting requests at the moment. Try again later.' : 'LinkedIn had a temporary problem. Try again later.',
                 $this->retryAfter($response),
                 $context,
             );
@@ -264,29 +271,54 @@ final class LinkedInClient
             return $this->outcomeUnknown(
                 $failure,
                 $readable
-                    ? 'LinkedIn had a temporary problem while handling the request.'.$detail
-                    : "LinkedIn gave an answer that could not be read (HTTP {$status}).",
+                    ? 'LinkedIn had a temporary problem while handling the request.'
+                    : 'LinkedIn gave an answer that could not be read.',
                 $context,
             );
         }
 
         if (! $readable) {
-            return $failure::permanent($this->platform, "LinkedIn gave an answer that could not be read (HTTP {$status}).", $context);
+            return $failure::permanent($this->platform, 'LinkedIn gave an answer that could not be read. Try again later.', $context);
         }
 
         if ($status === 426) {
             return $failure::permanent(
                 $this->platform,
-                'LinkedIn no longer supports the API version this instance asks for. Set LINKEDIN_API_VERSION to a current version.'.$detail,
+                'This instance asks LinkedIn for a version of its service that LinkedIn has retired. The person who runs this instance must set LINKEDIN_API_VERSION to a current version.',
+                $context,
+            );
+        }
+
+        if ($signingIn) {
+            return $failure::permanent(
+                $this->platform,
+                'LinkedIn refused the sign-in. Start again from the Channels page. If it keeps happening, check the Client ID, the Client Secret and the redirect address of the LinkedIn app.',
                 $context,
             );
         }
 
         return $failure::permanent(
             $this->platform,
-            ($signingIn ? 'LinkedIn refused the sign-in.' : 'LinkedIn refused the request.').$detail,
+            $code === 'FIELD_LENGTH_TOO_LONG'
+                ? 'LinkedIn found the text or the link title too long. Return the post to draft, shorten it and try again.'
+                : 'LinkedIn did not accept this. Return the post to draft, check the text and the link, and try again. The reason LinkedIn gave is in the log of this instance.',
             $context,
         );
+    }
+
+    /**
+     * A text from LinkedIn's answer, made safe to keep for the log: the
+     * credentials of this request removed, then cut to size.
+     *
+     * @param  list<string>  $secrets
+     */
+    private function forLog(mixed $value, #[SensitiveParameter] array $secrets): ?string
+    {
+        if (! is_scalar($value) || (string) $value === '') {
+            return null;
+        }
+
+        return Str::limit($this->scrub((string) $value, $secrets), self::MESSAGE_LENGTH);
     }
 
     /**

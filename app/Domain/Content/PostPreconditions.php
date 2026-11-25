@@ -15,6 +15,7 @@ use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Exceptions\CrossWorkspaceWrite;
 use App\Domain\Workspaces\Exceptions\MissingWorkspaceContext;
+use App\Http\Presenters\PlatformLabel;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
@@ -157,12 +158,12 @@ class PostPreconditions
             return [];
         }
 
-        $name = ['channel' => $channel->display_name];
+        $name = ['channel' => $channel->display_name, 'platform' => PlatformLabel::for($channel->platform)];
         $title = trim((string) $variant->link_title);
         $errors = [];
 
         if ($title === '') {
-            $errors["variants.{$variant->id}.link_title"] = [self::text('The link for :channel needs a title. This platform shows a link with the title you give it and reads nothing from the page.', $name)];
+            $errors["variants.{$variant->id}.link_title"] = [self::text('The link for :channel has no title. :platform shows a link with the title you give it and reads nothing from the page. Open the post and type a title under the link.', $name)];
         } elseif (mb_strlen($title) > $capabilities->linkTitleLength) {
             $errors["variants.{$variant->id}.link_title"] = [self::text('The link title for :channel is :length characters long. The limit is :limit.', [
                 ...$name,
@@ -186,7 +187,13 @@ class PostPreconditions
 
     /**
      * The time is not in the past (with a minute of grace, so that "now" is
-     * accepted) and not more than a year ahead.
+     * accepted), not more than a year ahead, and not after the access to one
+     * of the post's channels ends.
+     *
+     * The last one is a refusal and not advice: the publishing job does not
+     * call a platform with an access that has run out, so such a post would
+     * fail for certain. Connecting the channel again gives it a new end
+     * date, and that can be done straight away.
      *
      * @throws PostNotPublishable
      */
@@ -201,6 +208,41 @@ class PostPreconditions
         if ($at->gt(now()->addDays(self::MAX_DAYS_AHEAD))) {
             throw new PostNotPublishable($post, ['scheduled_at' => [self::text('The scheduled time is more than a year ahead.')]]);
         }
+
+        $ending = $this->accessEndingBefore($post, $at);
+
+        if ($ending !== []) {
+            throw new PostNotPublishable($post, ['scheduled_at' => $ending]);
+        }
+    }
+
+    /**
+     * One sentence for each channel of the post whose access ends at or
+     * before the given time, with the date on the clock of the workspace.
+     * A channel whose access has already ended is left to channelProblem().
+     *
+     * @return list<string>
+     */
+    private function accessEndingBefore(Post $post, CarbonImmutable $at): array
+    {
+        $workspace = $this->currentWorkspace->getOrFail();
+        $messages = [];
+
+        foreach ($post->variants()->unpublished()->with('channel')->orderBy('id')->get() as $variant) {
+            $channel = $variant->channel;
+            $endsAt = $channel?->token_expires_at;
+
+            if ($channel === null || $endsAt === null || $channel->tokenExpired() || $endsAt->gt($at)) {
+                continue;
+            }
+
+            $messages[] = self::text('The access to :channel ends on :date, before this post is due. Connect :channel again on the Channels page before then, or choose an earlier time.', [
+                'channel' => $channel->display_name,
+                'date' => $workspace->toLocal($endsAt)->format('j F Y'),
+            ]);
+        }
+
+        return $messages;
     }
 
     /**
@@ -234,7 +276,7 @@ class PostPreconditions
      */
     public static function platformUnavailable(Channel $channel): string
     {
-        return self::text('Publishing to :platform is not available on this instance.', ['platform' => $channel->platform]);
+        return self::text('Publishing to :platform is not available on this instance.', ['platform' => PlatformLabel::for($channel->platform)]);
     }
 
     /**

@@ -12,6 +12,7 @@
 use App\Domain\Drafting\Actions\GenerateDraft;
 use App\Domain\Drafting\CostEstimator;
 use App\Domain\Drafting\CredentialScope;
+use App\Domain\Drafting\DraftBudget;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingConfig;
 use App\Domain\Drafting\DraftingContext;
@@ -31,6 +32,7 @@ use App\Domain\Drafting\Planning\ProposalCost;
 use App\Domain\Drafting\PromptRenderer;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
+use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -226,6 +228,24 @@ describe('the request', function () {
         'low' => ['low', ['effort' => 'low']],
         'not set' => [null, null],
         'not a word' => ['{"tools":[]}', null],
+    ]);
+
+    it('sends the organization and project of the instance with the key of the instance only', function (CredentialScope $scope, bool $sent) {
+        config(['prism.providers.openai.organization' => 'org-of-the-operator', 'prism.providers.openai.project' => 'proj_of_the_operator']);
+        Http::fake([OPENAI_URL => Http::response(openAiAnswer())]);
+
+        $this->generator->generate($this->request, new DraftingContext('openai', OPENAI_TEST_MODEL, 2000, 20, 'v1', new LlmKey('openai', OPENAI_TEST_KEY, $scope)));
+
+        $request = Http::recorded()->first()[0];
+
+        expect($request->hasHeader('OpenAI-Organization'))->toBe($sent)
+            ->and($request->hasHeader('OpenAI-Project'))->toBe($sent)
+            ->and(str_contains((string) json_encode($request->headers()), 'of-the-operator'))->toBe($sent)
+            ->and($request->header('Authorization'))->toBe(['Bearer '.OPENAI_TEST_KEY])
+            ->and(config('prism.providers.openai.organization'))->toBe('org-of-the-operator');
+    })->with([
+        'a key a workspace brought' => [CredentialScope::Workspace, false],
+        'the key of the instance' => [CredentialScope::Instance, true],
     ]);
 
     it('uses the timeout of the context', function () {
@@ -522,7 +542,16 @@ describe('a failed call', function () {
 
         expect($failure->retryable)->toBeTrue()
             ->and($failure->getMessage())->toContain('within 20 seconds')
-            ->and($failure->context())->toMatchArray(['error' => 'connection']);
+            ->and($failure->context())->toMatchArray(['error' => 'connection'])
+            ->and($failure->usage?->toArray())->toMatchArray(['input_tokens' => 0, 'output_tokens' => 0, 'attempts' => 1]);
+    });
+
+    it('records nothing for a provider that could not be reached at all', function () {
+        Http::fake([OPENAI_URL => Http::failedConnection('cURL error 7: Failed to connect to api.openai.com port 443')]);
+
+        $failure = openAiFailure(fn () => $this->generator->generate($this->request, $this->context));
+
+        expect($failure->retryable)->toBeTrue()->and($failure->usage)->toBeNull();
     });
 
     it('keeps the usage of the first attempt when the second call fails', function () {
@@ -734,6 +763,27 @@ describe('two providers side by side', function () {
         expect($cost)->not->toBeNull()
             ->and((float) $cost['expected']->amount)->toBeGreaterThan(0.0)
             ->and((float) $cost['worst']->amount)->toBeGreaterThan((float) $cost['expected']->amount);
+    });
+
+    it('counts a run that timed out towards the daily limits, and not one that never reached the provider', function () {
+        app(DraftGenerators::class)->choose($this->workspace, 'openai');
+        $used = fn (): int => inWorkspace($this->workspace, fn () => app(DraftBudget::class)->usedByWorkspace());
+
+        Http::fake([OPENAI_URL => Http::failedConnection('cURL error 7: Failed to connect to api.openai.com port 443')]);
+
+        expect(fn () => ($this->draft)())->toThrow(DraftGenerationFailed::class)
+            ->and($used())->toBe(0);
+
+        Http::swap(new Factory(app('events')));
+        Http::preventStrayRequests();
+        Http::fake([OPENAI_URL => Http::failedConnection('cURL error 28: Operation timed out after 20001 milliseconds')]);
+
+        expect(fn () => ($this->draft)())->toThrow(DraftGenerationFailed::class)
+            ->and($used())->toBe(1);
+
+        $run = DB::table('draft_runs')->orderByDesc('id')->first();
+
+        expect([$run->status, $run->input_tokens, $run->output_tokens, $run->attempts])->toBe(['failed', 0, 0, 1]);
     });
 
     it('queues nothing that holds a key when a week is proposed', function () {

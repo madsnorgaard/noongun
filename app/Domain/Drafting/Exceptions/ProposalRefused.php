@@ -21,6 +21,9 @@ class ProposalRefused extends RuntimeException
 
     public const NOT_CONFIGURED = 'provider';
 
+    /** The provider the workspace chose is no longer offered; an owner chooses another. */
+    public const CHOICE_NOT_OFFERED = 'provider_choice';
+
     public const NOTHING_TO_DRAFT = 'empty';
 
     public const PLAN_CHANGED = 'changed';
