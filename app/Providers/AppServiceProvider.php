@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Domain\Channels\ChannelManager;
+use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Support\Health\CheckBackingServices;
 use Carbon\CarbonImmutable;
@@ -22,6 +23,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->app->scoped(CurrentWorkspace::class);
         $this->app->singleton(ChannelManager::class);
+        $this->app->scoped(DraftGenerators::class);
     }
 
     /**
