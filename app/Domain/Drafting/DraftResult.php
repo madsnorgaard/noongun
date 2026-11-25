@@ -3,10 +3,15 @@
 namespace App\Domain\Drafting;
 
 use App\Domain\Drafting\Exceptions\InvalidDraftOutput;
+use Illuminate\Support\Str;
 
 /**
- * One generated post: a text for each requested channel, a suggested link,
- * alternative text for an image, one line on why, and what it used.
+ * One generated post: a text for each requested channel, a link, alternative
+ * text for an image, one line on why, and what it used.
+ *
+ * The link is never the model's own: it is one of the addresses the author
+ * gave (the source of the request, or a call to action of the brief) or
+ * there is none. $linkDropped says that the model suggested another one.
  *
  * Build it with fromArray(), which is the validator: a DraftResult that
  * exists matches DraftSchema and its request. It is only ever turned into a
@@ -23,6 +28,7 @@ final readonly class DraftResult
         public ?string $altText,
         public string $rationale,
         public DraftUsage $usage,
+        public bool $linkDropped = false,
     ) {}
 
     /**
@@ -32,8 +38,14 @@ final readonly class DraftResult
      *
      * Beyond the schema: there is exactly one text for each requested
      * channel and none for any other, no text is empty or longer than its
-     * platform allows, the rationale is not empty, and a link is an http or
-     * https address. An empty link or alternative text counts as none.
+     * platform allows, and the rationale is not empty. An empty link or
+     * alternative text counts as none.
+     *
+     * A link is kept only when it is the request's source URL or the URL of
+     * one of the brief's calls to action, and then in the author's spelling.
+     * Any other link is dropped without failing the draft: what is pasted
+     * into an idea can steer a model, and a post must not carry an address
+     * that nobody in the workspace chose.
      *
      * @throws InvalidDraftOutput carrying $usage, so the attempt is still paid for
      */
@@ -51,15 +63,16 @@ final readonly class DraftResult
         foreach ($data['variants'] as $variant) {
             $channel = $request->channel($variant['channel_id']);
             $body = trim($variant['body']);
+            $name = $channel === null ? '' : self::nameOf($channel);
 
             if ($channel === null) {
                 $problems[] = 'There is a text for a channel that was not asked for.';
             } elseif (isset($bodies[$channel->channelId])) {
-                $problems[] = "There is more than one text for channel {$channel->channelId}.";
+                $problems[] = "There is more than one text for {$name}.";
             } elseif ($body === '') {
-                $problems[] = "The text for channel {$channel->channelId} is empty.";
+                $problems[] = "The text for {$name} is empty.";
             } elseif (! $channel->capabilities->fits($body)) {
-                $problems[] = "The text for channel {$channel->channelId} is ".mb_strlen($body)." characters long. The limit is {$channel->capabilities->maxBodyLength}.";
+                $problems[] = "The text for {$name} is ".mb_strlen($body)." characters long. The limit is {$channel->capabilities->maxBodyLength}.";
             }
 
             if ($channel !== null) {
@@ -67,17 +80,14 @@ final readonly class DraftResult
             }
         }
 
-        foreach ($request->channelIds() as $channelId) {
-            if (! isset($bodies[$channelId])) {
-                $problems[] = "There is no text for channel {$channelId}.";
+        foreach ($request->channels as $channel) {
+            if (! isset($bodies[$channel->channelId])) {
+                $problems[] = 'There is no text for '.self::nameOf($channel).'.';
             }
         }
 
-        $link = self::optional($data['link']);
-
-        if ($link !== null && ! self::isWebAddress($link)) {
-            $problems[] = 'The link is not an http or https address.';
-        }
+        $suggested = self::optional($data['link']);
+        $link = $suggested === null ? null : self::authorsLink($suggested, $request);
 
         if (trim($data['rationale']) === '') {
             $problems[] = 'The rationale is empty.';
@@ -93,7 +103,7 @@ final readonly class DraftResult
             $ordered[$channelId] = $bodies[$channelId];
         }
 
-        return new self($ordered, $link, self::optional($data['alt_text']), trim($data['rationale']), $usage);
+        return new self($ordered, $link, self::optional($data['alt_text']), trim($data['rationale']), $usage, $suggested !== null && $link === null);
     }
 
     public function bodyFor(int $channelId): ?string
@@ -107,7 +117,7 @@ final readonly class DraftResult
      */
     public function withUsage(DraftUsage $usage): self
     {
-        return new self($this->bodies, $this->link, $this->altText, $this->rationale, $usage);
+        return new self($this->bodies, $this->link, $this->altText, $this->rationale, $usage, $this->linkDropped);
     }
 
     /**
@@ -126,11 +136,60 @@ final readonly class DraftResult
         return $variants;
     }
 
+    /**
+     * A channel as a reader knows it: by its platform. The request holds no
+     * channel names by design, and an id means nothing to a person.
+     */
+    private static function nameOf(TargetChannel $channel): string
+    {
+        return Str::headline($channel->platform);
+    }
+
     private static function optional(?string $value): ?string
     {
         $value = $value === null ? '' : trim($value);
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * The address of the author that the suggested link stands for, or null.
+     */
+    private static function authorsLink(string $suggested, DraftRequest $request): ?string
+    {
+        $wanted = self::comparable($suggested);
+
+        if ($wanted === null) {
+            return null;
+        }
+
+        $allowed = [$request->sourceUrl, ...array_column($request->callsToAction, 'url')];
+
+        foreach ($allowed as $address) {
+            $address = self::optional($address);
+
+            if ($address !== null && self::comparable($address) === $wanted) {
+                return $address;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * An http or https address in the form two addresses are compared in:
+     * scheme and authority in lower case, an empty path as "/", and
+     * everything after that exactly as written. Null for anything else.
+     */
+    private static function comparable(string $address): ?string
+    {
+        if (! self::isWebAddress($address) || preg_match('~\A(https?)://([^/?#]*)(.*)\z~is', $address, $parts) !== 1) {
+            return null;
+        }
+
+        $rest = $parts[3] === '' || $parts[3][0] !== '/' ? '/'.$parts[3] : $parts[3];
+
+        return strtolower($parts[1]).'://'.strtolower($parts[2]).$rest;
     }
 
     private static function isWebAddress(string $link): bool

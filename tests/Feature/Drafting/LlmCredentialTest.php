@@ -118,7 +118,8 @@ describe('resolving the key for a workspace', function () {
         expect(fn () => resolveKey($this->workspace))->toThrow(function (LlmCredentialMissing $missing) {
             expect($missing->provider)->toBe('fake')
                 ->and($missing->retryable)->toBeFalse()
-                ->and($missing->getMessage())->toContain('No API key is set for [fake]')
+                ->and($missing->getMessage())->toBe('No API key is set for Fake. An owner of this workspace can add one under Settings, Drafting.')
+                ->and($missing->operatorDetail())->toContain('Provider [fake] has no key')
                 ->and($missing->context())->toMatchArray(['workspace_id' => $this->workspace->id]);
         });
 

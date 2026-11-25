@@ -52,7 +52,7 @@ describe('the schema', function () {
 
 describe('the result', function () {
     it('is built from valid output, one text per requested channel in the order asked', function () {
-        $request = plainDraftRequest(2);
+        $request = plainDraftRequest(2, sourceUrl: 'https://example.com/roast');
         $usage = new DraftUsage('fake', 'fake-model', 1200, 300);
 
         $result = DraftResult::fromArray([
@@ -109,14 +109,90 @@ describe('the result', function () {
                 expect($failure->problems())->toContain($problem);
             });
     })->with([
-        'a channel is missing' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => 'Text.']]], 'There is no text for channel 2.'],
+        'a channel is missing' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => 'Text.']]], 'There is no text for Facebook.'],
         'a channel that was not asked for' => [[...validOutput(), 'variants' => [...validOutput()['variants'], ['channel_id' => 9, 'body' => 'Text.']]], 'There is a text for a channel that was not asked for.'],
-        'a channel twice' => [[...validOutput(), 'variants' => [...validOutput()['variants'], ['channel_id' => 1, 'body' => 'Again.']]], 'There is more than one text for channel 1.'],
-        'an empty text' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => "  \n"], ['channel_id' => 2, 'body' => 'Text.']]], 'The text for channel 1 is empty.'],
-        'a text that is too long' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => str_repeat('a', 41)], ['channel_id' => 2, 'body' => 'Text.']]], 'The text for channel 1 is 41 characters long. The limit is 40.'],
-        'a link that is not a web address' => [[...validOutput(), 'link' => 'javascript:alert(1)'], 'The link is not an http or https address.'],
+        'a channel twice' => [[...validOutput(), 'variants' => [...validOutput()['variants'], ['channel_id' => 1, 'body' => 'Again.']]], 'There is more than one text for Facebook.'],
+        'an empty text' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => "  \n"], ['channel_id' => 2, 'body' => 'Text.']]], 'The text for Facebook is empty.'],
+        'a text that is too long' => [[...validOutput(), 'variants' => [['channel_id' => 1, 'body' => str_repeat('a', 41)], ['channel_id' => 2, 'body' => 'Text.']]], 'The text for Facebook is 41 characters long. The limit is 40.'],
         'an empty rationale' => [[...validOutput(), 'rationale' => '  '], 'The rationale is empty.'],
     ]);
+
+    it('keeps a link that the author gave, in the author\'s spelling', function (string $suggested, string $kept) {
+        $request = plainDraftRequest(
+            sourceUrl: 'https://Allowed.example/Roast?batch=7#notes',
+            callsToAction: [
+                ['text' => 'Order beans', 'url' => 'https://shop.allowed.example/order'],
+                ['text' => 'Visit us', 'url' => 'https://allowed.example'],
+                ['text' => 'Call us'],
+            ],
+        );
+
+        $result = draftResultFor($request, ['link' => $suggested]);
+
+        expect($result->link)->toBe($kept)
+            ->and($result->linkDropped)->toBeFalse()
+            ->and($result->variants()[0]['link'])->toBe($kept);
+    })->with([
+        'the source URL' => ['https://Allowed.example/Roast?batch=7#notes', 'https://Allowed.example/Roast?batch=7#notes'],
+        'the source URL with scheme and host in another case' => ['HTTPS://ALLOWED.EXAMPLE/Roast?batch=7#notes', 'https://Allowed.example/Roast?batch=7#notes'],
+        'the source URL with spaces around it' => ["  https://allowed.example/Roast?batch=7#notes\n", 'https://Allowed.example/Roast?batch=7#notes'],
+        'a call to action' => ['https://shop.allowed.example/order', 'https://shop.allowed.example/order'],
+        'a call to action with the slash of an empty path' => ['https://allowed.example/', 'https://allowed.example'],
+    ]);
+
+    it('drops a link that the author did not give, without failing the draft', function (string $suggested) {
+        $request = plainDraftRequest(
+            sourceUrl: 'https://allowed.example/roast',
+            callsToAction: [['text' => 'Order beans', 'url' => 'https://shop.allowed.example/order']],
+        );
+
+        $result = draftResultFor($request, ['link' => $suggested]);
+
+        expect($result->link)->toBeNull()
+            ->and($result->linkDropped)->toBeTrue()
+            ->and($result->withUsage($result->usage)->linkDropped)->toBeTrue()
+            ->and($result->variants()[0]['link'])->toBeNull()
+            ->and($result->bodyFor(1))->not->toBeNull();
+    })->with([
+        'an invented address' => ['https://evil.example/landing'],
+        'a lookalike host' => ['https://allowed.example.evil.test/roast'],
+        'a lookalike with a hyphen' => ['https://allowed-example.test/roast'],
+        'the allowed host as user name of another host' => ['https://allowed.example@evil.example/'],
+        'an at sign in the path' => ['https://allowed.example/roast@evil.example/roast'],
+        'another path on the allowed host' => ['https://allowed.example/other'],
+        'the path in another case' => ['https://allowed.example/Roast'],
+        'an added query' => ['https://allowed.example/roast?next=https://evil.example'],
+        'an added fragment' => ['https://allowed.example/roast#x'],
+        'another port' => ['https://allowed.example:8443/roast'],
+        'http instead of https' => ['http://allowed.example/roast'],
+        'a subdomain' => ['https://www.allowed.example/roast'],
+        'a script' => ['javascript:alert(1)'],
+        'no scheme' => ['//allowed.example/roast'],
+        'a path only' => ['/roast'],
+        'a line break after the allowed address' => ["https://allowed.example/roast\r\nX-Injected: 1"],
+    ]);
+
+    it('has no link and drops nothing when the model suggests none', function (?string $suggested) {
+        $result = draftResultFor(plainDraftRequest(sourceUrl: 'https://allowed.example/roast'), ['link' => $suggested]);
+
+        expect($result->link)->toBeNull()->and($result->linkDropped)->toBeFalse();
+    })->with(['null' => [null], 'empty' => ['  ']]);
+
+    it('never keeps a link when the author gave none, or gave one that is not a web address', function (?string $sourceUrl) {
+        $result = draftResultFor(plainDraftRequest(sourceUrl: $sourceUrl), ['link' => $sourceUrl ?? 'https://evil.example/']);
+
+        expect($result->link)->toBeNull()->and($result->linkDropped)->toBeTrue();
+    })->with(['none' => [null], 'a script' => ['javascript:alert(1)'], 'a file' => ['file:///etc/passwd']]);
+
+    it('names a channel by its platform, never by its id', function () {
+        $request = plainDraftRequest(1, maxBodyLength: 40, platform: 'linkedin');
+        $output = ['variants' => [['channel_id' => 1, 'body' => str_repeat('a', 41)]], 'link' => null, 'alt_text' => null, 'rationale' => 'Why.'];
+
+        expect(fn () => DraftResult::fromArray($output, $request, new DraftUsage('fake', 'fake-model', 1, 1)))
+            ->toThrow(function (InvalidDraftOutput $failure) {
+                expect($failure->getMessage())->toContain('The text for Linkedin is 41 characters long.')->not->toContain('channel 1');
+            });
+    });
 
     it('counts characters, not bytes, against the limit', function () {
         $request = plainDraftRequest(1, maxBodyLength: 5);

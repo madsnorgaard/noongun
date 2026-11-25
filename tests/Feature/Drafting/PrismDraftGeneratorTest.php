@@ -19,6 +19,8 @@ use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\Exceptions\InvalidDraftOutput;
 use App\Domain\Drafting\Generators\PrismDraftGenerator;
 use App\Domain\Drafting\LlmKey;
+use App\Domain\Drafting\Models\InstanceLlmCredential;
+use App\Domain\Drafting\Models\LlmCredential;
 use App\Domain\Drafting\PromptRenderer;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
@@ -291,6 +293,7 @@ describe('the answer', function () {
             'rationale' => 'It fits the brief.',
         ], input: 1234, output: 567)]);
 
+        $this->request = plainDraftRequest(channels: 2, sourceUrl: 'https://example.com/coffee');
         $result = $this->generator->generate($this->request, $this->context);
 
         expect($result->bodies)->toBe([1 => 'First channel.', 2 => 'Second channel.'])
@@ -434,7 +437,7 @@ describe('an answer that did not finish', function () {
         expect(fn () => $this->generator->generate($this->request, $this->context))->toThrow(DraftGenerationFailed::class);
     });
 
-    it('reports a cut off answer once, and says which limit to raise', function () {
+    it('reports a cut off answer once, in plain words, and keeps the setting for the operator', function () {
         $fake = Prism::fake([prismAnswer([], 800, 2000, FinishReason::Length, empty: true), prismAnswer()]);
 
         $failure = generationFailure(fn () => $this->generator->generate($this->request, $this->context));
@@ -443,7 +446,10 @@ describe('an answer that did not finish', function () {
 
         expect($failure)->toBeInstanceOf(DraftGenerationFailed::class)
             ->and($failure->retryable)->toBeFalse()
-            ->and($failure->getMessage())->toContain('cut off at the limit of 2000 tokens')->toContain('NOONGUN_DRAFT_MAX_TOKENS')
+            ->and($failure->getMessage())->toContain('was cut off')->toContain('operator of this instance')
+            ->and($failure->getMessage())->not->toContain('NOONGUN_')->not->toContain('token')
+            ->and($failure->operatorDetail())->toContain('limit of 2000 tokens')->toContain('NOONGUN_DRAFT_MAX_TOKENS')
+            ->and($failure->context()[DraftingException::OPERATOR_DETAIL])->toBe($failure->operatorDetail())
             ->and($failure->usage?->outputTokens)->toBe(2000);
     });
 
@@ -482,11 +488,12 @@ describe('a failed call', function () {
         'timeout' => [fn () => new ConnectionException('cURL error 28: Operation timed out'), true, 'within 20 seconds', ['error' => 'connection']],
         'too large' => [fn () => PrismRequestTooLargeException::make('anthropic'), false, 'too large', ['status' => 413]],
         'rejected key' => [fn () => anthropicError(401, 'authentication_error', 'invalid x-api-key'), false, 'did not accept the API key', ['status' => 401, 'error' => 'authentication_error']],
-        'no permission' => [fn () => anthropicError(403, 'permission_error', 'Not allowed'), false, 'may not use the model [fake-model]', ['status' => 403]],
-        'unknown model' => [fn () => anthropicError(404, 'not_found_error', 'model: fake-model'), false, 'does not know the model [fake-model]', ['status' => 404]],
+        'no permission' => [fn () => anthropicError(403, 'permission_error', 'Not allowed'), false, 'is not allowed to do this with the provider', ['status' => 403, 'operator_detail' => 'Asked for model [fake-model]. The provider said: Anthropic Error [403]: permission_error - Not allowed']],
+        'unknown model' => [fn () => anthropicError(404, 'not_found_error', 'model: fake-model'), false, 'does not know the model this instance is set up to use', ['status' => 404]],
         'billing' => [fn () => anthropicError(402, 'billing_error', 'Payment required'), false, 'billing', ['status' => 402]],
-        'bad request' => [fn () => anthropicError(400, 'invalid_request_error', 'max_tokens: must be at most 128000'), false, 'refused the request: Anthropic Error [400]: invalid_request_error - max_tokens: must be at most 128000', ['status' => 400, 'error' => 'invalid_request_error']],
-        'unsupported provider' => [fn () => new InvalidArgumentException('Provider [fake] is not supported.'), false, 'unexpected error', ['error' => 'InvalidArgumentException']],
+        'bad request' => [fn () => anthropicError(400, 'invalid_request_error', 'max_tokens: must be at most 128000'), false, 'The provider refused the request. The operator of this instance can find the reason in the log.', ['status' => 400, 'error' => 'invalid_request_error', 'operator_detail' => 'Asked for model [fake-model]. The provider said: Anthropic Error [400]: invalid_request_error - max_tokens: must be at most 128000']],
+        'no credit' => [fn () => anthropicError(400, 'invalid_request_error', 'Your credit balance is too low to access the Anthropic API.'), false, 'has no credit left', ['status' => 400]],
+        'unsupported provider' => [fn () => new InvalidArgumentException('Provider [fake] is not supported.'), false, 'unexpected error', ['error' => 'InvalidArgumentException', 'operator_detail' => 'InvalidArgumentException: Provider [fake] is not supported.']],
         'anything else' => [fn () => new TypeError('Something internal'), false, 'unexpected error', ['error' => 'TypeError']],
     ]);
 
@@ -501,6 +508,38 @@ describe('a failed call', function () {
         expect($failure)->toBeInstanceOf(DraftGenerationFailed::class)
             ->and($failure->retryable)->toBeTrue()
             ->and($failure->usage?->toArray())->toMatchArray(['input_tokens' => 900, 'output_tokens' => 250, 'attempts' => 1]);
+    });
+});
+
+describe('what a member reads', function () {
+    it('names no setting, model, status code or provider error type', function (Closure $sequence) {
+        prismGives($sequence());
+
+        $failure = generationFailure(fn () => $this->generator->generate($this->request, $this->context));
+
+        expect($failure->getMessage())
+            ->not->toMatch('/NOONGUN_|[A-Z]{3,}_[A-Z]{3,}|_error|\\[\\d{3}\\]|token|Anthropic Error/')
+            ->not->toContain(DRAFT_TEST_MODEL)
+            ->not->toContain('['.DRAFT_TEST_PROVIDER.']');
+    })->with([
+        'a cut off answer' => [fn () => [prismAnswer(finish: FinishReason::Length)]],
+        'a refusal' => [fn () => [prismAnswer(finish: FinishReason::Refusal)]],
+        'two empty answers' => [fn () => [prismAnswer([], empty: true), prismAnswer([], empty: true)]],
+        'a bad request' => [fn () => [anthropicError(400, 'invalid_request_error', 'max_tokens: must be at most 128000')]],
+        'an unknown model' => [fn () => [anthropicError(404, 'not_found_error', 'model: '.DRAFT_TEST_MODEL)]],
+        'no permission' => [fn () => [anthropicError(403, 'permission_error', 'Not allowed')]],
+        'a rejected key' => [fn () => [anthropicError(401, 'authentication_error', 'invalid x-api-key')]],
+        'a server error' => [fn () => [anthropicError(500, 'api_error', 'Internal server error')]],
+        'a rate limit' => [fn () => [PrismRateLimitedException::make([], 30)]],
+        'an unexpected error' => [fn () => [new InvalidArgumentException('Provider ['.DRAFT_TEST_PROVIDER.'] is not supported.')]],
+    ]);
+
+    it('keeps the key out of the detail for the operator', function () {
+        prismGives([anthropicError(400, 'invalid_request_error', 'header x-api-key: '.PRISM_TEST_KEY.' is malformed')]);
+
+        $failure = generationFailure(fn () => $this->generator->generate($this->request, $this->context));
+
+        expect($failure->operatorDetail())->toContain('is malformed')->not->toContain('NoonGunTestKey');
     });
 });
 
@@ -552,6 +591,36 @@ describe('the API key', function () {
         foreach ($handler->getRecords() as $record) {
             expect(json_encode($record->toArray()).$record->formatted)->not->toContain(PRISM_TEST_KEY)->not->toContain('NoonGunTestKey');
         }
+    });
+
+    it('is marked as sensitive in every signature it passes through', function () {
+        $unmarked = [];
+
+        foreach ([
+            PrismDraftGenerator::class,
+            DraftingException::class,
+            DraftGenerationFailed::class,
+            InvalidDraftOutput::class,
+            LlmKey::class,
+            LlmCredential::class,
+            InstanceLlmCredential::class,
+        ] as $class) {
+            foreach ((new ReflectionClass($class))->getMethods() as $method) {
+                if (! str_starts_with($method->class, 'App\\')) {
+                    continue;
+                }
+
+                foreach ($method->getParameters() as $parameter) {
+                    if (in_array($parameter->getName(), ['secrets', 'secret', 'apiKey', 'value', 'key'], true)
+                        && $parameter->getType()?->__toString() !== LlmKey::class
+                        && $parameter->getAttributes(SensitiveParameter::class) === []) {
+                        $unmarked[] = "{$method->class}::{$method->getName()}(\${$parameter->getName()})";
+                    }
+                }
+            }
+        }
+
+        expect(array_values(array_unique($unmarked)))->toBe([]);
     });
 
     it('is not logged by the generator itself', function () {
@@ -614,7 +683,8 @@ describe('what the model writes is data', function () {
         $storedRun = DB::table('draft_runs')->where('id', $run->id)->first();
 
         expect($stored->body)->toBe($body)
-            ->and($stored->link)->toBe('https://example.com/a?b=<script>&c=%0d%0aX-Injected:1')
+            ->and($stored->link)->toBeNull()
+            ->and($storedRun->link_dropped)->toBeTrue()
             ->and($storedRun->rationale)->toBe($rationale)
             ->and($storedRun->alt_text)->toBe($altText)
             ->and($storedRun->status)->toBe('succeeded');
@@ -629,23 +699,20 @@ describe('what the model writes is data', function () {
         Http::assertNothingSent();
     });
 
-    it('refuses a link that is not an http or https address', function (string $link) {
-        $fake = Prism::fake([
-            prismAnswer([...FakeDraftGenerator::outputFor($this->request), 'link' => $link]),
-            prismAnswer([...FakeDraftGenerator::outputFor($this->request), 'link' => $link]),
-        ]);
+    it('drops a link the author did not give, once, without failing the draft', function (string $link) {
+        $fake = Prism::fake([prismAnswer([...FakeDraftGenerator::outputFor($this->request), 'link' => $link])]);
 
-        $failure = generationFailure(fn () => $this->generator->generate($this->request, $this->context));
+        $result = $this->generator->generate($this->request, $this->context);
 
-        $fake->assertCallCount(2);
+        $fake->assertCallCount(1);
 
-        expect($failure)->toBeInstanceOf(InvalidDraftOutput::class)
-            ->and($failure->getMessage())->toContain('The link is not an http or https address.')->not->toContain($link);
+        expect($result->link)->toBeNull()->and($result->linkDropped)->toBeTrue();
     })->with([
         'javascript:alert(1)',
         'data:text/html,<script>alert(1)</script>',
         'file:///etc/passwd',
         '//evil.example/path',
+        'https://evil.example/landing',
         "https://example.com/\r\nX-Injected: 1",
         '/settings/drafting',
     ]);

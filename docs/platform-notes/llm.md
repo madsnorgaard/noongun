@@ -237,13 +237,22 @@ request can succeed later.
 |---|---|---|
 | `Stop`, `Other`, `Unknown` | `end_turn`, `stop_sequence`, one Prism does not know | validates the answer |
 | `Refusal`, `ContentFilter` | `refusal` | fails at once, permanent. The category from `stop_details` goes into the context, the explanation is not used |
-| `Length` | `max_tokens`, `model_context_window_exceeded` | fails at once, permanent, and names `NOONGUN_DRAFT_MAX_TOKENS` |
+| `Length` | `max_tokens`, `model_context_window_exceeded` | fails at once, permanent. The member reads a plain sentence; the limit and `NOONGUN_DRAFT_MAX_TOKENS` are in the operator detail |
 | `ToolCalls`, `Pause`, `Error` | `tool_use`, `pause_turn` | fails at once, permanent. Cannot happen without tools; handled so that it is visible if it does |
 
 A cut off answer is **not** asked for again, unlike what section 8 above says:
 the same request against the same limit ends the same way and costs a full
 answer. The second request is for answers that finished and do not pass
 `DraftResult::fromArray()`.
+
+The message of a failure is stored on the run and read by every member of the
+workspace, so it names no setting, model, status code or error type. What the
+operator needs (the setting to change, the model that was asked for, what the
+provider said) is in the context under `operator_detail`
+(`DraftingException::OPERATOR_DETAIL`, read with `operatorDetail()`). It is
+redacted like all context and is meant for the log, not for a page. Validation
+problems name a channel by its platform ("The text for Facebook is ..."),
+never by its id.
 
 Two answers in a row that are empty (`structured` is `null` or `[]`, which is
 also what broken JSON becomes) are reported as `DraftGenerationFailed` with a
@@ -259,9 +268,18 @@ The output is untrusted. Followed through the code on 2026-11-25:
 - `variants[].body`, `alt_text`, `rationale`: stored as text. No page prints
   post text with `v-html`; Vue's text interpolation escapes it. A page that
   shows the rationale or the alternative text must do the same.
-- `link`: must be http or https (`DraftResult`), and the page builds the `href`
+- `link`: kept only when it is the request's source URL or the URL of a call
+  to action of the brief, both of which the author wrote and both of which must
+  be http or https (`DraftResult::fromArray()`, see ADR 0011). Anything else
+  is dropped, the draft has no link, and `draft_runs.link_dropped` is set. The
+  run does not fail for it. The comparison is deliberately plain: trim, scheme
+  and host in lower case, an empty path as `/`, the rest exactly as written.
+  So `https://allowed.example@evil.example/`, a lookalike host, another path,
+  an added query or another port are all dropped. The page builds the `href`
   through `webAddress()`, which checks the scheme again. The server never opens
   the address; the Facebook adapter passes it to the Graph API as a parameter.
+  The prompt (v1) already tells the model to take the link from the source URL
+  or a call to action and never to make one up, so its wording is unchanged.
 - `variants[].channel_id`: an integer that must be one of the requested
   channels, and those were read from the current workspace when the request
   was built. An id the model makes up fails validation before anything is

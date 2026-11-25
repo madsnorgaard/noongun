@@ -3,13 +3,13 @@
 namespace App\Domain\Drafting\Models;
 
 use App\Domain\Drafting\CredentialScope;
+use App\Domain\Drafting\Models\Concerns\HoldsEncryptedKey;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
-use SensitiveParameter;
 
 /**
  * An API key of the instance for one LLM provider, set by the operator and
@@ -21,6 +21,7 @@ use SensitiveParameter;
  * database refuses an instance row with a workspace and a workspace row
  * without one. Only LlmCredentialResolver and operator tooling read it. A
  * key stored here goes before the key in the environment.
+ * InstanceLlmCredential::store($provider, $key) sets or replaces it.
  *
  * @property int $id
  * @property CredentialScope $scope
@@ -34,6 +35,8 @@ use SensitiveParameter;
 #[Hidden(['api_key'])]
 class InstanceLlmCredential extends Model
 {
+    use HoldsEncryptedKey;
+
     protected static function booted(): void
     {
         static::addGlobalScope('instance', function (Builder $query): void {
@@ -55,13 +58,5 @@ class InstanceLlmCredential extends Model
             'scope' => CredentialScope::class,
             'api_key' => 'encrypted',
         ];
-    }
-
-    /**
-     * Sets or replaces the instance key for a provider.
-     */
-    public static function store(string $provider, #[SensitiveParameter] string $apiKey): self
-    {
-        return static::query()->updateOrCreate(['provider' => $provider], ['api_key' => $apiKey]);
     }
 }
