@@ -9,6 +9,7 @@ use App\Domain\Content\Exceptions\PostNotEditable;
 use App\Domain\Content\Models\Post;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Posts\Concerns\ActsOnPosts;
+use App\Http\Presenters\InsightsPresenter;
 use App\Http\Presenters\PostPresenter;
 use App\Http\Requests\Posts\SavePostRequest;
 use Illuminate\Http\RedirectResponse;
@@ -28,7 +29,10 @@ class PostController extends Controller
     /** The time of day a new post is planned for when it is started from a day in the calendar. */
     private const DEFAULT_TIME = '09:00';
 
-    public function __construct(private readonly PostPresenter $presenter) {}
+    public function __construct(
+        private readonly PostPresenter $presenter,
+        private readonly InsightsPresenter $insights,
+    ) {}
 
     public function create(Request $request): Response
     {
@@ -38,6 +42,8 @@ class PostController extends Controller
             'post' => null,
             'channels' => $this->presenter->channelOptions(null),
             'planned' => $this->plannedFromQuery($request),
+            'insights' => null,
+            'reading' => null,
         ]);
     }
 
@@ -60,6 +66,10 @@ class PostController extends Controller
             'post' => $this->presenter->present($post, $this->mayChangePosts($request)),
             'channels' => $this->presenter->channelOptions($post),
             'planned' => null,
+            // How the texts that are on a platform did, with the readings
+            // over time. Null for a post that was never published.
+            'insights' => $this->insights->forPosts([$post], withHistory: true)[$post->id] ?? null,
+            'reading' => $this->insights->reading(),
         ]);
     }
 
