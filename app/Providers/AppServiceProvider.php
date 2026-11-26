@@ -3,9 +3,11 @@
 namespace App\Providers;
 
 use App\Domain\Channels\ChannelManager;
+use App\Domain\Channels\Events\ChannelConnected;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\Generators\ProviderReplies;
 use App\Domain\Drafting\PromptRenderer;
+use App\Domain\Insights\ResumePollingOfConnectedChannel;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Support\Health\CheckBackingServices;
 use App\Support\PasswordConfirmation;
@@ -54,6 +56,7 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
 
         Event::listen(DiagnosingHealth::class, CheckBackingServices::class);
+        Event::listen(ChannelConnected::class, ResumePollingOfConnectedChannel::class);
 
         View::addNamespace(PromptRenderer::NAMESPACE, resource_path('prompts'));
 

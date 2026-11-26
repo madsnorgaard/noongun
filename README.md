@@ -701,33 +701,94 @@ Three things to know when operating it:
 Noon Gun reads how published posts did: reactions, comments, shares, clicks
 and reach. See `docs/adr/0016-insights.md`.
 
+### How often
+
 The `scheduler` container runs `noongun:poll-metrics` every ten minutes. It
 queues one `FetchMetricsJob` for each active channel that has a published
 post due for a reading, and the job reads those posts in one call. A post is
 read every hour during its first day, once a day until it is three weeks old,
-and not after that (`NOONGUN_INSIGHTS_CADENCE`).
+and not after that (`NOONGUN_INSIGHTS_CADENCE`). That is about 45 readings
+for one post.
 
-What to know when operating it:
+### What is read from Facebook
+
+| Number | Where it comes from | Needs |
+|---|---|---|
+| Reactions | The total of all reactions on the post. | Nothing more than a connected Page. |
+| Comments | The total of all comments on the post, replies included. | Nothing more. |
+| Shares | How often the post was shared. | Nothing more. |
+| Clicks | The post insight `post_clicks`: clicks anywhere on the post. | `read_insights` |
+| Reach | The post insight `post_total_media_view_unique`: how many people saw the post. | `read_insights` |
+
+Only totals are asked for, never who reacted or commented. The posts of a
+channel are read together, at least 25 posts in one request, and Meta counts
+each post as one call against the rate limit of the Page (two with reach and
+clicks).
+
+Meta gives reach and clicks only for Pages with 100 or more likes, updates
+reach about once a day, and renames these metrics from time to time. When it
+does, set the new names with `FACEBOOK_METRIC_CLICKS` and
+`FACEBOOK_METRIC_REACH`; the log line "Facebook refused to give the insights
+of a post" says that a name is no longer accepted.
+
+### Getting reach and clicks: `read_insights`
+
+A Page as it is connected by default gives reactions, comments and shares.
+Reach and clicks stay empty until the Page has one more permission:
+
+1. In the Meta app at developers.facebook.com, add the permission
+   `read_insights` to the use case **Manage everything on your Page**.
+2. Add it to the permissions Noon Gun asks for, in `.env`:
+
+   ```
+   FACEBOOK_SCOPES=pages_show_list,pages_read_engagement,pages_manage_posts,read_insights
+   ```
+
+   If `FACEBOOK_SCOPES` already has other entries, such as
+   `business_management`, keep them and add `read_insights` at the end.
+3. Restart with `docker compose up -d`.
+4. Open **Channels**, choose **Connect Facebook** again and allow the new
+   permission. The Page keeps publishing while you do this.
+
+The person who connects must be able to see the insights of the Page on
+Facebook. From the next reading on, reach and clicks are filled for posts
+that are younger than three weeks. Numbers of the time before are not
+fetched.
+
+`read_insights` is optional in every respect: a Page that is connected
+without it, or that loses it later, publishes as before and only lacks these
+two numbers. It is never a reason for "connect again".
+
+### What to know when operating it
 
 - **A number that is missing is not zero.** A platform that does not give a
   number, or a channel without the permission for it, leaves it empty.
-- **Facebook gives reactions, comments and shares as connected.** Reach and
-  clicks need one more permission, `read_insights`. To get them, add the
-  permission to the Meta app, add it to `FACEBOOK_SCOPES`, and connect the
-  Page again. Meta only gives these two numbers for Pages with 100 or more
-  likes.
 - **LinkedIn gives no numbers yet.** A self-serve LinkedIn app may not read
   them (see `docs/adr/0007-linkedin-self-serve-until-m9.md`). LinkedIn posts
   are shown as not measured.
 - **Publishing comes first.** Reading uses at most
-  `NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT` of a channel's rate limit, runs on
-  its own queue (`insights`), and stops for a channel when the platform asks
-  it to wait. A failed reading changes nothing about a post or a channel;
-  it is logged and tried again later.
+  `NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT` of a channel's rate limit and stops
+  for a channel when the platform asks it to wait. It runs on its own queue
+  (`insights`) with one worker of its own (`supervisor-insights` in
+  `config/horizon.php`), so readings and publishing never wait for each
+  other. A failed reading changes nothing about a post or a channel; it is
+  logged and tried again later.
+- **A token that Facebook refuses for reading** pauses reading for that Page
+  for six hours and changes nothing else. Whether the Page needs to be
+  connected again is decided by publishing and the token check.
+  Connecting the Page again ends the pause at once.
+- **A post that was deleted on Facebook** is not read for ever. After
+  Facebook has answered three times in a row that it does not have the post
+  (`NOONGUN_INSIGHTS_GONE_AFTER`), Noon Gun stops asking about it. The numbers
+  it had are kept. Connecting the Page again makes Noon Gun ask once more.
+- **When the workers are down** the queue does not fill up: at most one
+  reading for each channel waits in it.
 - A reading is only stored when a number changed, so the table grows with
   what happens to a post, not with how often it is read.
-- Reading Facebook's numbers is not built yet: the job runs and stores
-  nothing for Facebook until it is.
+- The answers of Meta that this is built on were read in its documentation,
+  not yet recorded from a real Page. `scripts/spike/facebook/` holds a script
+  that prints them for one post; `docs/platform-notes/meta.md` lists what is
+  still assumed.
 
 ### Where the numbers are shown
 
@@ -921,7 +982,8 @@ it there.
 | `REDIS_HOST` | `redis` | Redis host. |
 | `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` | empty | Credentials of the Meta app this instance connects Pages with. |
 | `FACEBOOK_GRAPH_VERSION` | `v27.0` | Graph API version used for every Facebook call. |
-| `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
+| `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. A Page must be granted all of them, except `read_insights`, which only adds the reach and clicks of posts (see "Insights"). |
+| `FACEBOOK_METRIC_CLICKS`, `FACEBOOK_METRIC_REACH` | `post_clicks`, `post_total_media_view_unique` | Names of the post insights that are read as clicks and reach. Change them when Meta renames a metric. An empty name means the number is not asked for. |
 | `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
 | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | empty | Credentials of the LinkedIn app this instance connects profiles with. |
 | `LINKEDIN_API_VERSION` | `202611` | Value of the `Linkedin-Version` header on every LinkedIn API call, `YYYYMM`. LinkedIn refuses a version about a year after it came out. |
@@ -940,8 +1002,9 @@ it there.
 | `NOONGUN_INSIGHTS_VARIANTS_PER_RUN` | `25` | Most posts of one channel that one run of the job reads. Never more than 500. |
 | `NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT` | `20` | The share of a channel's rate limit that reading may use, so that publishing always has calls left. From 1 to 90. |
 | `NOONGUN_INSIGHTS_PAUSE_MINUTES` | `60` | How long a channel is left alone after the platform refused a reading. A longer wait the platform asks for is respected, up to a day. |
-| `NOONGUN_INSIGHTS_TIMEOUT` | `45` | Time limit in seconds for one run of the job. Must stay below the `timeout` of the supervisor in `config/horizon.php`. |
-| `NOONGUN_INSIGHTS_QUEUE` | `insights` | Queue that the job runs on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
+| `NOONGUN_INSIGHTS_TIMEOUT` | `45` | Time limit in seconds for one run of the job. Must stay below the `timeout` of `supervisor-insights` in `config/horizon.php`. |
+| `NOONGUN_INSIGHTS_QUEUE` | `insights` | Queue that the job runs on. `supervisor-insights` in `config/horizon.php` reads the same setting, so the queue always has a worker. Do not set it to the publishing queue. |
+| `NOONGUN_INSIGHTS_GONE_AFTER` | `3` | How many times in a row a platform must answer that a post is gone before Noon Gun stops asking for its numbers. |
 | `NOONGUN_INSIGHTS_WEIGHT_REACTIONS`, `_COMMENTS`, `_SHARES`, `_CLICKS` | `1`, `2`, `3`, `1` | Weights of the engagement score, the one number posts are compared by: each count times its weight, added up. Reach is not part of it. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
 | `OPENAI_API_KEY` | empty | The instance key for drafting with OpenAI, used by every workspace that drafts with OpenAI and has no OpenAI key of its own. |

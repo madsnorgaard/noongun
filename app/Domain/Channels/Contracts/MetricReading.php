@@ -15,6 +15,11 @@ use InvalidArgumentException;
  * Every number is a whole number from 0 to MAX. Adapters build a reading
  * from a platform answer with fromPlatform(), which drops what is not such
  * a number instead of failing.
+ *
+ * A reading can also say that the post is gone: the platform answered that
+ * it no longer has it. Such a reading holds no number. It is different from
+ * no reading at all, which only means "not this time". The caller counts
+ * these answers and stops asking about the variant (ADR 0016).
  */
 final readonly class MetricReading
 {
@@ -27,12 +32,26 @@ final readonly class MetricReading
         public ?int $shares = null,
         public ?int $clicks = null,
         public ?int $reach = null,
+        public bool $gone = false,
     ) {
         foreach ($this->toArray() as $name => $value) {
             if ($value !== null && ($value < 0 || $value > self::MAX)) {
                 throw new InvalidArgumentException("The metric {$name} must be a whole number from 0 to ".self::MAX.'.');
             }
+
+            if ($value !== null && $gone) {
+                throw new InvalidArgumentException('A reading of a post that is gone holds no numbers.');
+            }
         }
+    }
+
+    /**
+     * The platform said that it does not have this post any more, or not
+     * for this channel. Use it only for that answer, never for a failure.
+     */
+    public static function gone(): self
+    {
+        return new self(gone: true);
     }
 
     /**
@@ -81,6 +100,7 @@ final readonly class MetricReading
             shares: $keep(Metric::Shares),
             clicks: $keep(Metric::Clicks),
             reach: $keep(Metric::Reach),
+            gone: $this->gone,
         );
     }
 

@@ -2,6 +2,7 @@
 
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Contracts\Metric;
+use App\Domain\Channels\Contracts\MetricReading;
 use App\Domain\Channels\Contracts\RateLimit;
 use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Content\PostState;
@@ -71,6 +72,47 @@ it('records that a variant was asked about when the platform gave no reading for
 
     expect(snapshotsOf($this->variant))->toBe([])
         ->and(metricsCheckedAt($this->variant))->toBe('2026-11-26 10:00:00');
+});
+
+it('stops asking about a post that an adapter reports as gone three times in a row, and not sooner', function () {
+    $this->fake->reads($this->variant, MetricReading::gone());
+
+    foreach ([1, 2] as $round) {
+        runFetchMetrics($this->channel);
+        $this->travel(61)->minutes();
+    }
+
+    // A reading in between: the post was there after all.
+    $this->fake->reads($this->variant, ['reactions' => 4]);
+    runFetchMetrics($this->channel);
+
+    expect(goneCount($this->variant))->toBe(0)
+        ->and(snapshotsOf($this->variant))->toHaveCount(1);
+
+    $this->fake->reads($this->variant, MetricReading::gone());
+
+    foreach ([1, 2, 3, 4, 5] as $round) {
+        $this->travel(61)->minutes();
+        runFetchMetrics($this->channel);
+    }
+
+    // Two, one, and then three more: the last two rounds asked nothing.
+    $this->fake->assertMetricsFetchedTimes(6);
+
+    expect(goneCount($this->variant))->toBe(3)
+        ->and(snapshotsOf($this->variant))->toHaveCount(1)
+        ->and(ChannelPolling::isPaused($this->channel->id))->toBeFalse();
+});
+
+it('does not count a missing reading as a post that is gone', function () {
+    foreach ([1, 2, 3, 4] as $round) {
+        runFetchMetrics($this->channel);
+        $this->travel(61)->minutes();
+    }
+
+    $this->fake->assertMetricsFetchedTimes(4);
+
+    expect(goneCount($this->variant))->toBe(0);
 });
 
 it('stores only the metrics the channel may read, and null for the rest', function () {

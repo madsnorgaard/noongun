@@ -3,6 +3,7 @@
 namespace App\Domain\Channels\Models;
 
 use App\Domain\Channels\ChannelStatus;
+use App\Domain\Channels\Events\ChannelConnected;
 use App\Domain\Channels\Policies\ChannelPolicy;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\Concerns\BelongsToWorkspace;
@@ -159,7 +160,7 @@ class Channel extends Model
     {
         $existing = static::query()->where('platform', $platform)->where('external_id', $externalId)->first();
 
-        return static::query()->updateOrCreate(
+        $channel = static::query()->updateOrCreate(
             ['platform' => $platform, 'external_id' => $externalId],
             [
                 'refresh_token' => null,
@@ -169,6 +170,12 @@ class Channel extends Model
                 'status' => $existing?->status->isConfirmed() ? ChannelStatus::Active : ChannelStatus::Pending,
             ],
         );
+
+        if ($channel->status === ChannelStatus::Active) {
+            event(new ChannelConnected($channel->workspace_id, $channel->id));
+        }
+
+        return $channel;
     }
 
     public function isPending(): bool
@@ -195,6 +202,8 @@ class Channel extends Model
         // The row may be gone if it was discarded in the meantime.
         if ($confirmed) {
             $this->refresh();
+
+            event(new ChannelConnected($this->workspace_id, $this->id));
         }
 
         return $confirmed;

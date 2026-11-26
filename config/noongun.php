@@ -96,6 +96,24 @@ return [
             // requested unless it is added to FACEBOOK_SCOPES; a Page
             // connected without it gets reactions, comments and shares only.
             'insights_scope' => 'read_insights',
+            // Calls a Page token may make in 24 hours: Meta allows 4800 for
+            // each user who engaged with the Page, and this is that limit at
+            // one such user. Reading metrics uses a share of it.
+            'rate_limit_calls_per_day' => 4800,
+            // How the numbers of a post are read. "post_fields" is asked of
+            // the post itself: totals only (limit(0) keeps the people out
+            // of the answer), comments counted with their replies (filter
+            // "stream"). "clicks" and "reach" are the names of the insights
+            // metrics; Meta renames these from time to time, and an empty
+            // name means the number is not asked for. "batch_size" is the
+            // most reads in one batch request, at most 50.
+            'metrics' => [
+                'post_fields' => 'reactions.summary(total_count).limit(0),comments.filter(stream).summary(true).limit(0),shares',
+                'clicks' => env('FACEBOOK_METRIC_CLICKS', 'post_clicks'),
+                'reach' => env('FACEBOOK_METRIC_REACH', 'post_total_media_view_unique'),
+                'period' => 'lifetime',
+                'batch_size' => 50,
+            ],
         ],
 
         // A member's own profile, through the self-serve products "Share on
@@ -166,8 +184,10 @@ return [
     | always has calls left. "pause_minutes" is how long a channel is left
     | alone after the platform refused a read; a longer wait the platform
     | asks for is respected. "timeout" is the limit in seconds for one run
-    | of the job. "queue" is the queue the job runs on; it is listed after
-    | the publishing queue in config/horizon.php.
+    | of the job. "queue" is the queue the job runs on; it has a supervisor
+    | of its own in config/horizon.php. "gone_after" is how many times in a
+    | row a platform must answer that a post is gone before it is not asked
+    | about any more.
     |
     | "score" holds the weights of the engagement score, the one number
     | posts are compared by: each count times its weight, added up. Reach is
@@ -182,6 +202,7 @@ return [
         'rate_limit_percent' => (int) env('NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT', 20),
         'pause_minutes' => (int) env('NOONGUN_INSIGHTS_PAUSE_MINUTES', 60),
         'timeout' => (int) env('NOONGUN_INSIGHTS_TIMEOUT', 45),
+        'gone_after' => (int) env('NOONGUN_INSIGHTS_GONE_AFTER', 3),
 
         'score' => [
             'reactions' => env('NOONGUN_INSIGHTS_WEIGHT_REACTIONS', 1),

@@ -128,3 +128,23 @@ function metricsCheckedAt(PostVariant $variant): ?string
 
     return is_string($at) ? $at : null;
 }
+
+/**
+ * Gives a published variant the id a platform would have given its post,
+ * and returns the variant as it is now stored.
+ */
+function publishedAs(PostVariant $variant, string $externalId): PostVariant
+{
+    DB::table('post_variants')->where('id', $variant->id)->update(['external_id' => $externalId]);
+
+    return PostVariant::query()->withoutGlobalScopes()->findOrFail($variant->id);
+}
+
+/**
+ * How many times in a row the platform said the post of a variant is gone,
+ * read without a workspace.
+ */
+function goneCount(PostVariant $variant): int
+{
+    return (int) DB::table('post_variants')->where('id', $variant->id)->value('metrics_gone_count');
+}

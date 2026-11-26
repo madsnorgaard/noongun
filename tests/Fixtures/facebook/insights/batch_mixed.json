@@ -1,0 +1,43 @@
+[
+    {
+        "code": 200,
+        "headers": [
+            {
+                "name": "Content-Type",
+                "value": "application/json; charset=UTF-8"
+            }
+        ],
+        "body": "{\"reactions\":{\"data\":[],\"summary\":{\"total_count\":12}},\"comments\":{\"data\":[],\"summary\":{\"order\":\"chronological\",\"total_count\":3,\"can_comment\":true}},\"shares\":{\"count\":2},\"id\":\"100000000000001_900000000000001\"}"
+    },
+    {
+        "code": 200,
+        "headers": [
+            {
+                "name": "Content-Type",
+                "value": "application/json; charset=UTF-8"
+            }
+        ],
+        "body": "{\"data\":[{\"name\":\"post_clicks\",\"period\":\"lifetime\",\"values\":[{\"value\":40}]},{\"name\":\"post_total_media_view_unique\",\"period\":\"lifetime\",\"values\":[{\"value\":900}]}]}"
+    },
+    {
+        "code": 400,
+        "headers": [
+            {
+                "name": "Content-Type",
+                "value": "application/json; charset=UTF-8"
+            }
+        ],
+        "body": "{\"error\":{\"message\":\"Unsupported get request. Object with ID '100000000000001_900000000000002' does not exist, cannot be loaded due to missing permissions, or does not support this operation.\",\"type\":\"GraphMethodException\",\"code\":100,\"error_subcode\":33,\"fbtrace_id\":\"AtestTraceBatchGone01\"}}"
+    },
+    {
+        "code": 400,
+        "headers": [],
+        "body": "{\"error\":{\"message\":\"Unsupported get request. Object with ID '100000000000001_900000000000002' does not exist, cannot be loaded due to missing permissions, or does not support this operation.\",\"type\":\"GraphMethodException\",\"code\":100,\"error_subcode\":33,\"fbtrace_id\":\"AtestTraceBatchGone02\"}}"
+    },
+    {
+        "code": 200,
+        "headers": [],
+        "body": "{\"reactions\":{\"data\":[],\"summary\":{\"total_count\":5}},\"comments\":{\"data\":[],\"summary\":{\"order\":\"chronological\",\"total_count\":1,\"can_comment\":true}},\"id\":\"100000000000001_900000000000003\"}"
+    },
+    null
+]

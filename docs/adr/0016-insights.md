@@ -61,10 +61,18 @@ when it implements the interface and lists at least one metric.
 The method is batch-shaped, a channel and many variants, because the limits
 are per channel and platforms offer batch reads. It returns readings and
 writes nothing. A variant without an entry in the answer gave no reading this
-time (deleted on the platform, or its part of a batch failed); that is not an
+time (its part of a batch failed, or was not finished); that is not an
 error. A failure of the whole call is a `ChannelException` of the existing
 kinds. A permission that is missing for some metrics only is not a failure:
 those metrics are null.
+
+A post that the platform no longer has is a third answer, next to a reading
+and no reading: the entry is `MetricReading::gone()`, a reading with the flag
+`gone` and no numbers. It was added when the Facebook adapter was built,
+without changing a signature: `gone` is a last constructor argument that is
+false unless named. An adapter uses it only when the platform said so, never
+for a failure, and one that cannot tell the two apart leaves the variant out.
+What the caller does with it is under "Polling".
 
 `metricsFor()` says what the token of one channel can read. The capabilities
 say what the platform has; a Page connected without `read_insights` has
@@ -126,6 +134,30 @@ token is still good is decided by publishing and the token check.
 
 The payload is two ids. No token is in it or in a log line.
 
+A pause that was set because the token was not accepted ends when the channel
+is connected again (`ChannelConnected`, fired by `Channel::recordConnection()`
+for a channel that is active and by `Channel::confirm()`). A wait the platform
+asked for is kept apart and does not end that way.
+
+**A post that is gone.** `post_variants.metrics_gone_count` counts the answers
+in a row that a post is gone. At `NOONGUN_INSIGHTS_GONE_AFTER` (default 3)
+`DueVariants` leaves the variant out, so it costs no more calls. More than one
+answer is needed because platforms give the same answer for a deleted post
+and for one the token cannot see at the moment; Facebook says so in the text
+of its error. A reading sets the count back to zero, and so does connecting
+the channel again, which is how a wrong conclusion is undone. The snapshots
+the variant has are kept. Why a count and not a date: the question the job
+asks is "how sure", and one column answers it; a page that wants to say "no
+longer on Facebook" compares the count with `InsightsConfig::goneAfter()`.
+
+**One job for each channel.** `FetchMetricsJob` is unique for its channel
+(`ShouldBeUnique`): while one is queued or running, the scheduler does not
+queue a second. So the queue holds at most one job for each channel however
+long the workers are away, and when a platform is away the pause keeps the
+scheduler from queuing at all. A job that was lost blocks its channel for at
+most an hour. Two runs that do overlap are harmless as before: the lock lets
+one of them read, and the other finds nothing due.
+
 ### Publishing comes first
 
 - Reading counts its own calls for each channel and uses at most
@@ -135,7 +167,13 @@ The payload is two ids. No token is in it or in a log line.
 - When the platform says it is limiting requests, reading stops for that
   channel for the time the platform names, at least the configured pause.
 - The job runs on its own queue (`insights`), so a backlog of readings never
-  stands in front of a `PublishPostJob`.
+  stands in front of a `PublishPostJob`. The queue has a supervisor of its
+  own in `config/horizon.php`, `supervisor-insights`, with one process, in
+  every environment that file defines. The first version listed both queues
+  on one supervisor with automatic balancing. That consumed both, but
+  balancing moves processes to the queue with the longer wait, so a backlog
+  of readings could have left publishing with a single process. With two
+  supervisors neither queue can take a process from the other.
 - Publishing is not counted, not held back and not locked by any of this.
 
 What this does not cover: the limit is the platform's, and Noon Gun does not
@@ -186,6 +224,34 @@ works. To get them: add `read_insights` to the Meta app, add it to
 because a self-hosted instance works without it and every permission is one
 more thing to explain on the consent screen and, in Phase 3, in App Review.
 
+When it is configured it is still optional for each Page. The adapter asks
+for it in the dialog, but a Page that was not granted it connects all the
+same, and the token check does not mark a Page that lacks it. Every other
+configured permission stays required. Otherwise the step above would have
+refused or stopped Pages for the sake of two numbers, against the rule that
+metrics never get in the way of publishing.
+
+### How Facebook is read
+
+One request to the batch endpoint for every 25 posts: for each post a read of
+the post (reactions, comments with replies, shares) and, with
+`read_insights`, a read of its insights (clicks, reach). Meta counts each
+read as a call, so `metricCallsPerVariant()` is 2. `ids=` is not used: it is
+not documented, and the batch endpoint gives the same single round trip with
+the token in the form body. What each answer of a read means, and which of
+it rests on documentation and which on assumption, is in
+`docs/platform-notes/meta.md` (2026-11-26, the adapter).
+
+- A read that was not finished or failed for a moment gives no reading for
+  that post. When it is the insights read, the post gets no reading at all
+  this time, so a stored number is never replaced by "not given" because of
+  an outage.
+- Insights that are refused, empty or not permitted give null for reach and
+  clicks and keep the rest.
+- A refused token or a rate limit on any read fails the whole call.
+- Only when nothing came back at all is a temporary failure a failure of
+  the call, so the job pauses instead of marking every post as asked.
+
 ### LinkedIn
 
 Deferred to M9 (ADR 0007). The adapter lists no metrics and does not
@@ -200,6 +266,9 @@ shown as not measured.
 - The numbers of a post are as old as its last reading: up to an hour on the
   first day, up to a day later, and frozen after three weeks.
 - A change that happens and reverts between two readings is not seen.
+- A post that was deleted on the platform keeps its last numbers and is read
+  three more times. A post that is reported as gone by mistake three times
+  in a row is not read again until the channel is connected again.
 - The share of the rate limit is counted in the cache store. If the cache is
   cleared, the count starts again; the platform's own refusal and the pause
   are what remains.

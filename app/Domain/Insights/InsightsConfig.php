@@ -26,6 +26,26 @@ final class InsightsConfig
     /** How long a channel is left alone when the platform no longer accepts its token for reading. */
     public const RECONNECT_PAUSE_SECONDS = 21600;
 
+    /**
+     * How long a queued job keeps a second one for the same channel from
+     * being queued. It ends when the job has run; this is only the limit
+     * for a job that was lost, and what bounds the backlog when no worker
+     * runs: one job for each channel in this time, not one every run of
+     * the scheduler.
+     */
+    public const UNIQUE_SECONDS = 3600;
+
+    /**
+     * How many answers in a row that a post is gone it takes before the
+     * post is not asked about any more. More than one, because platforms
+     * give the same answer for a post that was deleted and for one they
+     * cannot show at the moment.
+     */
+    public static function goneAfter(): int
+    {
+        return min(self::int('gone_after', 3, 1), 100);
+    }
+
     public static function enabled(): bool
     {
         return config('noongun.insights.enabled') !== false;

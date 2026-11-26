@@ -18,6 +18,10 @@ use Illuminate\Database\Eloquent\Collection;
  * than the step for its age allows, or never. The ones that waited longest
  * come first. Whether the channel may be read at all is not decided here.
  *
+ * A variant whose post the platform has reported as gone
+ * InsightsConfig::goneAfter() times in a row is never due again, until a
+ * reading or a new connection of the channel sets the count back.
+ *
  * Only post_variants is read: what state the post is in does not matter. A
  * variant that is public has numbers, also when another variant of its post
  * failed.
@@ -68,6 +72,7 @@ final class DueVariants
         return PostVariant::query()
             ->where('post_variants.channel_id', $channel->id)
             ->whereNotNull('post_variants.external_id')
+            ->where('post_variants.metrics_gone_count', '<', InsightsConfig::goneAfter())
             ->where(function (Builder $due) use ($steps): void {
                 foreach ($steps as $step) {
                     $due->orWhere(function (Builder $query) use ($step): void {

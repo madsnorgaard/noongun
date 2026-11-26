@@ -44,10 +44,15 @@ interface ReadsMetrics
      * the readings.
      *
      * The answer is keyed by variant id. A variant without an entry gave no
-     * reading this time, for example because the post was deleted on the
-     * platform or its part of a batch failed; that is not an error, and the
-     * caller asks again when the variant is next due. A metric the platform
-     * did not give is null in the reading, never zero.
+     * reading this time, for example because its part of a batch failed;
+     * that is not an error, and the caller asks again when the variant is
+     * next due. A metric the platform did not give is null in the reading,
+     * never zero.
+     *
+     * When the platform answers that it no longer has the post, the entry
+     * is MetricReading::gone(). The caller counts these answers and stops
+     * asking about the variant after a few in a row. An adapter that cannot
+     * tell a deleted post from a failure leaves the variant out instead.
      *
      * A failure of the whole call is a ChannelException: retryable, with
      * retryAfterSeconds when the platform is limiting requests, or

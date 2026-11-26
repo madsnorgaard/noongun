@@ -16,7 +16,9 @@ use Illuminate\Support\Facades\RateLimiter;
  *
  * - The lock: one run reads a channel at a time.
  * - The pause: after the platform refused a read, the channel is left alone
- *   until the time the platform asked for, or the configured pause.
+ *   until the time the platform asked for, or the configured pause. A pause
+ *   for a token that was not accepted also ends when the channel is
+ *   connected again.
  * - The budget: reading may use a share of the channel's rate limit
  *   (noongun.insights.rate_limit_percent), counted here. The rest is never
  *   touched by reading, so publishing has calls left whatever is polled.
@@ -36,7 +38,7 @@ final class ChannelPolling
 
     public static function isPaused(int $channelId): bool
     {
-        return Cache::has(self::pauseKey($channelId));
+        return Cache::has(self::pauseKey($channelId)) || Cache::has(self::tokenPauseKey($channelId));
     }
 
     /**
@@ -51,9 +53,32 @@ final class ChannelPolling
         Cache::put(self::pauseKey($channelId), now()->addSeconds($seconds)->getTimestamp(), $seconds);
     }
 
+    /**
+     * Leaves the channel alone because the platform did not accept its
+     * token for reading. Kept apart from pause(), because this one ends
+     * when the channel is connected again (connectedAgain()), and a wait
+     * the platform asked for does not.
+     */
+    public static function pauseUntilConnectedAgain(int $channelId, int $seconds): void
+    {
+        $seconds = min(max($seconds, 1), InsightsConfig::LONGEST_PAUSE_SECONDS);
+
+        Cache::put(self::tokenPauseKey($channelId), now()->addSeconds($seconds)->getTimestamp(), $seconds);
+    }
+
+    /**
+     * The channel has a new token: a pause that was about the old one is
+     * over. A pause the platform asked for stays.
+     */
+    public static function connectedAgain(int $channelId): void
+    {
+        Cache::forget(self::tokenPauseKey($channelId));
+    }
+
     public static function resume(int $channelId): void
     {
         Cache::forget(self::pauseKey($channelId));
+        Cache::forget(self::tokenPauseKey($channelId));
     }
 
     /**
@@ -94,6 +119,11 @@ final class ChannelPolling
     private static function pauseKey(int $channelId): string
     {
         return "noongun:insights:pause:{$channelId}";
+    }
+
+    private static function tokenPauseKey(int $channelId): string
+    {
+        return "noongun:insights:pause-token:{$channelId}";
     }
 
     private static function callsKey(int $channelId): string
