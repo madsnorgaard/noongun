@@ -491,12 +491,12 @@ Observed, not from documentation. On the first connect against the real Graph AP
 owner ticked five Pages in Facebook's consent screen. `GET /me/accounts` listed three.
 Nothing in the answer said that two were left out, and Noon Gun said nothing either.
 
-**Cause: under investigation.** The working explanation is that the two Pages are held
-in a business portfolio, and that `/me/accounts` leaves such Pages out unless the app
-also has `business_management`. The 2026-11-23 entry notes that the "Manage everything
-on your Page" use case adds `business_management` by default; `FACEBOOK_SCOPES` does
-not request it. This has not been confirmed by a second connect with the permission
-added, and no documentation page was found that states it.
+**Cause: the two Pages are held in business portfolios** (confirmed the same day, see
+"Confirmed by a second connect" below). `/me/accounts` leaves such Pages out unless
+the app also has `business_management`. The 2026-11-23 entry notes that the "Manage
+everything on your Page" use case adds `business_management` by default;
+`FACEBOOK_SCOPES` does not request it by default. No documentation page was found that
+states this behaviour; it rests on our own connect.
 
 What the adapter does since this date:
 
@@ -508,12 +508,24 @@ What the adapter does since this date:
   one line about business portfolios and `business_management`, and the README section
   "A Page is missing" lists the causes.
 
+### Confirmed by a second connect
+
+Observed on 2026-11-26 against the real Graph API, with `business_management` added to
+the use case in the Meta app and to `FACEBOOK_SCOPES`:
+
+- The Facebook dialog showed an extra consent step, **Choose the Businesses**. The
+  least that is needed there is **Opt in to current Businesses only**, with the
+  portfolios that hold the Pages ticked.
+- `/me/accounts` then returned the two Pages that were missing before. Both are held
+  in business portfolios.
+- Connect succeeded, and four Pages are connected and active. So `debug_token` lists
+  `business_management` in `data.scopes` of a Page token, and the check in `connect()`
+  that refuses a Page whose token lacks a configured scope passes with
+  `business_management` in `FACEBOOK_SCOPES`. This closes that question.
+
 Still to confirm:
 
-1. Does adding `business_management` to the use case and to `FACEBOOK_SCOPES` make the
-   two Pages appear in `/me/accounts`?
-2. With `business_management` in `FACEBOOK_SCOPES`, does `debug_token` list it in
-   `data.scopes` of a Page token? `connect()` refuses every Page whose token lacks a
-   configured scope, so if it does not, connecting would fail for all Pages.
-3. Does `/me/accounts` ever return an entry without `access_token`? The "no access"
+1. Does `/me/accounts` ever return an entry without `access_token`? The "no access"
    reason exists for that case; it has not been seen in a real answer.
+2. Development mode visibility, as raised in the 2026-11-23 entry: whether posts made
+   by an app in Development mode are visible to the public.

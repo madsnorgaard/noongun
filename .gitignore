@@ -55,4 +55,4 @@ npm-debug.log
 /.zed
 
 # A local compose file, for example for container DNS (see the README)
-docker-compose.local.yml
+compose.local.yml

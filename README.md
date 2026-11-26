@@ -562,9 +562,10 @@ docker compose up -d --build --wait
 
 If connecting a channel says "Facebook could not be reached", the containers
 may have no DNS. This happens on a host whose `/etc/resolv.conf` has no
-nameserver that a container can use, because the host runs a local resolver.
-Give the containers a resolver in a local compose file, for example
-`docker-compose.local.yml`, which Git ignores:
+`nameserver` line, because the host runs a local resolver. Docker's embedded
+DNS then has no upstream on the compose network, so no outside name resolves.
+Give the containers a resolver in a local compose file, `compose.local.yml`,
+which Git ignores:
 
 ```yaml
 x-dns: &dns
@@ -584,7 +585,7 @@ services:
 List it in `.env` after the main file and start the stack again:
 
 ```
-COMPOSE_FILE=docker-compose.yml:docker-compose.local.yml
+COMPOSE_FILE=docker-compose.yml:compose.local.yml
 ```
 
 ```sh
@@ -717,8 +718,8 @@ these causes:
 - **Your role on the Page does not allow creating content.** Noon Gun shows
   this as "Your role on this Page does not allow creating posts." Change the
   role under **Page access** in the settings of the Page, then connect again.
-- **The Page is held in a business portfolio.** Facebook appears to leave such
-  Pages out unless the app also has the `business_management` permission. Add
+- **The Page is held in a business portfolio.** Facebook leaves such Pages out
+  unless the app also has the `business_management` permission. Add
   `business_management` to the use case in the Meta app, set this in `.env`,
   restart with `docker compose up -d` and connect again:
 
@@ -726,8 +727,10 @@ these causes:
   FACEBOOK_SCOPES=pages_show_list,pages_read_engagement,pages_manage_posts,business_management
   ```
 
-  This cause was observed on the first real connect and is not yet confirmed
-  by us; see the entry of 2026-11-26 in `docs/platform-notes/meta.md`.
+  The Facebook dialog then has an extra step, **Choose the Businesses**. The
+  least that is needed there is **Opt in to current Businesses only**, with
+  the portfolios that hold the Pages ticked. We confirmed this with a real
+  connect; see the entries of 2026-11-26 in `docs/platform-notes/meta.md`.
 
 A profile in professional mode is not a Page and cannot be connected.
 
