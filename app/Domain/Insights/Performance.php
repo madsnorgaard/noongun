@@ -2,6 +2,7 @@
 
 namespace App\Domain\Insights;
 
+use App\Domain\Channels\Contracts\Metric;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Insights\Models\MetricSnapshot;
 use Carbon\CarbonImmutable;
@@ -227,5 +228,180 @@ final class Performance
         }
 
         return $top;
+    }
+
+    /**
+     * Every row of each variant, oldest first: histories() is history()
+     * for several variants in one query. A variant without rows is not in
+     * the answer.
+     *
+     * @param  list<int>  $variantIds
+     * @return array<int, list<MetricSnapshot>> keyed by variant id
+     */
+    public function histories(array $variantIds): array
+    {
+        if ($variantIds === []) {
+            return [];
+        }
+
+        $histories = [];
+
+        $rows = MetricSnapshot::query()
+            ->whereIn('post_variant_id', $variantIds)
+            ->orderBy('captured_at')
+            ->orderBy('id')
+            ->get();
+
+        foreach ($rows as $row) {
+            $histories[$row->post_variant_id][] = $row;
+        }
+
+        return $histories;
+    }
+
+    /**
+     * Like byPillar(), with the counts an honest average needs: how many
+     * posts have each number. Ordered by pillar name, the entry without a
+     * pillar last.
+     *
+     * @return list<PerformanceSummary>
+     */
+    public function pillarSummaries(DateTimeInterface $from, DateTimeInterface $until): array
+    {
+        return $this->summaries($from, $until, byChannel: false);
+    }
+
+    /**
+     * One entry for each channel that has a variant published from $from up
+     * to, not including, $until, with the current numbers of those
+     * variants. The name is not read: the caller has the channels. Ordered
+     * by channel id.
+     *
+     * @return list<PerformanceSummary>
+     */
+    public function channelSummaries(DateTimeInterface $from, DateTimeInterface $until): array
+    {
+        return $this->summaries($from, $until, byChannel: true);
+    }
+
+    /**
+     * The posts with a variant published from $from up to, not including,
+     * $until that did best, counting those variants: highest engagement
+     * score first, then the one published last, then the newest post. Only
+     * posts with a score are listed, a score of 0 included.
+     *
+     * @return list<PostPerformance>
+     */
+    public function topPosts(DateTimeInterface $from, DateTimeInterface $until, int $limit): array
+    {
+        if ($limit < 1) {
+            return [];
+        }
+
+        $weights = EngagementScore::bindings();
+        $score = 'sum('.EngagementScore::SQL.')';
+
+        $rows = MetricSnapshot::query()
+            ->current()
+            ->join('post_variants', function (JoinClause $join): void {
+                $join->on('post_variants.id', '=', 'metric_snapshots.post_variant_id')
+                    ->on('post_variants.workspace_id', '=', 'metric_snapshots.workspace_id');
+            })
+            ->whereNotNull('post_variants.external_id')
+            ->where('post_variants.published_at', '>=', CarbonImmutable::instance($from)->utc())
+            ->where('post_variants.published_at', '<', CarbonImmutable::instance($until)->utc())
+            ->groupBy('post_variants.post_id')
+            ->havingRaw($score.' is not null', $weights)
+            ->orderByRaw($score.' desc', $weights)
+            ->orderByRaw('max(post_variants.published_at) desc')
+            ->orderByDesc('post_variants.post_id')
+            ->limit($limit)
+            ->selectRaw('post_variants.post_id as post_id, count(*) as measured_variants, min(metric_snapshots.checked_at) as checked_at, '.self::SUMS)
+            ->toBase()
+            ->get();
+
+        $posts = [];
+
+        foreach ($rows as $row) {
+            $totals = MetricTotals::fromRow($row);
+
+            $posts[] = new PostPerformance(
+                postId: (int) $row->post_id,
+                totals: $totals,
+                measuredVariants: (int) $row->measured_variants,
+                score: $totals->score(),
+                checkedAt: is_string($row->checked_at) ? CarbonImmutable::parse($row->checked_at, 'UTC') : null,
+            );
+        }
+
+        return $posts;
+    }
+
+    /**
+     * @return list<PerformanceSummary>
+     */
+    private function summaries(DateTimeInterface $from, DateTimeInterface $until, bool $byChannel): array
+    {
+        $posts = 'count(distinct post_variants.post_id)';
+        $counts = $posts.' as posts, '
+            .$posts.' filter (where metric_snapshots.id is not null) as measured_posts, '
+            .$posts.' filter (where coalesce(metric_snapshots.reactions, metric_snapshots.comments, metric_snapshots.shares, metric_snapshots.clicks) is not null) as scored_posts';
+
+        foreach (Metric::cases() as $metric) {
+            $counts .= ", {$posts} filter (where metric_snapshots.{$metric->value} is not null) as posts_with_{$metric->value}";
+        }
+
+        $query = PostVariant::query()
+            ->leftJoin('metric_snapshots', function (JoinClause $join): void {
+                $join->on('metric_snapshots.post_variant_id', '=', 'post_variants.id')
+                    ->on('metric_snapshots.workspace_id', '=', 'post_variants.workspace_id')
+                    ->where('metric_snapshots.is_latest', true);
+            })
+            ->whereNotNull('post_variants.external_id')
+            ->where('post_variants.published_at', '>=', CarbonImmutable::instance($from)->utc())
+            ->where('post_variants.published_at', '<', CarbonImmutable::instance($until)->utc());
+
+        if ($byChannel) {
+            $query->groupBy('post_variants.channel_id')
+                ->orderBy('post_variants.channel_id')
+                ->selectRaw('post_variants.channel_id as id, null as name, '.$counts.', '.self::SUMS);
+        } else {
+            $query
+                ->join('posts', function (JoinClause $join): void {
+                    $join->on('posts.id', '=', 'post_variants.post_id')
+                        ->on('posts.workspace_id', '=', 'post_variants.workspace_id');
+                })
+                ->leftJoin('pillars', function (JoinClause $join): void {
+                    $join->on('pillars.id', '=', 'posts.pillar_id')
+                        ->on('pillars.workspace_id', '=', 'posts.workspace_id');
+                })
+                ->groupBy('posts.pillar_id', 'pillars.name')
+                ->orderByRaw('pillars.name asc nulls last')
+                ->selectRaw('posts.pillar_id as id, pillars.name as name, '.$counts.', '.self::SUMS);
+        }
+
+        $summaries = [];
+
+        foreach ($query->toBase()->get() as $row) {
+            $totals = MetricTotals::fromRow($row);
+            $postsWith = [];
+
+            foreach (Metric::cases() as $metric) {
+                $postsWith[$metric->value] = (int) $row->{'posts_with_'.$metric->value};
+            }
+
+            $summaries[] = new PerformanceSummary(
+                id: is_numeric($row->id) ? (int) $row->id : null,
+                name: is_string($row->name) ? $row->name : null,
+                posts: (int) $row->posts,
+                measuredPosts: (int) $row->measured_posts,
+                scoredPosts: (int) $row->scored_posts,
+                totals: $totals,
+                postsWith: $postsWith,
+                score: $totals->score(),
+            );
+        }
+
+        return $summaries;
     }
 }
