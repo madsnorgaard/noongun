@@ -1,0 +1,33 @@
+{
+    "data": [
+        {
+            "access_token": "test-page-token-table-bay-coffee",
+            "category": "Coffee shop",
+            "category_list": [{"id": "197871390225897", "name": "Coffee shop"}],
+            "name": "Table Bay Coffee",
+            "id": "100000000000001",
+            "tasks": ["ADVERTISE", "ANALYZE", "CREATE_CONTENT", "MESSAGING", "MODERATE", "MANAGE"]
+        },
+        {
+            "access_token": "test-page-token-read-only-page",
+            "category": "Community",
+            "category_list": [{"id": "2612", "name": "Community"}],
+            "name": "Read Only Page",
+            "id": "100000000000003",
+            "tasks": ["ANALYZE"]
+        },
+        {
+            "category": "Restaurant",
+            "category_list": [{"id": "273819889375819", "name": "Restaurant"}],
+            "name": "Signal Hill Kitchen",
+            "id": "100000000000004",
+            "tasks": ["ANALYZE", "CREATE_CONTENT", "MODERATE"]
+        }
+    ],
+    "paging": {
+        "cursors": {
+            "before": "QVFIUtestBefore",
+            "after": "QVFIUtestAfter"
+        }
+    }
+}

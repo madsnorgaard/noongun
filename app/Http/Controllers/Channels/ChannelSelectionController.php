@@ -39,6 +39,7 @@ class ChannelSelectionController extends Controller
         return Inertia::render('channels/Select', [
             'channels' => $selection->waiting()->map($this->present(...))->values()->all(),
             'renewed' => $selection->renewed()->map($this->present(...))->values()->all(),
+            'connect_report' => $this->report($request)->present(),
             'minutes' => Channel::PENDING_MINUTES,
         ]);
     }
@@ -62,6 +63,7 @@ class ChannelSelectionController extends Controller
         ]);
 
         $confirmed = $selection->resolve(array_map(intval(...), $validated['keep']));
+        $this->report($request)->forget();
 
         $this->toast('success', trans_choice(
             '{1} :count channel is connected.|[2,*] :count channels are connected.',
@@ -83,6 +85,7 @@ class ChannelSelectionController extends Controller
 
         if ($selection->exists()) {
             $selection->abandon();
+            $this->report($request)->forget();
 
             $this->toast('info', __('Nothing new was connected.'));
         }
@@ -93,6 +96,11 @@ class ChannelSelectionController extends Controller
     private function selection(Request $request): ConnectSelection
     {
         return new ConnectSelection($request->session(), $this->current);
+    }
+
+    private function report(Request $request): ConnectReport
+    {
+        return new ConnectReport($request->session(), $this->current);
     }
 
     /**

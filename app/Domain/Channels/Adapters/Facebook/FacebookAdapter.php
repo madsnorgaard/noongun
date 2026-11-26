@@ -5,10 +5,14 @@ namespace App\Domain\Channels\Adapters\Facebook;
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Contracts\ChannelAdapter;
 use App\Domain\Channels\Contracts\ChannelCapabilities;
+use App\Domain\Channels\Contracts\ConnectedChannels;
 use App\Domain\Channels\Contracts\DescribesSetup;
+use App\Domain\Channels\Contracts\ExplainsMissingAccounts;
 use App\Domain\Channels\Contracts\PublishResult;
 use App\Domain\Channels\Contracts\RateLimit;
+use App\Domain\Channels\Contracts\SkippedAccount;
 use App\Domain\Channels\Exceptions\ChannelException;
+use App\Domain\Channels\Exceptions\NothingToConnect;
 use App\Domain\Channels\Exceptions\PublishFailed;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Channels\Support\LinkWithUtm;
@@ -31,12 +35,16 @@ use SensitiveParameter;
  * Only Page access tokens are stored. The user tokens met during connect()
  * are used for that one request and then dropped.
  */
-final class FacebookAdapter implements ChannelAdapter, DescribesSetup
+final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsMissingAccounts
 {
     public const PLATFORM = 'facebook';
 
     /** The Page task a user needs to publish. Pages without it are not connected. */
     private const PUBLISH_TASK = 'CREATE_CONTENT';
+
+    private const SKIPPED_FOR_ROLE = 'Your role on this Page does not allow creating posts. Change it under Page access in the settings of the Page.';
+
+    private const SKIPPED_FOR_ACCESS = 'Facebook gave no access to this Page.';
 
     /**
      * Longest Page post. Not stated in the Graph API documentation; this is
@@ -129,6 +137,15 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             .$this->url->route('channels.callback', ['platform' => self::PLATFORM], false);
     }
 
+    /**
+     * /me/accounts does not say what it left out, so this is shown after
+     * every connect. The cause is recorded in docs/platform-notes/meta.md.
+     */
+    public function missingAccountsHint(): string
+    {
+        return 'A Page you ticked on Facebook is not here? Facebook leaves out Pages that belong to a business portfolio unless the app also has the business_management permission. The README says how to add it.';
+    }
+
     public function authorizationUrl(Workspace $workspace, string $state): string
     {
         $this->guardConfigured();
@@ -164,9 +181,10 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             'fb_exchange_token' => $shortLived,
         ], safeToRepeat: true));
 
+        ['pages' => $granted, 'skipped' => $skipped] = $this->pagesOf($longLived);
         $pages = [];
 
-        foreach ($this->pagesOf($longLived) as $page) {
+        foreach ($granted as $page) {
             $inspection = $this->inspect($page['token']);
             $missing = array_values(array_diff($this->scopes(), $inspection['scopes']));
 
@@ -184,15 +202,16 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
         }
 
         if ($pages === []) {
-            throw ChannelException::permanent(
+            throw NothingToConnect::because(
                 self::PLATFORM,
                 'Facebook returned no Page that this account can publish to. Choose at least one Page in the Facebook dialog, and make sure the account can create content on it.',
+                $skipped,
             );
         }
 
         // Channel::recordConnection() decides the status: only a channel the
         // user already has connected is active straight away.
-        return $this->container->make(CurrentWorkspace::class)->run($workspace, fn (): Collection => DB::transaction(
+        $channels = $this->container->make(CurrentWorkspace::class)->run($workspace, fn (): Collection => DB::transaction(
             fn (): Collection => (new Collection($pages))->map(fn (array $page): Channel => Channel::recordConnection(
                 self::PLATFORM,
                 $page['id'],
@@ -205,6 +224,8 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
                 ],
             ))->values(),
         ));
+
+        return ConnectedChannels::with($channels, $skipped);
     }
 
     public function publish(PostVariant $variant): PublishResult
@@ -305,13 +326,16 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
     }
 
     /**
-     * Every Page the user granted that they can publish to.
+     * Every Page the user granted that they can publish to, and the Pages
+     * Facebook listed that cannot be connected. A Page Facebook does not
+     * list at all cannot be known here.
      *
-     * @return list<array{id: string, name: string, token: string}>
+     * @return array{pages: list<array{id: string, name: string, token: string}>, skipped: list<SkippedAccount>}
      */
     private function pagesOf(#[SensitiveParameter] string $userToken): array
     {
         $pages = [];
+        $skipped = [];
         $after = null;
 
         for ($i = 0; $i < self::MAX_ACCOUNT_PAGES; $i++) {
@@ -322,19 +346,26 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             ], fn (mixed $value): bool => $value !== null), $userToken, safeToRepeat: true);
 
             foreach (is_array($response['data'] ?? null) ? $response['data'] : [] as $page) {
-                if (! is_array($page) || ! is_scalar($page['id'] ?? null) || ! is_string($page['access_token'] ?? null) || $page['access_token'] === '') {
+                if (! is_array($page) || ! is_scalar($page['id'] ?? null)) {
                     continue;
                 }
+
+                $id = (string) $page['id'];
+                $name = is_string($page['name'] ?? null) && $page['name'] !== '' ? $page['name'] : $id;
 
                 if (is_array($page['tasks'] ?? null) && ! in_array(self::PUBLISH_TASK, $page['tasks'], true)) {
+                    $skipped[] = new SkippedAccount($id, $name, self::SKIPPED_FOR_ROLE);
+
                     continue;
                 }
 
-                $pages[] = [
-                    'id' => (string) $page['id'],
-                    'name' => is_string($page['name'] ?? null) && $page['name'] !== '' ? $page['name'] : (string) $page['id'],
-                    'token' => $page['access_token'],
-                ];
+                if (! is_string($page['access_token'] ?? null) || $page['access_token'] === '') {
+                    $skipped[] = new SkippedAccount($id, $name, self::SKIPPED_FOR_ACCESS);
+
+                    continue;
+                }
+
+                $pages[] = ['id' => $id, 'name' => $name, 'token' => $page['access_token']];
             }
 
             // The "next" link holds the user token, so it is never followed
@@ -349,7 +380,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup
             $after = $cursor;
         }
 
-        return $pages;
+        return ['pages' => $pages, 'skipped' => $skipped];
     }
 
     /**

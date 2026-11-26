@@ -696,6 +696,40 @@ git pull
 docker compose up -d --build --wait
 ```
 
+### Troubleshooting: "Facebook could not be reached"
+
+If connecting a channel says "Facebook could not be reached", the containers
+may have no DNS. This happens on a host whose `/etc/resolv.conf` has no
+`nameserver` line, because the host runs a local resolver. Docker's embedded
+DNS then has no upstream on the compose network, so no outside name resolves.
+Give the containers a resolver in a local compose file, `compose.local.yml`,
+which Git ignores:
+
+```yaml
+x-dns: &dns
+  dns:
+    - 1.1.1.1
+    - 9.9.9.9
+
+services:
+  app:
+    <<: *dns
+  horizon:
+    <<: *dns
+  scheduler:
+    <<: *dns
+```
+
+List it in `.env` after the main file and start the stack again:
+
+```
+COMPOSE_FILE=docker-compose.yml:compose.local.yml
+```
+
+```sh
+docker compose up -d --wait
+```
+
 ## Environment and secrets
 
 `.env` is created from `.env.example` by `./setup` and is never committed. Setup
@@ -816,6 +850,35 @@ What happens when Facebook sends you back:
   is erased. A Page you had disconnected stays disconnected. The scheduled
   command `noongun:discard-pending-channels` does this every five minutes, so
   it also happens when nobody opens Noon Gun.
+
+### A Page is missing
+
+Noon Gun can only connect what Facebook hands over. A Page that Facebook
+listed but that cannot be connected is named after the connect, with the
+reason. A Page that Facebook did not list at all cannot be named, so check
+these causes:
+
+- **It was not ticked in Facebook's consent screen.** Choose **Connect
+  Facebook** again and, in the Facebook dialog, edit the access and tick the
+  Page.
+- **Your role on the Page does not allow creating content.** Noon Gun shows
+  this as "Your role on this Page does not allow creating posts." Change the
+  role under **Page access** in the settings of the Page, then connect again.
+- **The Page is held in a business portfolio.** Facebook leaves such Pages out
+  unless the app also has the `business_management` permission. Add
+  `business_management` to the use case in the Meta app, set this in `.env`,
+  restart with `docker compose up -d` and connect again:
+
+  ```
+  FACEBOOK_SCOPES=pages_show_list,pages_read_engagement,pages_manage_posts,business_management
+  ```
+
+  The Facebook dialog then has an extra step, **Choose the Businesses**. The
+  least that is needed there is **Opt in to current Businesses only**, with
+  the portfolios that hold the Pages ticked. We confirmed this with a real
+  connect; see the entries of 2026-11-26 in `docs/platform-notes/meta.md`.
+
+A profile in professional mode is not a Page and cannot be connected.
 
 Noon Gun stores one access token for each connected Page, encrypted with
 `APP_KEY`. It does not store your own Facebook token. A Page token has no
