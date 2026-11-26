@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "f1e9ced9-ca31-4337-9ba5-a721bea1ba65",
+  "version": 6,
+  "timestamp": "2026-11-26T19:53:21.738Z",
+  "payload": {
+    "taskDescription": "Built on feat/22-examples: last approved texts per channel as examples (default 5, capped by characters), a list of other posts planned the same week, prompt lines in the v2 user part, cost estimate and worst case include them, run records example post ids. 78 new tests, 2356 in total. No real draft generated with it yet."
+  },
+  "seq": 6
+}

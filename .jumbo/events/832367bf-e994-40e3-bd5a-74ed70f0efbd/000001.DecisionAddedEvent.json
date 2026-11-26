@@ -1,0 +1,17 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "832367bf-e994-40e3-bd5a-74ed70f0efbd",
+  "version": 1,
+  "timestamp": "2026-11-26T19:53:22.359Z",
+  "payload": {
+    "title": "Approved posts are sent as examples when drafting",
+    "context": "#22, extends ADR 0011. Drafts were written blind to earlier posts: they repeated each other and never picked up the edits a member made. The examples slot of the contract was meant for M6 with metrics.",
+    "rationale": "Brought forward without metrics: the last texts a workspace approved, per target channel, chosen by approval time when the job runs. Rejected, unapproved and returned-to-draft posts never qualify; failed and outcome-unknown ones do, because a person approved the text. A separate list names the other posts planned for the same week by pillar, idea and first line. Example texts are neutralised so they cannot close their element, and their instructions sit in the v2 user part so the system part stays the same for every request.",
+    "alternatives": [
+      "Wait for M6 and rank by metrics",
+      "Send whole texts of the same week"
+    ],
+    "consequences": "The worst-case cost counts the full examples allowance, so that figure on the plan pages rises. First lines of drafts not yet approved are sent to the provider. M6 changes the ranking only. v1 renders examples in its frozen form."
+  },
+  "seq": 1
+}
