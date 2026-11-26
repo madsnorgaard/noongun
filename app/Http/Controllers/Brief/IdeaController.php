@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Brief;
 
 use App\Domain\Content\Models\Idea;
 use App\Domain\Content\Models\Pillar;
+use App\Domain\Drafting\Models\DraftRun;
 use App\Http\Controllers\Brief\Concerns\ActsAsMember;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Brief\SaveIdeaRequest;
@@ -49,6 +50,8 @@ class IdeaController extends Controller
             ],
             'can' => [
                 'manage' => $this->mayWrite($request, Idea::class),
+                // Who may propose a week may draft one post from an idea.
+                'draft' => $this->mayWrite($request, DraftRun::class),
             ],
         ]);
     }

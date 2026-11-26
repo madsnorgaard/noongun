@@ -5,7 +5,8 @@ namespace App\Domain\Drafting\Exceptions;
 use RuntimeException;
 
 /**
- * A week was not proposed, and nothing was created or spent. The message
+ * A week was not proposed, or one post was not drafted from an idea, and
+ * nothing was created or spent. The message
  * tells the person why and what to do. $reason names the cause for code
  * that wants to link to the place where it is fixed.
  */
@@ -33,6 +34,12 @@ class ProposalRefused extends RuntimeException
     public const DAILY_LIMIT = 'daily_limit';
 
     public const INSTANCE_LIMIT = 'instance_limit';
+
+    /** One post from an idea: the channels that were ticked cannot all be drafted for. */
+    public const CHANNELS_CHOSEN = 'channels_chosen';
+
+    /** One post from an idea: the planned time that was given makes no sense. */
+    public const PLANNED_TIME = 'planned_time';
 
     final public function __construct(public readonly string $reason, string $message)
     {
