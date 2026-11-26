@@ -47,6 +47,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property CarbonImmutable|null $published_at
  * @property string|null $error
  * @property CarbonImmutable|null $outcome_unknown_since
+ * @property CarbonImmutable|null $metrics_checked_at when the platform was last asked for its numbers; written only by FetchMetricsJob
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  * @property-read Post|null $post
@@ -103,6 +104,7 @@ class PostVariant extends Model
             'utm' => 'array',
             'published_at' => 'datetime',
             'outcome_unknown_since' => 'datetime',
+            'metrics_checked_at' => 'datetime',
         ];
     }
 

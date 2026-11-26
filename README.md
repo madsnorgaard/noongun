@@ -661,6 +661,39 @@ Three things to know when operating it:
   that drafting is not set up on this instance, the log line "Drafting is not
   set up, so a week cannot be proposed." names the setting that is missing.
 
+## Insights
+
+Noon Gun reads how published posts did: reactions, comments, shares, clicks
+and reach. See `docs/adr/0016-insights.md`.
+
+The `scheduler` container runs `noongun:poll-metrics` every ten minutes. It
+queues one `FetchMetricsJob` for each active channel that has a published
+post due for a reading, and the job reads those posts in one call. A post is
+read every hour during its first day, once a day until it is three weeks old,
+and not after that (`NOONGUN_INSIGHTS_CADENCE`).
+
+What to know when operating it:
+
+- **A number that is missing is not zero.** A platform that does not give a
+  number, or a channel without the permission for it, leaves it empty.
+- **Facebook gives reactions, comments and shares as connected.** Reach and
+  clicks need one more permission, `read_insights`. To get them, add the
+  permission to the Meta app, add it to `FACEBOOK_SCOPES`, and connect the
+  Page again. Meta only gives these two numbers for Pages with 100 or more
+  likes.
+- **LinkedIn gives no numbers yet.** A self-serve LinkedIn app may not read
+  them (see `docs/adr/0007-linkedin-self-serve-until-m9.md`). LinkedIn posts
+  are shown as not measured.
+- **Publishing comes first.** Reading uses at most
+  `NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT` of a channel's rate limit, runs on
+  its own queue (`insights`), and stops for a channel when the platform asks
+  it to wait. A failed reading changes nothing about a post or a channel;
+  it is logged and tried again later.
+- A reading is only stored when a number changed, so the table grows with
+  what happens to a post, not with how often it is read.
+- Reading Facebook's numbers is not built yet: the job runs and stores
+  nothing for Facebook until it is.
+
 ## Running on a home server
 
 `./setup` gives a development stack: it mounts the source code and runs in debug
@@ -830,6 +863,14 @@ it there.
 | `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `300` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of any job: 255 seconds for a drafting job with the defaults, 105 for a publishing job. Raise it when you raise `NOONGUN_DRAFT_TIMEOUT`. |
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
+| `NOONGUN_INSIGHTS_ENABLED` | `true` | Whether the numbers of published posts are read at all. `false` stops the scheduler command and the job. |
+| `NOONGUN_INSIGHTS_CADENCE` | `24:60,504:1440` | How often a published post is read, by its age, as `hours:minutes` pairs: until the post is that many hours old, read it every that many minutes. A post older than the last pair is not read any more. |
+| `NOONGUN_INSIGHTS_VARIANTS_PER_RUN` | `25` | Most posts of one channel that one run of the job reads. Never more than 500. |
+| `NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT` | `20` | The share of a channel's rate limit that reading may use, so that publishing always has calls left. From 1 to 90. |
+| `NOONGUN_INSIGHTS_PAUSE_MINUTES` | `60` | How long a channel is left alone after the platform refused a reading. A longer wait the platform asks for is respected, up to a day. |
+| `NOONGUN_INSIGHTS_TIMEOUT` | `45` | Time limit in seconds for one run of the job. Must stay below the `timeout` of the supervisor in `config/horizon.php`. |
+| `NOONGUN_INSIGHTS_QUEUE` | `insights` | Queue that the job runs on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
+| `NOONGUN_INSIGHTS_WEIGHT_REACTIONS`, `_COMMENTS`, `_SHARES`, `_CLICKS` | `1`, `2`, `3`, `1` | Weights of the engagement score, the one number posts are compared by: each count times its weight, added up. Reach is not part of it. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
 | `OPENAI_API_KEY` | empty | The instance key for drafting with OpenAI, used by every workspace that drafts with OpenAI and has no OpenAI key of its own. |
 | `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider a workspace drafts with until its owner chooses another. Must be listed under `drafting.providers` in `config/noongun.php`. |

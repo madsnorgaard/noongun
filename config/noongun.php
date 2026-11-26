@@ -92,6 +92,10 @@ return [
             // gives no limit; this is the one Facebook has stated for posts.
             // See docs/platform-notes/meta.md.
             'max_body_length' => 63206,
+            // The permission that reach and clicks of a post need. It is not
+            // requested unless it is added to FACEBOOK_SCOPES; a Page
+            // connected without it gets reactions, comments and shares only.
+            'insights_scope' => 'read_insights',
         ],
 
         // A member's own profile, through the self-serve products "Share on
@@ -144,6 +148,47 @@ return [
         'calls_per_job' => (int) env('NOONGUN_PUBLISH_CALLS_PER_JOB', 3),
         'lock_seconds' => (int) env('NOONGUN_PUBLISH_LOCK_SECONDS', 120),
         'stuck_after_minutes' => (int) env('NOONGUN_PUBLISH_STUCK_AFTER_MINUTES', 30),
+    ],
+
+    /*
+    | Reading the numbers of published posts (reactions, comments, shares,
+    | clicks, reach). Only platforms whose adapter reads metrics are asked;
+    | see docs/adr/0016-insights.md.
+    |
+    | "cadence" says how often a published post is read, by its age, as
+    | "hours:minutes" pairs, comma separated: until the post is that many
+    | hours old, read it every that many minutes. A post older than the last
+    | pair is not read any more. The default reads every hour during the
+    | first day, then once a day until the post is three weeks old.
+    | "variants_per_run" is the most posts of one channel that one run of
+    | the job reads. "rate_limit_percent" is the share of the platform's
+    | rate limit for a channel that reading may use, so that publishing
+    | always has calls left. "pause_minutes" is how long a channel is left
+    | alone after the platform refused a read; a longer wait the platform
+    | asks for is respected. "timeout" is the limit in seconds for one run
+    | of the job. "queue" is the queue the job runs on; it is listed after
+    | the publishing queue in config/horizon.php.
+    |
+    | "score" holds the weights of the engagement score, the one number
+    | posts are compared by: each count times its weight, added up. Reach is
+    | not part of it, so the score also works where reach is not available.
+    */
+
+    'insights' => [
+        'enabled' => filter_var(env('NOONGUN_INSIGHTS_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'queue' => env('NOONGUN_INSIGHTS_QUEUE', 'insights'),
+        'cadence' => env('NOONGUN_INSIGHTS_CADENCE', '24:60,504:1440'),
+        'variants_per_run' => (int) env('NOONGUN_INSIGHTS_VARIANTS_PER_RUN', 25),
+        'rate_limit_percent' => (int) env('NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT', 20),
+        'pause_minutes' => (int) env('NOONGUN_INSIGHTS_PAUSE_MINUTES', 60),
+        'timeout' => (int) env('NOONGUN_INSIGHTS_TIMEOUT', 45),
+
+        'score' => [
+            'reactions' => env('NOONGUN_INSIGHTS_WEIGHT_REACTIONS', 1),
+            'comments' => env('NOONGUN_INSIGHTS_WEIGHT_COMMENTS', 2),
+            'shares' => env('NOONGUN_INSIGHTS_WEIGHT_SHARES', 3),
+            'clicks' => env('NOONGUN_INSIGHTS_WEIGHT_CLICKS', 1),
+        ],
     ],
 
     /*

@@ -28,6 +28,7 @@ it('describes what a platform accepts', function () {
             'rate_limit' => ['max_calls' => 200, 'per_seconds' => 3600],
             'link_title_length' => null,
             'link_description_length' => null,
+            'metrics' => [],
         ]);
 });
 

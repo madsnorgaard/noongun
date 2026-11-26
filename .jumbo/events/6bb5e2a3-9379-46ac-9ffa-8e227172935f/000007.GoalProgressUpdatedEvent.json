@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "6bb5e2a3-9379-46ac-9ffa-8e227172935f",
+  "version": 7,
+  "timestamp": "2026-11-26T20:32:34.330Z",
+  "payload": {
+    "taskDescription": "Started 2026-11-26 on feat/6-insights, branched from feat/22-examples (PR #24). Plan: contract and data model first, then Facebook polling, the summary pages and example ranking in parallel, then two independent reviews."
+  },
+  "seq": 7
+}

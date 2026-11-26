@@ -24,7 +24,11 @@ use Illuminate\Support\Collection;
  *
  * Failures are reported as ChannelException (PublishFailed for publish()).
  * Their messages and context must never contain tokens, secrets or
- * authorization codes. fetchMetrics() is deferred to M6, see ADR 0009.
+ * authorization codes.
+ *
+ * What only some platforms can do is not in this interface. It is a second
+ * interface the adapter also implements: DescribesSetup,
+ * ExplainsMissingAccounts, and ReadsMetrics for fetchMetrics() (ADR 0016).
  */
 interface ChannelAdapter
 {

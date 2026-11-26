@@ -20,3 +20,7 @@ Schedule::command('noongun:discard-pending-channels')->everyFiveMinutes()->witho
 // Drafting. Marks draft runs that lost their worker as failed. It never asks
 // a provider again.
 Schedule::command('noongun:recover-stuck-draft-runs')->everyFiveMinutes()->withoutOverlapping(10);
+
+// Insights. Queues a reading of the numbers of published posts that are due,
+// one job per channel. The job decides again what it reads, under a lock.
+Schedule::command('noongun:poll-metrics')->everyTenMinutes()->withoutOverlapping(10);

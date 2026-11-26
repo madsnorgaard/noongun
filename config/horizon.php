@@ -199,7 +199,9 @@ return [
     'defaults' => [
         'supervisor-1' => [
             'connection' => 'redis',
-            'queue' => ['default'],
+            // Publishing and drafting first. Reading metrics has its own
+            // queue, so a backlog of it never stands in front of a post.
+            'queue' => ['default', 'insights'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
             'maxProcesses' => 1,
