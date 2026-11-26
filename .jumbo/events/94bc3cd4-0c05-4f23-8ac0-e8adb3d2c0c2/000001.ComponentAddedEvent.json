@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "94bc3cd4-0c05-4f23-8ac0-e8adb3d2c0c2",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:30.306Z",
+  "payload": {
+    "name": "GenerateDraftJob",
+    "type": "worker",
+    "description": "Queued job that builds the request, calls the generator and creates the draft through CreateDraftFromResult and SaveDraft.",
+    "responsibility": "Turn an open draft run into a draft post",
+    "path": "app/Domain/Drafting/GenerateDraftJob.php",
+    "status": "active"
+  },
+  "seq": 1
+}

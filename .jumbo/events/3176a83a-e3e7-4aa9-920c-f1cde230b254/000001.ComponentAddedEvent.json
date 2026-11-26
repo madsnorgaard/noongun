@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "3176a83a-e3e7-4aa9-920c-f1cde230b254",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:30.918Z",
+  "payload": {
+    "name": "PlanWeek",
+    "type": "service",
+    "description": "Plans a week from slots, pillars and ideas: one post per open slot time, channels at the same instant share a post (ADR 0012, 0014).",
+    "responsibility": "Decide which posts a proposed week drafts",
+    "path": "app/Domain/Drafting/Planning/PlanWeek.php",
+    "status": "active"
+  },
+  "seq": 1
+}

@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "5fa5fc1e-e17d-4556-b5a7-a5a839f92a09",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:34.989Z",
+  "payload": {
+    "name": "LinkedIn API",
+    "ecosystem": "service",
+    "packageName": "api.linkedin.com",
+    "versionConstraint": null,
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

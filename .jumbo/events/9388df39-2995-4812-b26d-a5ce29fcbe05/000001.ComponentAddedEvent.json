@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "9388df39-2995-4812-b26d-a5ce29fcbe05",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:33.055Z",
+  "payload": {
+    "name": "LinkedInAdapter",
+    "type": "lib",
+    "description": "ChannelAdapter for a personal LinkedIn profile: OpenID Connect, text and link posts with a typed link card, no idempotency key (ADR 0015).",
+    "responsibility": "Connect and publish to LinkedIn",
+    "path": "app/Domain/Channels/Adapters/LinkedIn/LinkedInAdapter.php",
+    "status": "active"
+  },
+  "seq": 1
+}

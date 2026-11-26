@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "3a5a79aa-95d8-4082-adc0-be4efb874242",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:33.676Z",
+  "payload": {
+    "name": "ConnectReport",
+    "type": "service",
+    "description": "Session-held report of accounts a platform listed that could not be connected, with reasons, shown once after a connect.",
+    "responsibility": "Explain what a connect left out",
+    "path": "app/Http/Controllers/Channels/ConnectReport.php",
+    "status": "active"
+  },
+  "seq": 1
+}

@@ -1,0 +1,14 @@
+{
+  "type": "GuidelineAddedEvent",
+  "aggregateId": "cdc24dfd-0cb9-4dca-b848-83395a5c30f4",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:32.145Z",
+  "payload": {
+    "category": "process",
+    "title": "Every ADR has a Jumbo decision and every issue a Jumbo goal",
+    "description": "Keep docs/adr, GitHub issues and Jumbo in step; commit .jumbo/events on the feature branch.",
+    "rationale": "Jumbo is the memory future sessions start from.",
+    "examples": []
+  },
+  "seq": 1
+}

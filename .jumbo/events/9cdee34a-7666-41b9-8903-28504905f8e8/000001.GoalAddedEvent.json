@@ -1,0 +1,20 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "9cdee34a-7666-41b9-8903-28504905f8e8",
+  "version": 1,
+  "timestamp": "2026-11-26T19:44:45.362Z",
+  "payload": {
+    "title": "First real publish and visibility check (#1, #3)",
+    "objective": "See a post approved in Noon Gun go out to a real Facebook Page at its scheduled minute, and find out who can see it while the Meta app is in Development mode.",
+    "successCriteria": [
+      "An approved post is published at its scheduled minute and shows its permalink",
+      "Visibility from a signed-out browser in Development mode is recorded",
+      "What Live mode requires is recorded in docs/platform-notes/meta.md",
+      "Photo posts and deletion through the API are tried or explicitly deferred"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined"
+  },
+  "seq": 1
+}

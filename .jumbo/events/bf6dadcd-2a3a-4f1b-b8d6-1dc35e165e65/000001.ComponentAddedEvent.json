@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "bf6dadcd-2a3a-4f1b-b8d6-1dc35e165e65",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:28.504Z",
+  "payload": {
+    "name": "PromptRenderer",
+    "type": "lib",
+    "description": "Renders versioned Blade templates under resources/prompts/draft into the system and user prompt. v1 is frozen, v2 is the default.",
+    "responsibility": "Decide exactly what is sent to a provider",
+    "path": "app/Domain/Drafting/PromptRenderer.php",
+    "status": "active"
+  },
+  "seq": 1
+}

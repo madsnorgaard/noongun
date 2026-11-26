@@ -1,0 +1,23 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "ae589c8f-7729-4a8a-a8f0-1aeee6fb635b",
+  "version": 1,
+  "timestamp": "2026-11-26T19:44:47.308Z",
+  "payload": {
+    "title": "Security hardening after the M3 review (#16)",
+    "objective": "Close the seven gaps the independent security review of M3 found before more members or a wider network reach the instance.",
+    "successCriteria": [
+      "Horizon is open to instance operators only",
+      "The web port binds to loopback by default",
+      "Only owners connect and disconnect channels",
+      "A workspace always keeps an owner and setup stays closed",
+      "The host is checked against APP_URL",
+      "Security headers on every response",
+      "The production image uses php.ini-production"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined"
+  },
+  "seq": 1
+}

@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "c35a46b5-e820-4ac3-9ab9-75399bf2073b",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:31.543Z",
+  "payload": {
+    "name": "Brief",
+    "type": "db",
+    "description": "Versioned content brief with voice rules and calls to action; every save is a new version.",
+    "responsibility": "Hold what every draft is written from",
+    "path": "app/Domain/Drafting/Models/Brief.php",
+    "status": "active"
+  },
+  "seq": 1
+}

@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "e22346f0-28f9-47f4-bca1-dd7d16d5395b",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:28.201Z",
+  "payload": {
+    "name": "PrismDraftGenerator",
+    "type": "lib",
+    "description": "Implementation of DraftGenerator on Prism for Anthropic and OpenAI, with provider differences in PrismDialect and reply reading in ProviderReplies.",
+    "responsibility": "Turn a rendered prompt into a validated DraftResult for either provider",
+    "path": "app/Domain/Drafting/Generators/PrismDraftGenerator.php",
+    "status": "active"
+  },
+  "seq": 1
+}

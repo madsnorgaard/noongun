@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "6ce2534b-64af-43e1-af17-c286ba785ea2",
+  "version": 5,
+  "timestamp": "2026-11-26T19:44:59.136Z",
+  "payload": {
+    "taskDescription": "Built with PasswordConfirmation derived from the middleware timeout, 13 new tests. In PR #23. Not yet seen in a browser."
+  },
+  "seq": 5
+}

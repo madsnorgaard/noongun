@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "fb0b7afa-f9c7-4f3d-ab24-87057792729b",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:28.802Z",
+  "payload": {
+    "name": "DraftSchema",
+    "type": "lib",
+    "description": "The structured output schema of a draft and its validation, valid under OpenAI strict mode.",
+    "responsibility": "Define and check the shape of model output",
+    "path": "app/Domain/Drafting/DraftSchema.php",
+    "status": "active"
+  },
+  "seq": 1
+}

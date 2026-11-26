@@ -1,0 +1,14 @@
+{
+  "type": "GoalSubmittedForReviewEvent",
+  "aggregateId": "f4c1ba12-bb65-46e2-92b4-fa6633543d2c",
+  "version": 7,
+  "timestamp": "2026-11-26T19:44:19.737Z",
+  "payload": {
+    "status": "in-review",
+    "submittedAt": "2026-11-26T19:44:19.737Z",
+    "claimedBy": "77b426e0-7326-4266-8f23-ac9bd3ebe0c6",
+    "claimedAt": "2026-11-26T19:44:19.734Z",
+    "claimExpiresAt": "2026-11-26T20:14:19.734Z"
+  },
+  "seq": 7
+}

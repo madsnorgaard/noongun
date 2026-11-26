@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "617e4441-9916-4076-bfd7-027c5dd8bd5e",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:27.896Z",
+  "payload": {
+    "name": "DraftGenerator",
+    "type": "lib",
+    "description": "Contract for asking a language model for one post: DraftRequest in, DraftResult out. One request is one post and one draft run (ADR 0011).",
+    "responsibility": "Be the only door to an LLM",
+    "path": "app/Domain/Drafting/Contracts/DraftGenerator.php",
+    "status": "active"
+  },
+  "seq": 1
+}

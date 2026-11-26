@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "ae589c8f-7729-4a8a-a8f0-1aeee6fb635b",
+  "version": 5,
+  "timestamp": "2026-11-26T19:44:48.841Z",
+  "payload": {
+    "taskDescription": "Merged in PR #17 and deployed on 2026-11-25. Verified on the home server: tailscale serve passes the host, a foreign host gets 400, all five headers present."
+  },
+  "seq": 5
+}

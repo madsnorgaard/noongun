@@ -1,0 +1,14 @@
+{
+  "type": "GoalCodifyingStartedEvent",
+  "aggregateId": "304e5dfe-c8eb-428d-9f9b-a50f2bd1e5c0",
+  "version": 10,
+  "timestamp": "2026-11-26T19:44:25.620Z",
+  "payload": {
+    "status": "codifying",
+    "codifyStartedAt": "2026-11-26T19:44:25.620Z",
+    "claimedBy": "77b426e0-7326-4266-8f23-ac9bd3ebe0c6",
+    "claimedAt": "2026-11-26T19:44:25.616Z",
+    "claimExpiresAt": "2026-11-26T20:14:25.616Z"
+  },
+  "seq": 10
+}

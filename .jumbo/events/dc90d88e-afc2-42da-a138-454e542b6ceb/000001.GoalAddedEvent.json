@@ -1,0 +1,19 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "dc90d88e-afc2-42da-a138-454e542b6ceb",
+  "version": 1,
+  "timestamp": "2026-11-26T19:44:51.041Z",
+  "payload": {
+    "title": "Say which Facebook Pages were left out (#19)",
+    "objective": "After a connect, name the Pages Facebook listed that cannot be connected and why, and explain why a ticked Page can be missing.",
+    "successCriteria": [
+      "The choose page and the Channels page name skipped Pages with reason and next step",
+      "README explains a missing Page and containers without DNS",
+      "No token in props, session or logs"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined"
+  },
+  "seq": 1
+}

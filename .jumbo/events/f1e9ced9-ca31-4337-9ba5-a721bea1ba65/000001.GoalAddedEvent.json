@@ -1,0 +1,21 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "f1e9ced9-ca31-4337-9ba5-a721bea1ba65",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:00.167Z",
+  "payload": {
+    "title": "Approved posts as examples when drafting (#22)",
+    "objective": "Send the texts a member approved as examples with each draft request, so drafts keep the voice, pick up edits and stop repeating themselves. Brought forward from M6 without metrics.",
+    "successCriteria": [
+      "The last few approved texts of the same channel are sent; the number is a setting and zero turns it off",
+      "Rejected and unapproved drafts are never used",
+      "The plan pages and settings say what is sent and the cost estimate includes it",
+      "Workspace isolation tests",
+      "ADR 0011 and the README are updated"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined"
+  },
+  "seq": 1
+}
