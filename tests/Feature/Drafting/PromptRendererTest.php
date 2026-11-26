@@ -192,6 +192,48 @@ describe('v2, one idea written for each channel', function () {
             ->toContain('- link_description: one plain sentence for the same card, or null.');
     });
 
+    /*
+     * A draft once ended with "the link is in the first comment". The post
+     * carries its link itself, and no comment, image, poll or tag is ever
+     * published with it. These hold that the system part keeps saying so,
+     * by the points it makes and not by its wording as a whole.
+     */
+    it('says what is published with a post, so a text does not refer to anything else', function () {
+        $system = $this->renderer->render(fullRequest(), 'v2')->system;
+
+        expect($system)
+            ->toContain('Only the text and the link are published.')
+            ->toMatch('/must not promise or refer to/')
+            ->toContain('attached to the post itself');
+
+        foreach (['image', 'comment', 'poll', 'tag of a person'] as $notPublished) {
+            expect($system)->toMatch('/^- Only the text and the link are published\\..*\\bNo\\b.*\\b'.preg_quote($notPublished, '/').'\\b/mi');
+        }
+
+        foreach (['in the comments', 'in the first comment', 'in the bio', 'below'] as $place) {
+            expect($system)->toMatch('/^- The link,.*Never write that a link is .*\\b'.preg_quote($place, '/').'\\b/m');
+        }
+
+        expect($system)->toMatch('/^- The link,.*Only the text for a channel that shows link previews may say that the link is with the post\\.$/m');
+    });
+
+    it('keeps to the facts it is given', function () {
+        $system = $this->renderer->render(fullRequest(), 'v2')->system;
+
+        expect($system)
+            ->toContain('Use only facts that the brief, the pillar, the idea or its notes state')
+            ->toContain('When a detail is not given, write without it.');
+
+        foreach (['numbers', 'dates', 'names', 'quotes'] as $invented) {
+            expect($system)->toMatch('/no invented [^.]*\\b'.$invented.'\\b/');
+        }
+    });
+
+    it('names no platform in the system part', function () {
+        expect($this->renderer->render(fullRequest(), 'v2')->system)
+            ->not->toMatch('/facebook|linkedin|instagram|twitter|threads|mastodon|bluesky|tiktok/i');
+    });
+
     it('leaves v1 as it was: it says nothing about a title for the link', function () {
         $request = new DraftRequest(
             briefTitle: 'Table Bay Coffee',
