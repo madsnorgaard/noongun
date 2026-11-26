@@ -17,6 +17,12 @@ enum AttemptOutcome
     case RetryLater;
 
     /**
+     * Nothing failed, but the variant has more images to send than one run
+     * may. The next run carries on at once from what is remembered.
+     */
+    case MoreToUpload;
+
+    /**
      * Another process holds the variant, or the post is no longer in this
      * round of publishing. This job stops and leaves the post alone.
      */

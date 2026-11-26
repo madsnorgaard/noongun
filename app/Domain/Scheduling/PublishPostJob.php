@@ -3,12 +3,15 @@
 namespace App\Domain\Scheduling;
 
 use App\Domain\Channels\ChannelManager;
+use App\Domain\Channels\Contracts\ChannelAdapter;
 use App\Domain\Channels\Contracts\PublishResult;
+use App\Domain\Channels\Contracts\UploadsMedia;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Exceptions\IllegalPostTransition;
 use App\Domain\Content\Exceptions\VariantAlreadyPublished;
+use App\Domain\Content\Models\MediaAttachment;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Content\PostPreconditions;
@@ -49,6 +52,15 @@ use Throwable;
  * One run sends at most noongun.publishing.calls_per_job variants and hands
  * the rest to a successor, so the time limit of a job has an upper bound.
  *
+ * A variant with images takes several calls: one upload for each image
+ * (UploadsMedia::uploadMedia()), then the call that creates the post. The
+ * uploads make nothing public. They happen before the variant is marked,
+ * and each id is written on its attachment the moment it is known, so a
+ * run that fails or dies between two calls is followed by one that sends
+ * only what is missing, and never by a second post. One run uploads at
+ * most noongun.publishing.media_uploads_per_job images and hands a variant
+ * that needs more to its successor, without counting that as an attempt.
+ *
  * Variants that fail for good do not stop the others. When no variant will
  * be tried again, the post is finished as published or failed.
  */
@@ -59,6 +71,13 @@ final class PublishPostJob implements ShouldQueue
     public const UNKNOWN_OUTCOME = 'Publishing stopped with an unexpected error, and it is not known whether the post reached the channel. Check the channel before you try again.';
 
     public const EARLIER_ATTEMPT = 'An earlier attempt may have reached the channel. Check it before you try again.';
+
+    public const UPLOAD_FAILED = 'Sending an image to the channel stopped with an unexpected error. Nothing was published.';
+
+    public const FILE_MISSING = 'The file of image %d is missing from the storage of this instance. Nothing was published. Return the post to draft and upload the image again.';
+
+    /** How many images this run may still send, see PublishingConfig::uploadsPerJob(). */
+    private int $uploadsLeft = 0;
 
     /**
      * The queue must never run this job again by itself. A run by hand is
@@ -76,6 +95,7 @@ final class PublishPostJob implements ShouldQueue
      * @param  int  $attempt  how many times the variants that are still open have been sent, plus one
      * @param  list<int>  $givenUp  ids of variants that failed for good earlier in this round
      * @param  int  $calls  how many platform calls this run can make at most, for the time limit
+     * @param  int  $uploads  how many images this run may have to send to a platform, for the time limit
      */
     public function __construct(
         public int $workspaceId,
@@ -85,8 +105,9 @@ final class PublishPostJob implements ShouldQueue
         public int $attempt = 1,
         public array $givenUp = [],
         int $calls = 1,
+        int $uploads = 0,
     ) {
-        $this->timeout = PublishingConfig::jobSeconds($calls);
+        $this->timeout = PublishingConfig::jobSeconds($calls, $uploads);
         $this->onQueue(PublishingConfig::queue());
     }
 
@@ -100,7 +121,20 @@ final class PublishPostJob implements ShouldQueue
             postId: $post->id,
             round: $post->publish_round,
             calls: $post->variants()->unpublished()->count(),
+            uploads: self::imagesToSend($post),
         );
+    }
+
+    /**
+     * How many images the variants that are not out yet carry. An upper
+     * bound for the uploads that are left: some may be on the platform
+     * already.
+     */
+    private static function imagesToSend(Post $post): int
+    {
+        return MediaAttachment::query()
+            ->whereIn('post_variant_id', $post->variants()->unpublished()->select('id'))
+            ->count();
     }
 
     public function handle(CurrentWorkspace $currentWorkspace, ChannelManager $channels): void
@@ -172,6 +206,7 @@ final class PublishPostJob implements ShouldQueue
 
         $givenUp = $this->givenUp;
         $budget = PublishingConfig::callsPerJob();
+        $this->uploadsLeft = PublishingConfig::uploadsPerJob();
         $retryIn = null;
         $open = 0;
 
@@ -205,6 +240,12 @@ final class PublishPostJob implements ShouldQueue
                 $retryIn = max($retryIn ?? 0, $wait);
                 $open++;
             }
+
+            // Nothing failed: this run sent as many images as it may, and
+            // the successor carries on from what is remembered.
+            if ($outcome === AttemptOutcome::MoreToUpload) {
+                $open++;
+            }
         }
 
         if ($open > 0) {
@@ -216,6 +257,7 @@ final class PublishPostJob implements ShouldQueue
                 attempt: $retryIn !== null ? $this->attempt + 1 : $this->attempt,
                 givenUp: $givenUp,
                 calls: $open,
+                uploads: self::imagesToSend($post),
             ))->delay($retryIn ?? 0);
 
             return;
@@ -278,6 +320,15 @@ final class PublishPostJob implements ShouldQueue
                 return [AttemptOutcome::Failed, 0];
             }
 
+            // The images go first. Nothing of this is public and the
+            // variant is not marked yet, so a run that dies here leaves a
+            // post that can simply be sent again.
+            $uploaded = $this->uploadImages($variant, $channel, $adapter);
+
+            if ($uploaded !== null) {
+                return $uploaded;
+            }
+
             try {
                 // Written down before the call: from here the outcome is
                 // unknown until something says otherwise.
@@ -319,6 +370,79 @@ final class PublishPostJob implements ShouldQueue
                 $lock->release();
             }
         }
+    }
+
+    /**
+     * Sends the images of the variant that the platform does not hold yet,
+     * one call to the adapter for each, and writes each id down as soon as
+     * it is known. Returns null when every image is on the platform and
+     * the post can be created, or the outcome that ends this run for the
+     * variant.
+     *
+     * A variant without images passes straight through.
+     *
+     * @return array{AttemptOutcome, int}|null
+     */
+    private function uploadImages(PostVariant $variant, Channel $channel, ChannelAdapter $adapter): ?array
+    {
+        $attachments = $variant->images();
+
+        if ($attachments->isEmpty()) {
+            return null;
+        }
+
+        $capabilities = $adapter->capabilities();
+
+        // The readiness check refused this before the approval. It is
+        // asked again here because the platform or its adapter may have
+        // changed since, and nothing has been sent yet.
+        $problems = app(PostPreconditions::class)->mediaProblems($variant, $channel, $capabilities);
+
+        if ($problems !== [] || ! $adapter instanceof UploadsMedia) {
+            $variant->markFailed(array_values($problems)[0][0] ?? PostPreconditions::platformUnavailable($channel));
+
+            return [AttemptOutcome::Failed, 0];
+        }
+
+        foreach ($attachments->values() as $index => $attachment) {
+            if ($attachment->isUploaded($capabilities->mediaUploadLifetime)) {
+                continue;
+            }
+
+            if ($this->uploadsLeft === 0) {
+                return [AttemptOutcome::MoreToUpload, 0];
+            }
+
+            if (! $attachment->image()->fileExists()) {
+                $variant->markFailed(sprintf(self::FILE_MISSING, $index + 1));
+
+                return [AttemptOutcome::Failed, 0];
+            }
+
+            $this->uploadsLeft--;
+
+            try {
+                $externalId = $adapter->uploadMedia($variant, $attachment);
+            } catch (ChannelException $e) {
+                return $this->afterFailure($variant, $channel, $e, firstMark: false, uploading: true);
+            } catch (Throwable $e) {
+                Log::error('A channel adapter threw an unexpected exception while uploading an image.', [
+                    'workspace_id' => $this->workspaceId,
+                    'post_id' => $this->postId,
+                    'variant_id' => $variant->id,
+                    'media_id' => $attachment->media_id,
+                    'exception' => $e::class,
+                ]);
+
+                $variant->markFailed(self::UPLOAD_FAILED.($variant->hasUnknownOutcome() ? ' '.self::EARLIER_ATTEMPT : ''));
+
+                return [AttemptOutcome::Failed, 0];
+            }
+
+            $attachment->markUploaded($externalId);
+        }
+
+        return null;
     }
 
     /**
@@ -391,9 +515,10 @@ final class PublishPostJob implements ShouldQueue
 
     /**
      * @param  bool  $firstMark  whether this attempt set the mark of an unknown outcome, see PostVariant::beginAttempt()
+     * @param  bool  $uploading  whether the failure is that of an image upload, which makes nothing public
      * @return array{AttemptOutcome, int}
      */
-    private function afterFailure(PostVariant $variant, Channel $channel, ChannelException $e, bool $firstMark): array
+    private function afterFailure(PostVariant $variant, Channel $channel, ChannelException $e, bool $firstMark, bool $uploading = false): array
     {
         $context = $e->context();
 
@@ -414,7 +539,8 @@ final class PublishPostJob implements ShouldQueue
 
         // The adapter does not know whether the platform made the post.
         // The mark stays, and nothing sends this variant again by itself.
-        if (($context['outcome_unknown'] ?? false) === true) {
+        // An upload makes no post, so its outcome cannot be in doubt.
+        if (! $uploading && ($context['outcome_unknown'] ?? false) === true) {
             $variant->markFailed($message);
 
             return [AttemptOutcome::Failed, 0];
@@ -423,8 +549,13 @@ final class PublishPostJob implements ShouldQueue
         // From here the platform certainly made no post in this attempt.
         // The mark is cleared only if this attempt set it: one left by an
         // earlier attempt still stands, whatever the platform says now.
+        // A failed upload set no mark, and there may be none to speak of.
         $write = function (string $text) use ($variant, $firstMark): void {
-            $firstMark ? $variant->markRefused($text) : $variant->markFailed($text.' '.self::EARLIER_ATTEMPT);
+            match (true) {
+                $firstMark => $variant->markRefused($text),
+                $variant->hasUnknownOutcome() => $variant->markFailed($text.' '.self::EARLIER_ATTEMPT),
+                default => $variant->markFailed($text),
+            };
         };
 
         if ($e->retryable && ! $e->requiresReconnect && $this->attempt < PublishingConfig::maxAttempts()) {
