@@ -111,6 +111,8 @@ it('puts each post on its day and time in the workspace timezone', function (str
                         'time' => $time,
                         'channels' => ['Alpha'],
                         'excerpt' => 'We open at eight.',
+                        'thumb_url' => null,
+                        'image_count' => 0,
                         'date' => $date,
                     ];
             }));

@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Posts;
 
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Content\Media\MediaConfig;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Content\PostPreconditions;
@@ -55,6 +56,16 @@ class SavePostRequest extends FormRequest
             'variants.*.link' => ['nullable', 'string', 'max:2048', 'url:http,https'],
             'variants.*.link_title' => ['nullable', 'string', 'max:'.self::MAX_LINK_TITLE_LENGTH],
             'variants.*.link_description' => ['nullable', 'string', 'max:'.self::MAX_LINK_DESCRIPTION_LENGTH],
+            // The images of a text, in order. An image must be one this
+            // workspace stored: an id from anywhere else does not exist.
+            // How many and which a platform takes is checked on approval.
+            'variants.*.media' => ['sometimes', 'array', 'list', 'max:'.MediaConfig::maxPerVariant()],
+            'variants.*.media.*.id' => [
+                'required',
+                'integer',
+                Rule::exists('media', 'id')->where('workspace_id', app(CurrentWorkspace::class)->id()),
+            ],
+            'variants.*.media.*.alt_text' => ['nullable', 'string', 'max:'.MediaConfig::MAX_ALT_TEXT_LENGTH],
         ];
     }
 
@@ -68,6 +79,8 @@ class SavePostRequest extends FormRequest
             'variants.min' => __('Choose at least one channel.'),
             'variants.*.channel_id.exists' => __('This channel does not exist in this workspace.'),
             'variants.*.link.url' => __('The link must be a full address that starts with http:// or https://.'),
+            'variants.*.media.max' => __('A text can carry :max images at most.'),
+            'variants.*.media.*.id.exists' => __('This image does not exist in this workspace. It may have been removed because no post used it. Upload it again.'),
             'scheduled_at.date_format' => __('The planned time is not a valid date and time.'),
         ];
     }
@@ -84,6 +97,9 @@ class SavePostRequest extends FormRequest
             'variants.*.link_title' => __('link title'),
             'variants.*.link_description' => __('link description'),
             'variants.*.channel_id' => __('channel'),
+            'variants.*.media' => __('images'),
+            'variants.*.media.*.id' => __('image'),
+            'variants.*.media.*.alt_text' => __('image description'),
         ];
     }
 
@@ -113,6 +129,12 @@ class SavePostRequest extends FormRequest
                     ->keyBy('id');
 
                 foreach ($this->variantInputs() as $position => $input) {
+                    $ids = array_column($input['media'] ?? [], 'id');
+
+                    if (count($ids) !== count(array_unique($ids))) {
+                        $validator->errors()->add("variants.{$position}.media", (string) __('The same image is on this text twice.'));
+                    }
+
                     if (in_array($input['channel_id'], $used, true)) {
                         continue;
                     }
@@ -140,7 +162,10 @@ class SavePostRequest extends FormRequest
     }
 
     /**
-     * @return list<array{channel_id: int, body: string, link: string|null, link_title: string|null, link_description: string|null}>
+     * The key "media" is only there when the request sent it: a request
+     * without it leaves the images of that text as they are.
+     *
+     * @return list<array{channel_id: int, body: string, link: string|null, link_title: string|null, link_description: string|null, media?: list<array{id: int, alt_text: string|null}>}>
      */
     public function variantInputs(): array
     {
@@ -155,7 +180,7 @@ class SavePostRequest extends FormRequest
             $link = $variant['link'] ?? null;
             $hasLink = is_string($link) && $link !== '';
 
-            $variants[] = [
+            $input = [
                 'channel_id' => (int) $variant['channel_id'],
                 'body' => is_string($body) ? $body : '',
                 'link' => $hasLink ? $link : null,
@@ -163,9 +188,32 @@ class SavePostRequest extends FormRequest
                 'link_title' => $hasLink ? self::text($variant['link_title'] ?? null) : null,
                 'link_description' => $hasLink ? self::text($variant['link_description'] ?? null) : null,
             ];
+
+            if (is_array($variant['media'] ?? null)) {
+                $input['media'] = self::media($variant['media']);
+            }
+
+            $variants[] = $input;
         }
 
         return $variants;
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $items
+     * @return list<array{id: int, alt_text: string|null}>
+     */
+    private static function media(array $items): array
+    {
+        $media = [];
+
+        foreach ($items as $item) {
+            if (is_array($item) && is_numeric($item['id'] ?? null)) {
+                $media[] = ['id' => (int) $item['id'], 'alt_text' => self::text($item['alt_text'] ?? null)];
+            }
+        }
+
+        return $media;
     }
 
     private static function text(mixed $value): ?string

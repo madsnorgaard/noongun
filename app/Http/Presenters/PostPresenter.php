@@ -5,10 +5,13 @@ namespace App\Http\Presenters;
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Contracts\ChannelCapabilities;
+use App\Domain\Channels\Contracts\MediaLinkRule;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Actions\DeletePost;
 use App\Domain\Content\Exceptions\PostNotPublishable;
+use App\Domain\Content\Media\MediaConfig;
+use App\Domain\Content\Models\MediaAttachment;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Content\PostPreconditions;
@@ -56,6 +59,10 @@ final class PostPresenter
             'version' => $this->version($post),
             'variants' => $post->variants->sortBy('id')->values()->map($this->variant(...))->all(),
             'problems' => (object) $this->problems($post),
+            // Worth a look, and never a reason to refuse: an image without
+            // a description, a link that moves into the text. Keyed like
+            // problems.
+            'advice' => (object) ($state === PostState::Draft ? $this->preconditions->advice($post) : []),
             'origin' => $this->origin($post),
             'can' => [
                 'update' => $mayChange && $state === PostState::Draft,
@@ -111,13 +118,18 @@ final class PostPresenter
 
     /**
      * A fingerprint of what a human reads before signing off: the planned
-     * time, every text and every link with its card. The approve request sends it back, so that a
-     * post that was edited in the meantime is not approved unseen.
+     * time, every text, every link with its card, and the images of every
+     * text in their order, each with its alternative text. The approve
+     * request sends it back, so that a post that was edited in the
+     * meantime is not approved unseen.
      */
     public function version(Post $post): string
     {
         $content = $post->variants->sortBy('id')->values()
-            ->map(fn (PostVariant $variant): array => [$variant->id, $variant->channel_id, $variant->body, $variant->link, $variant->link_title, $variant->link_description])
+            ->map(fn (PostVariant $variant): array => [
+                $variant->id, $variant->channel_id, $variant->body, $variant->link, $variant->link_title, $variant->link_description,
+                $variant->attachments->map(fn (MediaAttachment $attachment): array => [$attachment->media_id, $attachment->alt_text])->values()->all(),
+            ])
             ->all();
 
         return substr(hash('sha256', (string) json_encode([$post->scheduled_at?->getTimestamp(), $content])), 0, 20);
@@ -181,6 +193,7 @@ final class PostPresenter
                     // the author types: the editor then asks for one.
                     'link_title_length' => $capabilities?->linkTitleLength,
                     'link_description_length' => $capabilities?->linkDescriptionLength,
+                    'media' => self::mediaRules($capabilities),
                 ];
             })
             ->all());
@@ -207,11 +220,39 @@ final class PostPresenter
             'link' => $variant->link,
             'link_title' => $card ? $variant->link_title : null,
             'link_description' => $card ? $variant->link_description : null,
+            'media' => $variant->images()
+                ->filter(fn (MediaAttachment $attachment): bool => $attachment->media !== null)
+                ->map(fn (MediaAttachment $attachment): array => [...MediaPresenter::present($attachment->image()), 'alt_text' => $attachment->alt_text])
+                ->values()
+                ->all(),
+            'media_rules' => self::mediaRules($capabilities),
             'published' => $variant->isPublished(),
             'outcome_unknown' => $variant->hasUnknownOutcome(),
             'permalink' => $variant->permalink,
             'published_at' => $variant->published_at?->toIso8601String(),
             'error' => $variant->isPublished() ? null : $variant->error,
+        ];
+    }
+
+    /**
+     * What a platform takes in images, for the editor: how many, which
+     * types, how large, whether it takes an alternative text and how long,
+     * and what becomes of the link of a text that has images
+     * (MediaLinkRule). max_items is 0 for a platform that takes none.
+     *
+     * @return array{max_items: int, types: list<string>, max_bytes: int|null, max_pixels: int|null, alt_text_length: int|null, link_rule: string}
+     */
+    private static function mediaRules(?ChannelCapabilities $capabilities): array
+    {
+        $accepts = $capabilities?->acceptsMedia() ?? false;
+
+        return [
+            'max_items' => $accepts ? min($capabilities->maxMediaItems, MediaConfig::maxPerVariant()) : 0,
+            'types' => $accepts ? $capabilities->mediaTypes : [],
+            'max_bytes' => $capabilities?->maxMediaBytes,
+            'max_pixels' => $capabilities?->maxMediaPixels,
+            'alt_text_length' => $capabilities?->altTextLength,
+            'link_rule' => ($capabilities->mediaLinkRule ?? MediaLinkRule::InText)->value,
         ];
     }
 

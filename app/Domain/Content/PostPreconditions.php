@@ -5,6 +5,7 @@ namespace App\Domain\Content;
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Contracts\ChannelCapabilities;
+use App\Domain\Channels\Contracts\MediaLinkRule;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Exceptions\IllegalPostTransition;
@@ -98,8 +99,8 @@ class PostPreconditions
         // A list that has loaded the variants for many posts at once does
         // not pay for a query per post here.
         $variants = $post->relationLoaded('variants')
-            ? $post->variants->loadMissing('channel')->sortBy('id')->values()
-            : $post->variants()->with('channel')->orderBy('id')->get();
+            ? $post->variants->loadMissing(['channel', 'attachments.media'])->sortBy('id')->values()
+            : $post->variants()->with(['channel', 'attachments.media'])->orderBy('id')->get();
 
         if ($variants->isEmpty()) {
             return ['variants' => [self::text('The post has no text for any channel. Add at least one channel.')]];
@@ -129,17 +130,158 @@ class PostPreconditions
                 continue;
             }
 
+            // With images, the link may be sent as the last line of the
+            // text. What is measured is what the platform gets.
+            $text = $variant->textFor($capabilities);
+            $linkInText = $capabilities->linkGoesInText($variant->link, $variant->attachments->count());
+
             if (trim($variant->body) === '') {
                 $errors["variants.{$variant->id}.body"] = [self::text('The text for :channel is empty.', ['channel' => $channel->display_name])];
-            } elseif (! $capabilities->fits($variant->body)) {
-                $errors["variants.{$variant->id}.body"] = [self::text('The text for :channel is :length characters long. The limit is :limit.', [
-                    'channel' => $channel->display_name,
-                    'length' => mb_strlen($variant->body),
-                    'limit' => $capabilities->maxBodyLength,
-                ])];
+            } elseif (! $capabilities->fits($text)) {
+                $errors["variants.{$variant->id}.body"] = [self::text($text === $variant->body
+                    ? 'The text for :channel is :length characters long. The limit is :limit.'
+                    : 'The text for :channel is :length characters long with its link, which goes out as the last line of the text because the post has an image. The limit is :limit.', [
+                        'channel' => $channel->display_name,
+                        'length' => mb_strlen($text),
+                        'limit' => $capabilities->maxBodyLength,
+                    ])];
             }
 
-            $errors += $this->linkCardProblems($variant, $channel, $capabilities);
+            $errors += $this->mediaProblems($variant, $channel, $capabilities);
+
+            // No card is shown next to images, so none is asked for.
+            if (! $linkInText) {
+                $errors += $this->linkCardProblems($variant, $channel, $capabilities);
+            }
+        }
+
+        return $errors;
+    }
+
+    /**
+     * What is not wrong but worth a second look before the post goes out,
+     * keyed like problems(). Nothing here holds an approval back.
+     *
+     * An image without alternative text is advice and not a refusal: a
+     * person who uses a screen reader gets nothing from such an image, and
+     * the page says so, but whether a picture needs describing is for the
+     * author to decide.
+     *
+     * @return array<string, non-empty-list<string>>
+     */
+    public function advice(Post $post): array
+    {
+        $variants = $post->relationLoaded('variants')
+            ? $post->variants->loadMissing(['channel', 'attachments.media'])->sortBy('id')->values()
+            : $post->variants()->with(['channel', 'attachments.media'])->orderBy('id')->get();
+
+        $advice = [];
+
+        foreach ($variants as $variant) {
+            $channel = $variant->channel;
+
+            if ($variant->isPublished() || $channel === null || $variant->attachments->isEmpty()) {
+                continue;
+            }
+
+            try {
+                $capabilities = $this->channels->for($channel)->capabilities();
+            } catch (ChannelAdapterNotAvailable) {
+                continue;
+            }
+
+            if ($capabilities->altTextLength === null) {
+                continue;
+            }
+
+            foreach ($variant->attachments->values() as $index => $attachment) {
+                if (trim((string) $attachment->alt_text) === '') {
+                    $advice["variants.{$variant->id}.media.{$attachment->media_id}.alt_text"] = [self::text('Image :number for :channel has no description. People who use a screen reader will not know what it shows.', [
+                        'number' => $index + 1,
+                        'channel' => $channel->display_name,
+                    ])];
+                }
+            }
+
+            if ($capabilities->linkGoesInText($variant->link, $variant->attachments->count())) {
+                $advice["variants.{$variant->id}.link"] = [self::text('With an image, :platform shows no preview of the link. The link for :channel goes out as the last line of the text.', [
+                    'platform' => PlatformLabel::for($channel->platform),
+                    'channel' => $channel->display_name,
+                ])];
+            }
+        }
+
+        return $advice;
+    }
+
+    /**
+     * What keeps the images of a variant from going out on its channel:
+     * more than the platform takes, a platform that takes none, a file of
+     * a type or size it refuses, an alternative text that is too long, or
+     * images together with a link where the platform takes one or the other.
+     *
+     * @return array<string, non-empty-list<string>>
+     */
+    public function mediaProblems(PostVariant $variant, Channel $channel, ChannelCapabilities $capabilities): array
+    {
+        $attachments = $variant->images()->values();
+
+        if ($attachments->isEmpty()) {
+            return [];
+        }
+
+        $key = "variants.{$variant->id}.media";
+        $name = ['channel' => $channel->display_name, 'platform' => PlatformLabel::for($channel->platform)];
+
+        if (! $capabilities->acceptsMedia()) {
+            return [$key => [self::text('Images cannot be published to :platform from this instance. Take the images off the text for :channel.', $name)]];
+        }
+
+        $errors = [];
+
+        if ($attachments->count() > $capabilities->maxMediaItems) {
+            $errors[$key] = [self::text('The text for :channel has :count images. :platform takes :limit at most.', [
+                ...$name,
+                'count' => $attachments->count(),
+                'limit' => $capabilities->maxMediaItems,
+            ])];
+        } elseif ($capabilities->mediaLinkRule === MediaLinkRule::Refused && ! blank($variant->link)) {
+            $errors[$key] = [self::text(':platform takes a post with images or a post with a link, not both. Take the link or the images off the text for :channel.', $name)];
+        }
+
+        foreach ($attachments as $index => $attachment) {
+            $image = $attachment->media;
+            $number = [...$name, 'number' => $index + 1];
+            $problem = match (true) {
+                $image === null => self::text('Image :number for :channel no longer exists. Take it off the post.', $number),
+                ! $capabilities->supportsMedia($image->mime) => self::text('Image :number for :channel is of a type that :platform does not take.', $number),
+                $capabilities->maxMediaBytes !== null && $image->byte_size > $capabilities->maxMediaBytes => self::text('Image :number for :channel is :size MB. :platform takes :limit MB at most.', [
+                    ...$number,
+                    'size' => round($image->byte_size / 1024 / 1024, 1),
+                    'limit' => round($capabilities->maxMediaBytes / 1024 / 1024, 1),
+                ]),
+                $capabilities->maxMediaPixels !== null && $image->pixels() > $capabilities->maxMediaPixels => self::text('Image :number for :channel is :width x :height pixels. :platform takes :limit megapixels at most.', [
+                    ...$number,
+                    'width' => $image->width,
+                    'height' => $image->height,
+                    'limit' => round($capabilities->maxMediaPixels / 1_000_000, 1),
+                ]),
+                default => null,
+            };
+
+            if ($problem !== null) {
+                $errors["{$key}.{$attachment->media_id}"] = [$problem];
+            }
+
+            $altText = (string) $attachment->alt_text;
+
+            if ($capabilities->altTextLength !== null && mb_strlen($altText) > $capabilities->altTextLength) {
+                $errors["{$key}.{$attachment->media_id}.alt_text"] = [self::text('The description of image :number for :channel is :length characters long. The limit is :limit.', [
+                    ...$number,
+                    'length' => mb_strlen($altText),
+                    'limit' => $capabilities->altTextLength,
+                ])];
+            }
         }
 
         return $errors;
@@ -304,7 +446,7 @@ class PostPreconditions
      * Every text a user reads goes through the translator, as in the
      * controllers.
      *
-     * @param  array<string, string|int>  $replace
+     * @param  array<string, string|int|float>  $replace
      */
     private static function text(string $key, array $replace = []): string
     {

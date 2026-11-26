@@ -64,6 +64,14 @@ describe('new post page', function () {
                 'link_previews' => true,
                 'link_title_length' => null,
                 'link_description_length' => null,
+                'media' => [
+                    'max_items' => 1,
+                    'types' => ['image/jpeg', 'image/png'],
+                    'max_bytes' => null,
+                    'max_pixels' => null,
+                    'alt_text_length' => null,
+                    'link_rule' => 'in_text',
+                ],
             ])
             ->where('channels.1.id', $reconnect->id)
             ->where('channels.1.can_publish', false)

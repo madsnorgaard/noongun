@@ -4,16 +4,19 @@ namespace App\Http\Controllers\Posts;
 
 use App\Domain\Content\Actions\DeletePost;
 use App\Domain\Content\Actions\SaveDraft;
+use App\Domain\Content\Exceptions\AttachedMediaMissing;
 use App\Domain\Content\Exceptions\PostNotDeletable;
 use App\Domain\Content\Exceptions\PostNotEditable;
 use App\Domain\Content\Models\Post;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Posts\Concerns\ActsOnPosts;
+use App\Http\Presenters\MediaPresenter;
 use App\Http\Presenters\PostPresenter;
 use App\Http\Requests\Posts\SavePostRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -28,6 +31,8 @@ class PostController extends Controller
     /** The time of day a new post is planned for when it is started from a day in the calendar. */
     private const DEFAULT_TIME = '09:00';
 
+    private const IMAGE_GONE = 'The changes were not saved: an image on the post no longer exists. It was removed because no post used it. Take it off and upload it again.';
+
     public function __construct(private readonly PostPresenter $presenter) {}
 
     public function create(Request $request): Response
@@ -38,12 +43,17 @@ class PostController extends Controller
             'post' => null,
             'channels' => $this->presenter->channelOptions(null),
             'planned' => $this->plannedFromQuery($request),
+            'uploads' => MediaPresenter::uploads(),
         ]);
     }
 
     public function store(SavePostRequest $request, SaveDraft $save): RedirectResponse
     {
-        $post = $save->handle($this->actor($request), null, $request->plannedAt(), $request->variantInputs());
+        try {
+            $post = $save->handle($this->actor($request), null, $request->plannedAt(), $request->variantInputs());
+        } catch (AttachedMediaMissing) {
+            throw ValidationException::withMessages(['variants' => [(string) __(self::IMAGE_GONE)]]);
+        }
 
         $this->toast('success', __('The draft is saved.'));
 
@@ -60,6 +70,7 @@ class PostController extends Controller
             'post' => $this->presenter->present($post, $this->mayChangePosts($request)),
             'channels' => $this->presenter->channelOptions($post),
             'planned' => null,
+            'uploads' => MediaPresenter::uploads(),
         ]);
     }
 
@@ -75,6 +86,8 @@ class PostController extends Controller
             $this->toast('success', __('The draft is saved.'));
         } catch (PostNotEditable) {
             $this->toast('error', __('The changes were not saved: the post is no longer a draft. Return it to draft to edit it.'));
+        } catch (AttachedMediaMissing) {
+            throw ValidationException::withMessages(['variants' => [(string) __(self::IMAGE_GONE)]]);
         }
 
         return to_route('posts.show', $post->id);
