@@ -22,8 +22,8 @@ use InvalidArgumentException;
  *
  * The source URL is the one given or else the idea's.
  *
- * The examples are the texts the workspace approved most recently for
- * these channels (SelectExamplePosts), chosen here unless the caller made
+ * The examples are texts the workspace approved for these channels, the
+ * most recent and those that did well (SelectExamplePosts), chosen here unless the caller made
  * the choice itself to keep a note of it.
  */
 final class BuildDraftRequest

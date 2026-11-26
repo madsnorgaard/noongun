@@ -58,9 +58,9 @@ function fullRequest(): DraftRequest
 
 /*
  * Every version that exists is held to the same line: a run of an earlier
- * week can still name v1, and v2 is what a new run is sent.
+ * week can still name v1 or v2, and v3 is what a new run is sent.
  */
-dataset('prompt versions', ['v1', 'v2']);
+dataset('prompt versions', ['v1', 'v2', 'v3']);
 
 it('registers resources/prompts as the prompts view namespace', function (string $version) {
     expect(View::exists("prompts::draft.{$version}.system"))->toBeTrue()
@@ -72,8 +72,8 @@ it('registers resources/prompts as the prompts view namespace', function (string
 it('covers every version that has templates', function () {
     $folders = array_map('basename', glob(resource_path('prompts/draft/*'), GLOB_ONLYDIR));
 
-    expect($folders)->toEqualCanonicalizing(['v1', 'v2'])
-        ->and(config('noongun.drafting.prompt_version'))->toBe('v2');
+    expect($folders)->toEqualCanonicalizing(['v1', 'v2', 'v3'])
+        ->and(config('noongun.drafting.prompt_version'))->toBe('v3');
 });
 
 it('renders the request into a system and a user text for the version', function (string $version) {
@@ -251,6 +251,21 @@ describe('v2, one idea written for each channel', function () {
             ->and(hash('sha256', (string) file_get_contents(resource_path('prompts/draft/v1/user.blade.php'))))
             ->toBe('7dbe9fbd07976934664ee70cc697ba3c240aff81ef8ec5aa23144123b1f29489');
     });
+
+    it('leaves v2 as it was when v3 took over: draft runs refer to it', function () {
+        $prompt = $this->renderer->render(fullRequest(), 'v2');
+
+        expect($prompt->user)->not->toContain('performed')
+            ->and(hash('sha256', (string) file_get_contents(resource_path('prompts/draft/v2/system.blade.php'))))
+            ->toBe('9fd110463a9e4547f64ae49f0b3306616410ab516e3334487ce7bf630ac8e106')
+            ->and(hash('sha256', (string) file_get_contents(resource_path('prompts/draft/v2/user.blade.php'))))
+            ->toBe('18c37d3ae0f3ed3f79582b0f3282458f6631fa5fa92e000f1b286bf46054919e');
+    });
+
+    it('changes nothing in v3 but the examples: its system part is that of v2, word for word', function () {
+        expect($this->renderer->render(fullRequest(), 'v3')->system)->toBe($this->renderer->render(fullRequest(), 'v2')->system)
+            ->and($this->renderer->render(fullRequest(), 'v3')->user)->toBe($this->renderer->render(fullRequest(), 'v2')->user);
+    });
 });
 
 describe('what is sent to a provider', function () {
@@ -319,7 +334,7 @@ describe('what is sent to a provider', function () {
 
         expect($holdsOnlyPlainValues($request->toArray()))->toBeTrue()
             ->and(array_keys($request->toArray()))->toBe(['brief', 'voice_rules', 'pillar', 'idea', 'source_url', 'channels', 'examples', 'also_planned'])
-            ->and(array_keys((new ExamplePost('facebook', 'A text.'))->toArray()))->toBe(['platform', 'body', 'channel_id', 'pillar'])
+            ->and(array_keys((new ExamplePost('facebook', 'A text.'))->toArray()))->toBe(['platform', 'body', 'channel_id', 'pillar', 'performed_well'])
             ->and(array_keys((new PlannedAlongside('A pillar'))->toArray()))->toBe(['pillar', 'idea', 'opening'])
             ->and(array_keys($request->toArray()['channels'][0]))->toBe([
                 'channel_id', 'platform', 'max_body_length', 'link_previews', 'media_types', 'max_media_items',

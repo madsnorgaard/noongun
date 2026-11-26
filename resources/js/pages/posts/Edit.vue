@@ -1265,8 +1265,11 @@ const locked = computed(() => {
                                     post.origin.examples === 1
                                         ? '1 earlier post as an example'
                                         : `${post.origin.examples} earlier posts as examples`
+                                }}{{
+                                    post.origin.examples_by_performance > 0
+                                        ? `, ${post.origin.examples_by_performance} of them chosen because they did well.`
+                                        : ' of your voice.'
                                 }}
-                                of your voice.
                             </dd>
                         </div>
                         <div

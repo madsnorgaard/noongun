@@ -46,8 +46,8 @@ use DateTimeInterface;
  * a post is drafted, not when it is planned, and a post can be approved in
  * between. The expected cost counts them as they are now. The worst case
  * does not rely on that: it counts the most of both a request could ever
- * carry, with every character of an example as four tokens, the most
- * bytes one character has.
+ * carry, each marked as one that did well, with every character of an
+ * example as four tokens, the most bytes one character has.
  *
  * Both are estimates of the price table, not an invoice. Without a price
  * for the model there is neither.
@@ -180,7 +180,8 @@ final class ProposalCost
 
     /**
      * The request with as many examples as it could carry, each with the
-     * longest pillar name and no text, and with the longest list of posts
+     * longest pillar name, the mark of a post that did well and no text,
+     * and with the longest list of posts
      * planned alongside. Rendered, it is everything around the texts of
      * the examples at its largest. The texts themselves are counted apart,
      * at their limit.
@@ -193,7 +194,7 @@ final class ProposalCost
         if (self::exampleCharacters() > 0) {
             foreach ($request->channels as $channel) {
                 for ($i = 0; $i < DraftingConfig::examplesPerChannel(); $i++) {
-                    $examples[] = new ExamplePost($channel->platform, '', $channel->channelId, $widest);
+                    $examples[] = new ExamplePost($channel->platform, '', $channel->channelId, $widest, performedWell: true);
                 }
             }
         }

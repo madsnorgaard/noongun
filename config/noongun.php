@@ -240,12 +240,16 @@ return [
     | that it can be read and approved in time. "weeks_ahead" is how far
     | ahead a week can be proposed.
     |
-    | "examples" sends the texts the workspace approved most recently along
-    | with a draft request, so that a draft matches the voice and does not
-    | repeat what was said. "per_channel" is how many for each target
-    | channel, at most 10; 0 sends none. "max_characters" is the most
-    | characters all examples of one request may hold together; the oldest
-    | are left out first and a text is never cut.
+    | "examples" sends texts the workspace approved along with a draft
+    | request, so that a draft matches the voice and does not repeat what
+    | was said. "per_channel" is how many for each target channel, at most
+    | 10; 0 sends none. "max_characters" is the most characters all examples
+    | of one request may hold together; a text is never cut. "top_share" is
+    | the share of the examples of a channel, in percent, that goes to the
+    | approved posts that did best instead of the most recent ones; 0 takes
+    | only the most recent. "top_days" is how many days back a post may have
+    | been published to be taken for how it did; 0 takes none. See
+    | docs/adr/0011-drafting-contract.md.
     */
 
     'drafting' => [
@@ -253,7 +257,7 @@ return [
         'offered' => array_values(array_filter(array_map(trim(...), explode(',', (string) env('NOONGUN_DRAFT_PROVIDERS', ''))))),
         'max_tokens' => (int) env('NOONGUN_DRAFT_MAX_TOKENS', 16000),
         'timeout' => (int) env('NOONGUN_DRAFT_TIMEOUT', 120),
-        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v2'),
+        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v3'),
         'currency' => env('NOONGUN_DRAFT_PRICE_CURRENCY', 'USD'),
 
         'providers' => [
@@ -295,6 +299,8 @@ return [
         'examples' => [
             'per_channel' => env('NOONGUN_DRAFT_EXAMPLES', 5),
             'max_characters' => env('NOONGUN_DRAFT_EXAMPLES_MAX_CHARS', 6000),
+            'top_share' => env('NOONGUN_DRAFT_EXAMPLES_TOP_SHARE', 50),
+            'top_days' => env('NOONGUN_DRAFT_EXAMPLES_TOP_DAYS', 90),
         ],
 
         'limits' => [

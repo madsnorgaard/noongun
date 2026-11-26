@@ -299,7 +299,7 @@ describe('what the page says is sent', function () {
         config(['noongun.drafting.examples.per_channel' => 3]);
 
         $expected = array_values(LlmKeyController::SENT_TO_PROVIDER);
-        $expected[6] = 'the texts of the posts this workspace approved most recently as examples, at most 3 for each target channel';
+        $expected[6] = 'the texts of posts this workspace approved as examples, at most 3 for each target channel: the most recent ones and those that did best, the latter marked as such without their numbers';
 
         $this->actingAs($this->owner)->get(route('llm-key.edit'))
             ->assertInertia(fn (Assert $page) => $page

@@ -18,6 +18,9 @@ final class DraftingConfig
     /** The most characters the examples of one request can hold, whatever is configured. */
     public const MAX_EXAMPLE_CHARACTERS = 40000;
 
+    /** The furthest back, in days, a post can be taken as an example for how it did, whatever is configured. */
+    public const MAX_EXAMPLE_TOP_DAYS = 365;
+
     public static function defaultProvider(): ?string
     {
         return self::string('provider');
@@ -148,8 +151,8 @@ final class DraftingConfig
     }
 
     /**
-     * How many recently approved posts a draft request carries as examples
-     * for each target channel. 0 sends none.
+     * How many approved posts a draft request carries as examples for each
+     * target channel. 0 sends none.
      */
     public static function examplesPerChannel(): int
     {
@@ -163,6 +166,34 @@ final class DraftingConfig
     public static function exampleCharacters(): int
     {
         return self::bounded('examples.max_characters', 6000, self::MAX_EXAMPLE_CHARACTERS);
+    }
+
+    /**
+     * How many of the examples of one target channel are chosen for how
+     * they did instead of for being recent: the configured share of
+     * examplesPerChannel(), rounded down, and always at least one fewer
+     * than that, so that the most recent approved text is always among
+     * them. 0 chooses by recency only, which is what a share of 0, a
+     * window of 0 days and a single example for a channel all give.
+     */
+    public static function exampleTopSlots(): int
+    {
+        $perChannel = self::examplesPerChannel();
+
+        if ($perChannel < 2 || self::exampleTopDays() === 0) {
+            return 0;
+        }
+
+        return min($perChannel - 1, intdiv($perChannel * self::bounded('examples.top_share', 50, 100), 100));
+    }
+
+    /**
+     * How many days back a post may have been published to be chosen as
+     * an example for how it did. 0 chooses none that way.
+     */
+    public static function exampleTopDays(): int
+    {
+        return self::bounded('examples.top_days', 90, self::MAX_EXAMPLE_TOP_DAYS);
     }
 
     public static function currency(): string
