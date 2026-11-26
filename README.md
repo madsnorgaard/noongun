@@ -694,6 +694,43 @@ What to know when operating it:
 - Reading Facebook's numbers is not built yet: the job runs and stores
   nothing for Facebook until it is.
 
+### Where the numbers are shown
+
+Everyone in the workspace who can see posts can see their numbers, viewers
+included. Nothing on these pages changes anything.
+
+- **Insights** (`/insights`) covers the last 7, 28 or 90 days, counted in days
+  of the workspace timezone, today included. The period is in the address
+  (`/insights?period=7`), so a view can be linked. It shows what the period
+  added up to, a table for each pillar sorted by average score, the ten posts
+  with the highest score, and a table for each channel that also says why a
+  channel has no numbers.
+- **A published post** (`/posts/{id}`) shows its numbers for each channel, a
+  total when it is on several, when they were last checked, and the readings
+  over time.
+- **History** in the queue shows the total of each published post on one line.
+- **The dashboard** shows the totals of the last 7 days and the best post, once
+  a post of that week is measured.
+
+How to read them:
+
+- A dash is a number the platform did not give. It is left out of totals and
+  averages. An average is taken over the posts that have the number, and the
+  page says "from 3 of 5" when that is fewer than the measured posts.
+- The score is reactions x 1 + comments x 2 + shares x 3 + clicks x 1, with
+  the weights from `NOONGUN_INSIGHTS_WEIGHT_*`. The page prints the formula
+  with the weights in use. Reach is not part of it.
+- A post that was just published says when its first reading is expected: by
+  the next run of `noongun:poll-metrics`, about ten minutes after it went out.
+  If it says that a reading is due and nothing changes within the hour, check
+  that the `scheduler` and `horizon` containers are running.
+- A post older than the last step of `NOONGUN_INSIGHTS_CADENCE` says "Last
+  measured on" with the time of its last reading.
+- A channel that needs to be connected again keeps its last numbers, and the
+  pages say that they are not updated until it is connected.
+- With `NOONGUN_INSIGHTS_ENABLED=false` the pages say that insights are turned
+  off and still show what was read before.
+
 ## Running on a home server
 
 `./setup` gives a development stack: it mounts the source code and runs in debug

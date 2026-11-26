@@ -198,6 +198,21 @@ square dot, so that it does not rest on colour alone.
 - **Advice and checks.** A row with a small filled tag: "OK" on Harbour green,
   "Check" on dark brass with the advice surface behind the row.
 - **Times, counts, ids.** Always `font-mono`.
+- **Table of numbers.** Inside a card, in a wrapper with `overflow-x-auto` and a
+  `min-w` on the table, so that a phone scrolls the table and not the page. A
+  `caption` (`sr-only` when the heading above says the same), column headings in
+  secondary text at `text-sm` and normal weight, `scope` on every heading, rows
+  divided by `border-t border-border`, numbers right-aligned in `font-mono`. No
+  zebra stripes, no coloured cells. Insights use it; nothing is drawn as a chart.
+- **A number that was not given.** A dash in secondary text, drawn by
+  `MetricValue` (`resources/js/components/insights`), with the reason as text
+  for a screen reader and on hover. Never a zero. The page says once, in a
+  sentence, what a dash means. An average that is made of fewer posts than its
+  row counts says so under the number ("from 3 of 5").
+- **Where numbers stand.** One sentence from `resources/js/lib/insights.ts`:
+  when they were last checked, when the first reading is expected, or why
+  there are none and what to do. It is secondary text, not an alert: a number
+  that is missing is not a failure.
 
 ## Voice
 
@@ -282,8 +297,10 @@ decide. Until then the interface follows the system and borrows only the look.
   way".
 - **Not built yet.** Voice rule checks, photos and alt text, the platform
   preview, the day strip, reject with undo, the one-card review on a phone,
-  channel status in the sidebar, the draft count in the navigation, Library and
-  Insights.
+  channel status in the sidebar, the draft count in the navigation and Library.
+- **Built in M6.** Insights, as tables of numbers and sentences, without
+  charts. It is in the navigation between Ideas and Channels: what was written,
+  how it did, then where it goes.
 - **Density.** `CLAUDE.md` asks for a calm, dense, tool-like interface. The guide
   sets body text at 17px, controls at 46px and cards at 20px radius. The guide's
   values are used.
