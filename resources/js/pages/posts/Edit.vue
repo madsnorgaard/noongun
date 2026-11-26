@@ -9,6 +9,7 @@ import {
     ref,
     watch,
 } from 'vue';
+import PostNumbers from '@/components/insights/PostNumbers.vue';
 import InputError from '@/components/InputError.vue';
 import PostStateBadge from '@/components/posts/PostStateBadge.vue';
 import PostTexts from '@/components/posts/PostTexts.vue';
@@ -41,6 +42,7 @@ import {
     update,
 } from '@/routes/posts';
 import { index as queue } from '@/routes/queue';
+import type { PostInsights, Reading } from '@/types/insights';
 import type { ChannelOption, Post } from '@/types/posts';
 
 defineOptions({
@@ -63,6 +65,9 @@ const props = defineProps<{
     channels: ChannelOption[];
     /** A planned time to start a new post with, on the workspace clock. */
     planned: string | null;
+    /** How the texts that are on a platform did. Null before that. */
+    insights: PostInsights | null;
+    reading: Reading | null;
 }>();
 
 type VariantFields = {
@@ -789,6 +794,12 @@ const locked = computed(() => {
                         <PostTexts :post="post" side-by-side />
                     </section>
                 </template>
+
+                <PostNumbers
+                    v-if="insights && reading"
+                    :insights="insights"
+                    :reading="reading"
+                />
             </div>
 
             <aside

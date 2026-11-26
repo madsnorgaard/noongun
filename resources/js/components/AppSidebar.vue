@@ -14,6 +14,7 @@ import { edit as brief } from '@/routes/brief';
 import { index as calendar } from '@/routes/calendar';
 import { index as channels } from '@/routes/channels';
 import { index as ideas } from '@/routes/ideas';
+import { index as insights } from '@/routes/insights';
 import { index as queue } from '@/routes/queue';
 import type { NavItem } from '@/types';
 
@@ -35,6 +36,10 @@ const mainNavItems: NavItem[] = [
     {
         title: 'Ideas',
         href: ideas(),
+    },
+    {
+        title: 'Insights',
+        href: insights(),
     },
     {
         title: 'Channels',

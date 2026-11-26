@@ -1,15 +1,20 @@
 <script setup lang="ts">
 import { Head, usePage } from '@inertiajs/vue3';
+import MetricList from '@/components/insights/MetricList.vue';
 import TextLink from '@/components/TextLink.vue';
 import { computed } from 'vue';
+import { formatNumber } from '@/lib/insights';
 import { dashboard } from '@/routes';
 import { edit as brief } from '@/routes/brief';
 import { index as calendar } from '@/routes/calendar';
 import { index as channels } from '@/routes/channels';
+import { index as insightsPage } from '@/routes/insights';
 import { edit as draftingSettings } from '@/routes/llm-key';
+import { show as showPost } from '@/routes/posts';
 import { create as proposeWeek } from '@/routes/proposals';
 import { index as queue } from '@/routes/queue';
 import { index as slots } from '@/routes/slots';
+import type { DashboardInsights } from '@/types/insights';
 
 defineOptions({
     layout: {
@@ -29,6 +34,8 @@ type SetupKey = 'channel' | 'brief' | 'slots' | 'key' | 'propose';
 const props = defineProps<{
     /** What is left before a week can be proposed. Null when all is done. */
     setup: { key: SetupKey; done: boolean }[] | null;
+    /** What the last week added up to. Null when nothing of it is measured. */
+    insights: DashboardInsights | null;
     can: { propose: boolean };
 }>();
 
@@ -112,6 +119,50 @@ const localTime = computed(() => {
                     <span v-else>{{ step.title }}</span>
                 </li>
             </ul>
+        </section>
+
+        <section
+            v-if="insights"
+            class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
+            data-test="dashboard-insights"
+        >
+            <h2 class="text-heading">Last {{ insights.days }} days</h2>
+            <p>
+                <span class="font-mono">{{
+                    formatNumber(insights.posts)
+                }}</span>
+                {{ insights.posts === 1 ? 'post' : 'posts' }} published,
+                <span class="font-mono">{{
+                    formatNumber(insights.measured_posts)
+                }}</span>
+                measured.
+            </p>
+            <MetricList :numbers="insights.numbers" :score="insights.score" />
+            <p v-if="insights.best" class="max-w-[72ch]">
+                Best post:
+                <TextLink
+                    :href="showPost({ post: insights.best.post_id })"
+                    data-test="dashboard-best-post"
+                    >{{
+                        insights.best.excerpt || 'a post without text'
+                    }}</TextLink
+                >
+                <template v-if="insights.best.score !== null">
+                    with a score of
+                    <span class="font-mono">{{
+                        formatNumber(insights.best.score, 2)
+                    }}</span
+                    >.
+                </template>
+            </p>
+            <p>
+                <TextLink
+                    :href="insightsPage({ query: { period: insights.days } })"
+                    data-test="dashboard-insights-link"
+                >
+                    See pillars and channels in Insights
+                </TextLink>
+            </p>
         </section>
 
         <section class="rounded-xl bg-card p-5.5 shadow-xs">
