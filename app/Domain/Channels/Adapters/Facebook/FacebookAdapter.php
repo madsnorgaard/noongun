@@ -8,8 +8,10 @@ use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Channels\Contracts\ConnectedChannels;
 use App\Domain\Channels\Contracts\DescribesSetup;
 use App\Domain\Channels\Contracts\ExplainsMissingAccounts;
+use App\Domain\Channels\Contracts\Metric;
 use App\Domain\Channels\Contracts\PublishResult;
 use App\Domain\Channels\Contracts\RateLimit;
+use App\Domain\Channels\Contracts\ReadsMetrics;
 use App\Domain\Channels\Contracts\SkippedAccount;
 use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Channels\Exceptions\NothingToConnect;
@@ -35,7 +37,7 @@ use SensitiveParameter;
  * Only Page access tokens are stored. The user tokens met during connect()
  * are used for that one request and then dropped.
  */
-final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsMissingAccounts
+final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsMissingAccounts, ReadsMetrics
 {
     public const PLATFORM = 'facebook';
 
@@ -61,6 +63,19 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
     private const RATE_LIMIT_CALLS = 4800;
 
     private const RATE_LIMIT_SECONDS = 86400;
+
+    /**
+     * Read from the post itself with the permissions every connected Page
+     * has. See "Reading the numbers of a post" in docs/platform-notes/meta.md.
+     */
+    private const METRICS_OF_THE_POST = [Metric::Reactions, Metric::Comments, Metric::Shares];
+
+    /**
+     * Read from the insights of the post, which need one more permission
+     * (`insights_scope` in the settings). A Page connected without it gets
+     * null for these.
+     */
+    private const METRICS_OF_INSIGHTS = [Metric::Clicks, Metric::Reach];
 
     /** Most result pages read from /me/accounts (100 Pages each). */
     private const MAX_ACCOUNT_PAGES = 10;
@@ -109,7 +124,37 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
             maxMediaItems: 0,
             linkPreviews: true,
             rateLimit: new RateLimit(self::RATE_LIMIT_CALLS, self::RATE_LIMIT_SECONDS),
+            metrics: [...self::METRICS_OF_THE_POST, ...self::METRICS_OF_INSIGHTS],
         );
+    }
+
+    public function metricsFor(Channel $channel): array
+    {
+        $insightsScope = $this->setting('insights_scope');
+
+        return $insightsScope !== '' && $channel->hasScope($insightsScope)
+            ? [...self::METRICS_OF_THE_POST, ...self::METRICS_OF_INSIGHTS]
+            : self::METRICS_OF_THE_POST;
+    }
+
+    /**
+     * Facebook counts every post id in a request as one call, also when ids
+     * are combined or batched. One read of the post and one of its insights.
+     */
+    public function metricCallsPerVariant(): int
+    {
+        return 2;
+    }
+
+    /**
+     * NOT IMPLEMENTED YET (M6, issue #6): no call is made and no variant
+     * gets a reading, so FetchMetricsJob stores nothing for Facebook and
+     * nothing fails. The calls to make are described under "Reading the
+     * numbers of a post" in docs/platform-notes/meta.md.
+     */
+    public function fetchMetrics(Channel $channel, array $variants): array
+    {
+        return [];
     }
 
     public function setupSteps(): array
