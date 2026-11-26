@@ -3,6 +3,9 @@
 namespace App\Domain\Drafting\Planning;
 
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
+use App\Domain\Channels\Models\Channel;
+use App\Domain\Content\Models\Idea;
+use App\Domain\Content\Models\Pillar;
 use App\Domain\Drafting\Actions\BuildDraftRequest;
 use App\Domain\Drafting\CostEstimate;
 use App\Domain\Drafting\CostEstimator;
@@ -54,7 +57,33 @@ final class ProposalCost
      */
     public function of(WeekPlan $plan, Brief $brief, DraftingContext $context): ?array
     {
-        if ($plan->isEmpty()) {
+        return $this->ofPosts(array_map(
+            fn (PlannedPost $post): array => ['channels' => $post->channels, 'pillar' => $post->pillar, 'idea' => $post->idea],
+            $plan->posts,
+        ), $brief, $context);
+    }
+
+    /**
+     * The same two figures for one post on the given channels, as "Draft a
+     * post" on an idea asks for it.
+     *
+     * @param  list<Channel>  $channels
+     * @return array{expected: CostEstimate, worst: CostEstimate}|null null without a channel, without a price for the model or when the prompt cannot be rendered
+     */
+    public function ofOnePost(array $channels, ?Pillar $pillar, ?Idea $idea, Brief $brief, DraftingContext $context): ?array
+    {
+        return $channels === []
+            ? null
+            : $this->ofPosts([['channels' => $channels, 'pillar' => $pillar, 'idea' => $idea]], $brief, $context);
+    }
+
+    /**
+     * @param  list<array{channels: list<Channel>, pillar: Pillar|null, idea: Idea|null}>  $posts
+     * @return array{expected: CostEstimate, worst: CostEstimate}|null
+     */
+    private function ofPosts(array $posts, Brief $brief, DraftingContext $context): ?array
+    {
+        if ($posts === []) {
             return null;
         }
 
@@ -63,9 +92,9 @@ final class ProposalCost
         $worstInput = 0;
 
         try {
-            foreach ($plan->posts as $post) {
+            foreach ($posts as $post) {
                 $prompt = $this->prompts->render(
-                    $this->buildRequest->handle($brief, $post->channels, $post->pillar, $post->idea),
+                    $this->buildRequest->handle($brief, $post['channels'], $post['pillar'], $post['idea']),
                     $context->promptVersion,
                 );
 
@@ -78,7 +107,7 @@ final class ProposalCost
             return null;
         }
 
-        $posts = count($plan->posts);
+        $posts = count($posts);
         $answers = DraftingLimits::maxAttempts() * DraftingLimits::ANSWERS_PER_RUN;
 
         $expected = $this->costs->estimate(new DraftUsage(
