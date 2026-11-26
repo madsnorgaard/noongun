@@ -12,11 +12,13 @@ use App\Domain\Insights\ChannelPolling;
 use App\Domain\Insights\DueVariants;
 use App\Domain\Insights\FetchMetricsJob;
 use App\Domain\Insights\InsightsConfig;
+use App\Domain\Scheduling\PublishingConfig;
 use App\Domain\Workspaces\Models\Workspace;
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
+use Laravel\Horizon\ProvisioningPlan;
 
 require_once __DIR__.'/../../Support/publishing.php';
 require_once __DIR__.'/../../Support/posts.php';
@@ -236,7 +238,7 @@ it('asks nothing of LinkedIn, which gives no metrics yet', function () {
     expect(DB::table('metric_snapshots')->count())->toBe(0);
 });
 
-it('declares the metrics of Facebook and stores nothing until reading them is built', function () {
+it('declares the metrics of Facebook, and which of them a Page without the insights permission can read', function () {
     $manager = app(ChannelManager::class);
     $manager->extend('facebook', fn (array $settings, $container) => $container->make(
         FacebookAdapter::class,
@@ -244,7 +246,6 @@ it('declares the metrics of Facebook and stores nothing until reading them is bu
     ));
 
     $withInsights = channelIn($this->workspace, ['scopes' => ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts', 'read_insights']]);
-    $variant = variantAged('1 hour');
     $reader = $manager->metricsReader($this->channel);
 
     expect($reader)->not->toBeNull()
@@ -252,10 +253,64 @@ it('declares the metrics of Facebook and stores nothing until reading them is bu
         ->and($reader->metricsFor($this->channel))->toBe([Metric::Reactions, Metric::Comments, Metric::Shares])
         ->and($reader->metricsFor($withInsights))->toBe(Metric::cases())
         ->and($reader->metricCallsPerVariant())->toBe(2);
+});
 
-    // No HTTP fake: a call would fail the test.
-    runFetchMetrics($this->channel);
+it('queues one job for a channel, however often the command runs before a worker takes it', function () {
+    Queue::fake();
+    variantAged('1 hour');
 
-    expect(snapshotsOf($variant))->toBe([])
-        ->and(ChannelPolling::isPaused($this->channel->id))->toBeFalse();
+    $this->artisan('noongun:poll-metrics')->assertSuccessful();
+    $this->travel(10)->minutes();
+    $this->artisan('noongun:poll-metrics')->assertSuccessful();
+    $this->travel(40)->minutes();
+    $this->artisan('noongun:poll-metrics')->assertSuccessful();
+
+    Queue::assertPushed(FetchMetricsJob::class, 1);
+
+    // A job that was lost does not keep the channel from being read for
+    // longer than this.
+    $this->travel(InsightsConfig::UNIQUE_SECONDS)->seconds();
+    $this->artisan('noongun:poll-metrics')->assertSuccessful();
+
+    Queue::assertPushed(FetchMetricsJob::class, 2);
+});
+
+it('lets a second job be queued once the first has run', function () {
+    $variant = variantAged('1 hour');
+    $this->fake->reads($variant, ['reactions' => 1]);
+
+    dispatch(new FetchMetricsJob($this->workspace->id, $this->channel->id));
+
+    Queue::fake();
+    dispatch(new FetchMetricsJob($this->workspace->id, $this->channel->id));
+
+    Queue::assertPushed(FetchMetricsJob::class, 1);
+});
+
+it('has a worker for the insights queue in every environment, apart from the workers that publish', function () {
+    $plan = new ProvisioningPlan('test', config('horizon.environments'), config('horizon.defaults'));
+    $environments = $plan->toSupervisorOptions();
+
+    expect(array_keys($environments))->toEqualCanonicalizing(['production', 'local']);
+
+    foreach ($environments as $environment => $supervisors) {
+        $working = fn (string $queue) => collect($supervisors)
+            ->filter(fn ($options) => in_array($queue, explode(',', $options->queue), true))
+            ->values();
+
+        $insights = $working(InsightsConfig::queue());
+        $publishing = $working(PublishingConfig::queue());
+
+        expect($insights)->toHaveCount(1, "no single supervisor for insights in {$environment}")
+            ->and($publishing)->toHaveCount(1, "no single supervisor for publishing in {$environment}")
+            ->and($insights[0]->name)->not->toBe($publishing[0]->name)
+            // Each works its own queue only, so neither can keep the other waiting.
+            ->and($insights[0]->queue)->toBe(InsightsConfig::queue())
+            ->and($publishing[0]->queue)->toBe(PublishingConfig::queue())
+            ->and($insights[0]->maxProcesses)->toBe(1)
+            ->and($publishing[0]->maxProcesses)->toBeGreaterThanOrEqual(1)
+            ->and($insights[0]->connection)->toBe($publishing[0]->connection)
+            ->and($insights[0]->timeout)->toBeGreaterThan(InsightsConfig::jobSeconds())
+            ->and($insights[0]->maxTries)->toBe(1);
+    }
 });

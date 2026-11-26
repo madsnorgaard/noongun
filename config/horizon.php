@@ -199,11 +199,29 @@ return [
     'defaults' => [
         'supervisor-1' => [
             'connection' => 'redis',
-            // Publishing and drafting first. Reading metrics has its own
-            // queue, so a backlog of it never stands in front of a post.
-            'queue' => ['default', 'insights'],
+            // Publishing and drafting. Reading metrics is not worked here,
+            // so no process of this supervisor is ever busy with it.
+            'queue' => ['default'],
             'balance' => 'auto',
             'autoScalingStrategy' => 'time',
+            'maxProcesses' => 1,
+            'maxTime' => 0,
+            'maxJobs' => 0,
+            'memory' => 128,
+            'tries' => 1,
+            'timeout' => 60,
+            'nice' => 0,
+        ],
+
+        // Reading the numbers of published posts (FetchMetricsJob). One
+        // process of its own in every environment below: a backlog of
+        // readings cannot take a worker away from publishing, and a busy
+        // publishing queue cannot keep readings waiting. The timeout must
+        // stay above NOONGUN_INSIGHTS_TIMEOUT.
+        'supervisor-insights' => [
+            'connection' => 'redis',
+            'queue' => [env('NOONGUN_INSIGHTS_QUEUE', 'insights')],
+            'balance' => false,
             'maxProcesses' => 1,
             'maxTime' => 0,
             'maxJobs' => 0,

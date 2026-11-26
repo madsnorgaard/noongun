@@ -48,6 +48,17 @@ it('can be narrowed to the metrics a channel may read', function () {
         ->and($reading->only([])->isEmpty())->toBeTrue();
 });
 
+it('can say that the post is gone, which is not a number and not a failure', function () {
+    $gone = MetricReading::gone();
+
+    expect($gone->gone)->toBeTrue()
+        ->and($gone->isEmpty())->toBeTrue()
+        ->and($gone->only([Metric::Reactions])->gone)->toBeTrue()
+        ->and((new MetricReading(reactions: 0))->gone)->toBeFalse()
+        ->and(MetricReading::fromPlatform(['reactions' => 3, 'gone' => true])->gone)->toBeFalse()
+        ->and(fn () => new MetricReading(reactions: 1, gone: true))->toThrow(InvalidArgumentException::class);
+});
+
 it('lists the metrics of a platform in its capabilities', function () {
     $none = new ChannelCapabilities(maxBodyLength: 3000);
     $some = new ChannelCapabilities(maxBodyLength: 3000, metrics: [Metric::Reactions, Metric::Comments]);
