@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Domain\Channels\ChannelManager;
+use App\Domain\Content\Media\MediaConfig;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\Generators\ProviderReplies;
 use App\Domain\Drafting\PromptRenderer;
@@ -77,6 +78,11 @@ class AppServiceProvider extends ServiceProvider
 
                 return back(fallback: route('queue.index'))->withErrors(['proposal' => $message]);
             }));
+
+        // "media-uploads": each upload is decoded and written again, which
+        // costs memory and time. The page that uploads reads the 429.
+        RateLimiter::for('media-uploads', fn (Request $request): Limit => Limit::perMinute(MediaConfig::uploadsPerMinute())
+            ->by('media|'.($request->user()?->getAuthIdentifier() ?? $request->ip())));
     }
 
     /**

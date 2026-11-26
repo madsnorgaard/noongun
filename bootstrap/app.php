@@ -15,7 +15,7 @@ use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
-        web: [__DIR__.'/../routes/web.php', __DIR__.'/../routes/channels.php', __DIR__.'/../routes/posts.php', __DIR__.'/../routes/brief.php', __DIR__.'/../routes/llm.php', __DIR__.'/../routes/proposals.php'],
+        web: [__DIR__.'/../routes/web.php', __DIR__.'/../routes/channels.php', __DIR__.'/../routes/posts.php', __DIR__.'/../routes/media.php', __DIR__.'/../routes/brief.php', __DIR__.'/../routes/llm.php', __DIR__.'/../routes/proposals.php'],
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
