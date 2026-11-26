@@ -17,6 +17,10 @@ Schedule::command('noongun:recover-stuck-posts')->everyFiveMinutes()->withoutOve
 // Channels. Removes accounts that a connect returned and nobody confirmed.
 Schedule::command('noongun:discard-pending-channels')->everyFiveMinutes()->withoutOverlapping(10);
 
+// Images. Removes stored images that no post has used for a day. It never
+// touches an image that is on a post.
+Schedule::command('noongun:prune-unused-media')->hourly()->withoutOverlapping(30);
+
 // Drafting. Marks draft runs that lost their worker as failed. It never asks
 // a provider again.
 Schedule::command('noongun:recover-stuck-draft-runs')->everyFiveMinutes()->withoutOverlapping(10);
