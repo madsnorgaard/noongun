@@ -312,6 +312,8 @@ there: Noon Gun estimates cost, it does not cap what the provider charges.
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call. |
 | `NOONGUN_DRAFT_PROMPT_VERSION` | `v2` | The folder under `resources/prompts/draft/` that holds the prompt. `v2` asks for a text written for each channel; `v1` is kept for the runs that used it. |
 | `NOONGUN_DRAFT_PRICES`, `NOONGUN_DRAFT_PRICE_CURRENCY` | empty, `USD` | The price table for the cost estimate. |
+| `NOONGUN_DRAFT_EXAMPLES` | `5` | How many of the texts the workspace approved most recently are sent with a draft request as examples, for each target channel. `0` sends none. Never more than 10. |
+| `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` | `6000` | The most characters all examples of one request hold together. Over that, the oldest are left out; a text is never cut. `0` sends none. Never more than 40000. |
 
 ### What is sent to the provider
 
@@ -327,20 +329,65 @@ conversation. The prompt is built in one place
   does not open it, and neither does the model;
 - for each target channel its number, its platform and the limits of that
   platform, such as the longest text;
-- earlier posts of the workspace as examples of its voice. None are sent
-  today: the list is filled from the insights milestone on.
+- the texts the workspace approved most recently, as examples of its voice
+  and of what has already been said: for each target channel the last
+  `NOONGUN_DRAFT_EXAMPLES` texts of that channel (see "Examples from approved
+  posts" below). With each text goes the platform, the number of the channel
+  when the draft is for that channel too, and the name of the pillar the post
+  had. `NOONGUN_DRAFT_EXAMPLES=0` sends none;
+- a few words about the other posts of the same week, so that the same post
+  is not written twice: for each at most 60 characters of the name of its
+  pillar, of the title of its idea and of the first line of its text, for at
+  most 12 posts. Never a whole text. A draft without a planned time gets no
+  such list.
 
 The Drafting settings page names the same parts to the owner who chooses a
 provider; a test holds that list against the request.
 
 Never sent: platform tokens, API keys, the names of your Pages and profiles,
 the name of the workspace, names or email addresses of users, and anything
-that belongs to another workspace. The API
+that belongs to another workspace. Of an earlier post the text is sent and
+nothing else about it: not its link or the card of the link, not who wrote or
+approved it, not when, not its address on the platform and no figures. The API
 key travels in a request header to the provider and nowhere else. It is not
 written to logs, error messages, the queue or the draft run.
 
 What the provider does with a request is set by its own terms. Do not put into
 the brief what you would not send to it.
+
+### Examples from approved posts
+
+A draft is written from the brief, and from what you approved before. The
+texts you approved most recently go along with each draft request, in the
+form you approved them, so that an edit you made before approving is what the
+next draft learns from. The model is told that they show your voice and what
+has already been said, that it must not repeat their topics, openings or
+phrases, and that it must never copy a sentence.
+
+- A text counts when its post carries an approval: approved, scheduled, being
+  published, published, or failed on the way to the platform. A draft that
+  waits for approval, a rejected post and a post that was returned to draft
+  do not count.
+- For each channel a draft is for, the last `NOONGUN_DRAFT_EXAMPLES` texts of
+  that channel are taken, newest approval first. A channel with fewer is
+  topped up with texts of your other channels on the same platform. Nothing
+  is taken from another platform.
+- All examples of one request hold at most `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS`
+  characters together. Over that, the oldest are left out. A text is never
+  cut.
+- They are chosen when the draft is written, not when it is asked for. The
+  drafts of one proposed week therefore do not see each other as examples
+  until you approve them. What they do get is the list of the other posts of
+  the week described above.
+- They go to the provider the workspace drafts with, like the brief.
+- Only texts of your own workspace can be chosen.
+
+The pages that start a draft say when examples are sent. The editor says on
+a drafted post how many earlier posts it was written with; the draft run
+keeps the numbers of those posts and no text.
+
+Noon Gun does not yet know how a post did. From the insights milestone on,
+the examples are chosen by that, not only by how recent they are.
 
 ### What comes back
 
@@ -560,6 +607,13 @@ Before the start the page shows two figures from the price table:
   at one token for every byte, plus an allowance for what the provider wraps
   around it. A token is never shorter than a byte, so a proposal cannot cost
   more than this, however long the brief is.
+
+Both figures include the examples from approved posts. The expected cost
+counts the examples that would be sent now. The worst case counts the most
+there could be, at four tokens for each of the
+`NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` characters, because a post can be approved
+between the start and the moment a draft is written. Lower that setting or
+`NOONGUN_DRAFT_EXAMPLES` to lower both.
 
 While a proposal is at work and after it, the queue shows what its runs used
 so far, failed attempts included. The editor shows on a drafted post what
