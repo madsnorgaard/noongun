@@ -4,11 +4,14 @@ namespace Tests\Fakes;
 
 use App\Domain\Channels\Contracts\ChannelAdapter;
 use App\Domain\Channels\Contracts\ChannelCapabilities;
+use App\Domain\Channels\Contracts\MediaLinkRule;
 use App\Domain\Channels\Contracts\PublishResult;
 use App\Domain\Channels\Contracts\RateLimit;
+use App\Domain\Channels\Contracts\UploadsMedia;
 use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Channels\Exceptions\PublishFailed;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Content\Models\MediaAttachment;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\Models\Workspace;
 use Closure;
@@ -24,12 +27,36 @@ use PHPUnit\Framework\Assert;
  *     ...
  *     $fake->assertPublishedTimes($variant, 1);
  *
+ * It takes images as a real platform does, in two steps:
+ *
+ *     $fake = fakeChannelAdapter()->acceptingImages(max: 4);
+ *     ...
+ *     $fake->uploads;                    // each file it was sent, with a hash of its bytes
+ *     $fake->lastPublished($variant);    // the text and the image ids the post was made with
+ *
  * Register it with fakeChannelAdapter() from tests/Support/channels.php.
  */
-class FakeChannelAdapter implements ChannelAdapter
+class FakeChannelAdapter implements ChannelAdapter, UploadsMedia
 {
     /** @var list<array{method: string, variant_id: int|null, channel_id: int|null}> */
     public array $calls = [];
+
+    /**
+     * Every image that was uploaded, in order.
+     *
+     * @var list<array{variant_id: int, media_id: int, position: int, mime: string, alt_text: string|null, bytes: int, sha256: string, external_id: string}>
+     */
+    public array $uploads = [];
+
+    /**
+     * What every publish call was given, failed calls included.
+     *
+     * @var list<array{variant_id: int, text: string, images: list<array{media_id: int, external_id: string|null, alt_text: string|null}>}>
+     */
+    public array $published = [];
+
+    /** @var list<ChannelException> */
+    private array $uploadFailures = [];
 
     /** @var list<ChannelException> */
     private array $publishFailures = [];
@@ -93,6 +120,19 @@ class FakeChannelAdapter implements ChannelAdapter
     {
         $this->record('publish', $variant);
 
+        // What a real adapter reads when it creates the post: the images
+        // in order, each with the id its upload returned, and the text
+        // with the link where the images take the place of the preview.
+        $this->published[] = [
+            'variant_id' => $variant->id,
+            'text' => $variant->textFor($this->capabilities),
+            'images' => $variant->images()->map(fn (MediaAttachment $attachment): array => [
+                'media_id' => $attachment->media_id,
+                'external_id' => $attachment->external_id,
+                'alt_text' => $attachment->alt_text,
+            ])->values()->all(),
+        ];
+
         if ($this->publishFailures !== []) {
             throw array_shift($this->publishFailures);
         }
@@ -112,6 +152,38 @@ class FakeChannelAdapter implements ChannelAdapter
         $externalId = "{$this->platform}_{$variant->id}_{$attempt}";
 
         return new PublishResult($externalId, "https://platform.test/{$this->platform}/posts/{$externalId}", now());
+    }
+
+    /**
+     * Reads the whole file, as a real upload would, and records what it
+     * was given. Returns a new id on every call.
+     */
+    public function uploadMedia(PostVariant $variant, MediaAttachment $attachment): string
+    {
+        $this->record('uploadMedia', $variant);
+
+        if ($this->uploadFailures !== []) {
+            throw array_shift($this->uploadFailures);
+        }
+
+        $stream = $attachment->readStream();
+        $bytes = (string) stream_get_contents($stream);
+        fclose($stream);
+
+        $externalId = "{$this->platform}_image_{$attachment->media_id}_".(count($this->uploads) + 1);
+
+        $this->uploads[] = [
+            'variant_id' => $variant->id,
+            'media_id' => $attachment->media_id,
+            'position' => $attachment->position,
+            'mime' => $attachment->image()->mime,
+            'alt_text' => $attachment->alt_text,
+            'bytes' => strlen($bytes),
+            'sha256' => hash('sha256', $bytes),
+            'external_id' => $externalId,
+        ];
+
+        return $externalId;
     }
 
     public function delete(PostVariant $variant): void
@@ -139,6 +211,51 @@ class FakeChannelAdapter implements ChannelAdapter
     public function withCapabilities(ChannelCapabilities $capabilities): static
     {
         $this->capabilities = $capabilities;
+
+        return $this;
+    }
+
+    /**
+     * A platform that takes images: up to $max JPEG or PNG files on a post,
+     * with an alternative text, and the link of such a post in its text.
+     * Everything else stays as the fake has it. Without this the fake
+     * takes one image and no alternative text.
+     */
+    public function acceptingImages(
+        int $max = 4,
+        ?int $altTextLength = 1000,
+        MediaLinkRule $linkRule = MediaLinkRule::InText,
+        ?int $maxBytes = null,
+        ?int $maxPixels = null,
+        ?int $uploadLifetime = null,
+    ): static {
+        $current = $this->capabilities;
+
+        return $this->withCapabilities(new ChannelCapabilities(
+            maxBodyLength: $current->maxBodyLength,
+            mediaTypes: ['image/jpeg', 'image/png'],
+            maxMediaItems: $max,
+            linkPreviews: $current->linkPreviews,
+            rateLimit: $current->rateLimit,
+            linkTitleLength: $current->linkTitleLength,
+            linkDescriptionLength: $current->linkDescriptionLength,
+            maxMediaBytes: $maxBytes,
+            maxMediaPixels: $maxPixels,
+            altTextLength: $altTextLength,
+            mediaLinkRule: $linkRule,
+            mediaUploadLifetime: $uploadLifetime,
+        ));
+    }
+
+    /**
+     * The next $times uploads of an image throw the failure, then
+     * uploading works again. By default a failure worth trying again.
+     */
+    public function failNextUploads(?ChannelException $failure = null, int $times = 1): static
+    {
+        for ($i = 0; $i < $times; $i++) {
+            $this->uploadFailures[] = $failure ?? PublishFailed::retryable($this->platform, 'The platform is busy.');
+        }
 
         return $this;
     }
@@ -241,6 +358,32 @@ class FakeChannelAdapter implements ChannelAdapter
     public function publishCount(?PostVariant $variant = null): int
     {
         return $this->count('publish', $variant);
+    }
+
+    /**
+     * How many images were uploaded, for one variant or in total. Failed
+     * uploads count.
+     */
+    public function uploadCount(?PostVariant $variant = null): int
+    {
+        return $this->count('uploadMedia', $variant);
+    }
+
+    /**
+     * What the last publish call for the variant was given, or null when
+     * there was none.
+     *
+     * @return array{variant_id: int, text: string, images: list<array{media_id: int, external_id: string|null, alt_text: string|null}>}|null
+     */
+    public function lastPublished(PostVariant $variant): ?array
+    {
+        foreach (array_reverse($this->published) as $call) {
+            if ($call['variant_id'] === $variant->id) {
+                return $call;
+            }
+        }
+
+        return null;
     }
 
     public function deleteCount(?PostVariant $variant = null): int
