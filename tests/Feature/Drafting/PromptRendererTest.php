@@ -13,6 +13,7 @@ use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Drafting\DraftRequest;
 use App\Domain\Drafting\ExamplePost;
 use App\Domain\Drafting\Exceptions\UnknownPromptVersion;
+use App\Domain\Drafting\PlannedAlongside;
 use App\Domain\Drafting\PromptRenderer;
 use App\Domain\Drafting\TargetChannel;
 use App\Domain\Drafting\VoiceRules;
@@ -317,7 +318,9 @@ describe('what is sent to a provider', function () {
         };
 
         expect($holdsOnlyPlainValues($request->toArray()))->toBeTrue()
-            ->and(array_keys($request->toArray()))->toBe(['brief', 'voice_rules', 'pillar', 'idea', 'source_url', 'channels', 'examples'])
+            ->and(array_keys($request->toArray()))->toBe(['brief', 'voice_rules', 'pillar', 'idea', 'source_url', 'channels', 'examples', 'also_planned'])
+            ->and(array_keys((new ExamplePost('facebook', 'A text.'))->toArray()))->toBe(['platform', 'body', 'channel_id', 'pillar'])
+            ->and(array_keys((new PlannedAlongside('A pillar'))->toArray()))->toBe(['pillar', 'idea', 'opening'])
             ->and(array_keys($request->toArray()['channels'][0]))->toBe([
                 'channel_id', 'platform', 'max_body_length', 'link_previews', 'media_types', 'max_media_items',
                 'link_title_length', 'link_description_length', 'voice_rules',

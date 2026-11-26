@@ -194,6 +194,13 @@ return [
     | "lead_minutes" is how far ahead a slot time must be to get a draft, so
     | that it can be read and approved in time. "weeks_ahead" is how far
     | ahead a week can be proposed.
+    |
+    | "examples" sends the texts the workspace approved most recently along
+    | with a draft request, so that a draft matches the voice and does not
+    | repeat what was said. "per_channel" is how many for each target
+    | channel, at most 10; 0 sends none. "max_characters" is the most
+    | characters all examples of one request may hold together; the oldest
+    | are left out first and a text is never cut.
     */
 
     'drafting' => [
@@ -239,6 +246,11 @@ return [
             ],
             (array) json_decode((string) env('NOONGUN_DRAFT_PRICES', '{}'), true),
         ),
+
+        'examples' => [
+            'per_channel' => env('NOONGUN_DRAFT_EXAMPLES', 5),
+            'max_characters' => env('NOONGUN_DRAFT_EXAMPLES_MAX_CHARS', 6000),
+        ],
 
         'limits' => [
             'posts_per_proposal' => (int) env('NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL', 14),

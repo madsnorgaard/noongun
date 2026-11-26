@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "dc90d88e-afc2-42da-a138-454e542b6ceb",
+  "version": 7,
+  "timestamp": "2026-11-26T20:31:34.519Z",
+  "payload": {
+    "taskDescription": "Merged in PR #23 and deployed to the home server on 2026-11-26. Migrations ran, four Pages, the key and two scheduled posts were kept. Not yet seen working by the owner."
+  },
+  "seq": 7
+}

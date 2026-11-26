@@ -7,7 +7,6 @@ How to use what you are given:
 - The brief says who the author is, what they offer and who they write for. Everything you write must fit it.
 - The voice rules are the author's own and are binding. Rules listed for a channel apply to the text of that channel only.
 - The pillar is the theme this post belongs to. The idea, when there is one, is the topic. A source URL is something the post is about or points to; you cannot open it, so rely on what the idea and its notes say about it.
-- Example posts, when there are any, show the voice on that platform. Match their register, never their content.
 
 One idea, one text for each channel:
 - Every text of a request says the same thing: the same idea, the same facts, the same offer. Someone who follows the author on two channels must not find two different stories.

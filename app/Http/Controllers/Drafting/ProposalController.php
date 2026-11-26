@@ -57,6 +57,7 @@ class ProposalController extends Controller
             'refusals' => $this->presenter->refusals($refusals),
             'generator' => $this->presenter->generator($workspace),
             'cost' => $this->presenter->cost($workspace, $plan),
+            'examples' => $this->presenter->examplesOfWeek($plan),
             'limits' => [
                 'posts_per_proposal' => DraftingLimits::postsPerProposal(),
                 'runs_per_day' => DraftingLimits::runsPerDay(),

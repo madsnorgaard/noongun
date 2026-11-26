@@ -97,6 +97,8 @@ final class PostPresenter
             // Channels the draft was planned for and could not be written
             // for, because they could not publish when it was drafted.
             'left_out' => $this->leftOut($run),
+            // How many approved posts went along as examples of the voice.
+            'examples' => $run->exampleCount(),
             'drafted_at' => $run->finished_at?->toIso8601String(),
             // What this one draft used: tokens as the provider reported
             // them, and the estimate of the price table when there is one.

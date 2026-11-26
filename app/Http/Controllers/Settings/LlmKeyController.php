@@ -46,7 +46,8 @@ class LlmKeyController extends Controller
      * What a provider is sent for a draft, in the words of the page: one
      * entry for each part of DraftRequest::toArray(), which is all a prompt
      * is built from. A test holds the two together, so a part that is
-     * added to the request has to be named here.
+     * added to the request has to be named here. ":count" is the most
+     * examples for one channel; sentToProvider() fills it in.
      *
      * @var array<string, string>
      */
@@ -57,8 +58,30 @@ class LlmKeyController extends Controller
         'idea' => 'the idea with its notes',
         'source_url' => 'the source link',
         'channels' => 'the platform and the limits of each target channel',
-        'examples' => 'earlier posts of this workspace as examples, once there are any',
+        'examples' => 'the texts of the posts this workspace approved most recently as examples, at most :count for each target channel',
+        'also_planned' => 'the pillar, the idea title and the first line of the other posts of the same week',
     ];
+
+    /**
+     * The list as the page prints it. Without examples
+     * (NOONGUN_DRAFT_EXAMPLES=0) none are sent, so they are not named.
+     *
+     * @return list<string>
+     */
+    public static function sentToProvider(): array
+    {
+        $perChannel = DraftingConfig::examplesPerChannel();
+        $parts = self::SENT_TO_PROVIDER;
+
+        if ($perChannel === 0 || DraftingConfig::exampleCharacters() === 0) {
+            unset($parts['examples']);
+        }
+
+        return array_values(array_map(
+            fn (string $part): string => str_replace(':count', (string) $perChannel, $part),
+            $parts,
+        ));
+    }
 
     public function edit(Request $request, CurrentWorkspace $current, DraftGenerators $generators, LlmCredentialResolver $keys, PasswordConfirmation $password): Response
     {
@@ -84,7 +107,7 @@ class LlmKeyController extends Controller
                 ? DraftingConfig::label($workspace->drafting_provider)
                 : null,
             'follows_default' => $workspace->drafting_provider === null,
-            'sent_to_provider' => array_values(self::SENT_TO_PROVIDER),
+            'sent_to_provider' => self::sentToProvider(),
             'providers' => $canManage ? $this->providerRows($workspace, $provider, $generators, $keys, $credentials) : [],
             'password' => [
                 'confirmed' => $secondsLeft !== null,

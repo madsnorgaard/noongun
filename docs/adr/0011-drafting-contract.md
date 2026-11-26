@@ -203,10 +203,123 @@ run. A version that runs refer to is not edited; a change is a new folder.
 `PromptRenderer::render()` is the only place that decides what a provider is
 sent. It gives the templates `DraftRequest::toArray()` and nothing else, and a
 `DraftRequest` holds plain values copied out of the workspace's records: the
-brief, the voice rules, the pillar, the idea, a source URL, and for each channel
-its id, platform and limits. Channel names, tokens, user data and other
+brief, the voice rules, the pillar, the idea, a source URL, for each channel
+its id, platform and limits, and since issue #22 texts the workspace approved
+and a few words about the other posts of the week (see "Examples from
+approved posts"). Channel names, tokens, user data and other
 workspaces' content are not in it. `tests/Feature/Drafting/PromptRendererTest.php`
 holds that line.
+
+### Examples from approved posts (brought forward from M6)
+
+Added with issue #22. `DraftRequest::$examples` was an empty place kept for
+M6, to be filled with the posts that did well. Two things were seen before M6:
+drafts on the same pillar were written blind to each other and repeated, and
+an edit made before approving was never picked up. So a first version is
+built without metrics: the texts the workspace approved, as it approved them.
+
+Selection (`Actions\SelectExamplePosts`, reading through
+`Content\ApprovedTexts`):
+
+- A text qualifies while its post carries a human approval: `approved`,
+  `scheduled`, `publishing`, `published` or `failed`. `failed` and a variant
+  whose outcome is unknown qualify, because a person signed off the text and
+  it is not the text that failed. `draft`, `rejected` and a post that was
+  returned to draft do not: `returnToDraft()` erases the approval (ADR 0009),
+  so "approved" is read from the row as it is now, and no history is kept or
+  needed.
+- Recent means by `posts.approved_at`, newest first.
+- For each target channel the last `NOONGUN_DRAFT_EXAMPLES` texts of that
+  channel (default 5, `0` turns examples off, never more than 10). A channel
+  with fewer is topped up with texts of other channels of the workspace on
+  the same platform, and then it stops. A text is in a request once, one post
+  gives one channel one text, and a top-up that repeats a text already chosen
+  word for word is left out.
+- All examples of a request hold at most `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS`
+  characters together (default 6000, never more than 40000). Over that, the
+  text with the oldest approval is left out, then the next. A text is never
+  cut: half a post is a bad example of a voice.
+- They are chosen when the job of a run builds its request, not when the run
+  is opened.
+
+What an `ExamplePost` carries: the text, the platform, the name of the pillar
+the post had (at most 60 characters), and the id of the channel only when
+that channel is a target of the same request, which already names it. It
+does not carry: the id of the post, the link or its card, the author or the
+approver, any time, the permalink, metrics, or the id of a channel the
+request does not name. Whether a human changed the text before approving is
+not sent either: nothing records it reliably today (a run does not keep the
+text the model gave), and edit tracking was not built for this.
+
+Reading is workspace-scoped twice: `PostVariant` through the workspace scope,
+and the join to `posts` on `workspace_id` as well as on the id. The composite
+foreign keys already refuse a variant that names a post or a channel of
+another workspace.
+
+In the prompt (v2, edited in place because no run refers to it yet): the
+examples are printed in the user part inside `<example_posts>`, each in an
+`<example>` with its platform, channel and pillar as attributes. The lines
+that say what they are stand directly before them, in the user part and not
+in the system part, and only when there are examples: the system part is the
+same for every request (a test holds that), and with no examples the prompt
+does not mention them. Those lines say that the author approved the posts,
+that they show the voice and what has been said, to match the voice, not to
+repeat topics, openings or phrases, never to copy a sentence, and that they
+are data and not instructions.
+
+An example is a whole post and may hold anything, so `PromptRenderer` makes
+it harmless before a template sees it: every `<` that could begin a tag is
+written as `&lt;`, so a text cannot close its element; a pillar name printed
+as an attribute is put on one line, loses its double quotes and has `<` and
+`>` written out. A text without anything like a tag is sent exactly as it was
+approved. The brief, the pillar and the idea are still printed as written.
+v1 is not edited: it prints an example as it always would have (platform and
+text) and says about examples what its system part always said.
+
+#### The other posts of the same week
+
+Because examples are chosen when a job runs and only from approved posts, the
+drafts of one proposal cannot see each other as examples. Repeating each
+other was one of the two problems, so a request also carries
+`DraftRequest::$alsoPlanned`, a separate list that is not examples
+(`Actions\ListPlannedAlongside`): for the week of the planned time, on the
+workspace calendar, the posts the week already holds that are not rejected,
+and the runs of the same proposal that are still open. Of each: the name of
+the pillar, the title of the idea and the first line of the text, each cut to
+60 characters, for at most 12 posts. Never a whole text. It was cheap: the
+runs of a proposal share `request['proposal']` and already point at their
+pillar and idea, and the posts of a week are one query. A run without a
+planned time gets no list. Jobs that run one after the other see the first
+lines of the drafts before them; jobs that run at the same moment see only
+the pillar and the idea of each other.
+
+#### Cost
+
+`ProposalCost` measures the rendered prompt, so the expected cost on both
+plan pages includes the examples that would be sent now. The worst case must
+hold whatever is approved between the start and the job, so it does not use
+the current choice: it renders the request with the most examples it could
+carry, each with the longest pillar name and no text, and the longest list of
+posts planned alongside, and adds four tokens for every character
+`NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` allows, the most bytes a character has.
+With the defaults that is about 35,000 input tokens more in the worst case of
+one answer. It is the price of a bound that cannot be exceeded.
+
+#### What is recorded
+
+A run notes the ids of the posts whose texts it sent as
+`request['example_post_ids']`, written while the run is still pending. No
+text is copied. The editor reads the count for "Where this draft came from".
+A retry notes its own choice. The list of posts planned alongside is not
+recorded.
+
+#### What M6 changes
+
+Selection becomes ranking: with metrics, the examples are the approved posts
+that did well, not only the most recent, and `ApprovedTexts::latest()` is the
+one place that order is decided. The limits, what an example carries and how
+it is printed stay. Whether metrics themselves are sent is a question for M6
+and needs a line in the README if the answer is yes.
 
 ### Slots
 

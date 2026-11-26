@@ -71,6 +71,8 @@ export type PostOrigin = {
     link_dropped: boolean;
     /** Channels the draft was planned for but could not be written for. */
     left_out: string[];
+    /** How many approved posts were sent along as examples of the voice. */
+    examples: number;
     drafted_at: string | null;
     /** Tokens the draft used, as the provider reported them. */
     input_tokens: number | null;

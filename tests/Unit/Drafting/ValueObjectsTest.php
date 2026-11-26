@@ -92,7 +92,8 @@ describe('DraftRequest', function () {
                 'link_description_length' => null,
                 'voice_rules' => ['Conversational.'],
             ]],
-            'examples' => [['platform' => 'facebook', 'body' => 'An earlier post.']],
+            'examples' => [['platform' => 'facebook', 'body' => 'An earlier post.', 'channel_id' => null, 'pillar' => null]],
+            'also_planned' => [],
         ]);
     });
 });

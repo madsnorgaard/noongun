@@ -744,8 +744,9 @@ describe('two providers side by side', function () {
         $cost = inWorkspace($this->workspace, function (): ?array {
             $context = app(DraftGenerators::class)->contextFor($this->workspace->refresh());
             $plan = planFor($this->workspace, '2026-11-30');
-            $prompt = app(PromptRenderer::class)->render(draftRequestIn($this->workspace, [$this->channel]), $context->promptVersion);
-            $bytes = strlen($prompt->system) + strlen($prompt->user) + strlen((string) json_encode(DraftSchema::definition()));
+            // The prompt at its largest: the examples and the other posts of the week are chosen later.
+            $bytes = largestPromptBytes(draftRequestIn($this->workspace, [$this->channel]), $context->promptVersion)
+                + strlen((string) json_encode(DraftSchema::definition()));
 
             expect($context->promptVersion)->toBe(DraftingConfig::promptVersion())
                 ->and($plan->posts)->toHaveCount(1);

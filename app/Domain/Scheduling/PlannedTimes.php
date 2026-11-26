@@ -2,9 +2,11 @@
 
 namespace App\Domain\Scheduling;
 
+use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Content\PostState;
 use DateTimeInterface;
+use Illuminate\Database\Eloquent\Collection;
 
 /**
  * Which times in a period already hold a post, per channel. Read-only, in
@@ -37,6 +39,25 @@ final class PlannedTimes
         }
 
         return $taken;
+    }
+
+    /**
+     * The posts planned in a period that are not rejected, in time order,
+     * with their pillar, idea and variants.
+     *
+     * @return Collection<int, Post>
+     */
+    public function postsBetween(DateTimeInterface $from, DateTimeInterface $until, int $limit): Collection
+    {
+        return Post::query()
+            ->whereIn('state', self::holdingStates())
+            ->where('scheduled_at', '>=', $from)
+            ->where('scheduled_at', '<', $until)
+            ->with(['pillar', 'idea', 'variants'])
+            ->orderBy('scheduled_at')
+            ->orderBy('id')
+            ->limit(max(0, $limit))
+            ->get();
     }
 
     /**

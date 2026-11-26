@@ -23,6 +23,13 @@ use Illuminate\Contracts\View\Factory;
  * A template receives the request as plain data (DraftRequest::toArray())
  * and has no model to reach through. Templates print with {!! !!}: the text
  * goes to a model, not to a browser, and must not be HTML-escaped.
+ *
+ * Example posts and the list of posts planned alongside are the one
+ * exception to "as written". They are whole texts and first lines of posts,
+ * placed inside an element of the prompt, so anything in them that could
+ * open or close an element is made harmless first (asData()): a text can
+ * say what it likes, but it cannot leave its element. The brief, the
+ * pillar and the idea are printed as the author wrote them.
  */
 class PromptRenderer
 {
@@ -39,6 +46,17 @@ class PromptRenderer
     {
         $views = $this->viewsFor($version);
         $data = $request->toArray();
+
+        $data['examples'] = array_map(fn (array $example): array => [
+            ...$example,
+            'body' => self::asData($example['body']),
+            'pillar' => $example['pillar'] !== null ? self::asAttribute($example['pillar']) : null,
+        ], $data['examples']);
+
+        $data['also_planned'] = array_map(fn (array $post): array => array_map(
+            fn (?string $part): ?string => $part !== null ? self::asAttribute($part) : null,
+            $post,
+        ), $data['also_planned']);
 
         return new RenderedPrompt(
             system: self::tidy($this->views->make($views['system'], $data)->render()),
@@ -86,6 +104,33 @@ class PromptRenderer
         }
 
         return $view;
+    }
+
+    /**
+     * Text that is printed inside an element and must stay there. Every
+     * "<" that could begin a tag, a closing tag, a comment or a processing
+     * instruction is written as "&lt;": one that is followed by a letter,
+     * or, with or without space between, by "/", "!" or "?". Nothing else
+     * changes, so "1 < 2", "a < b" and "<3" read as they were written. One
+     * character becomes four bytes at most.
+     */
+    public static function asData(string $text): string
+    {
+        return (string) preg_replace('/<(?=\s*[\/!?]|\p{L})/u', '&lt;', $text);
+    }
+
+    /**
+     * Text that is printed on one line or inside the quotes of an
+     * attribute: on one line, without a double quote, and with every "<"
+     * and ">" written as "&lt;" and "&gt;".
+     */
+    public static function asAttribute(string $text): string
+    {
+        return str_replace(
+            ['"', '<', '>'],
+            ["'", '&lt;', '&gt;'],
+            trim((string) preg_replace('/\s+/u', ' ', $text)),
+        );
     }
 
     private static function tidy(string $text): string

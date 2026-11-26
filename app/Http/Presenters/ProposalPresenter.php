@@ -4,6 +4,7 @@ namespace App\Http\Presenters;
 
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\Pillar;
+use App\Domain\Drafting\Actions\SelectExamplePosts;
 use App\Domain\Drafting\CostEstimate;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingConfig;
@@ -57,6 +58,7 @@ final class ProposalPresenter
     public function __construct(
         private readonly DraftGenerators $generators,
         private readonly ProposalCost $proposalCost,
+        private readonly SelectExamplePosts $selectExamples,
     ) {}
 
     /**
@@ -185,10 +187,46 @@ final class ProposalPresenter
         }
 
         try {
-            return self::figures($this->proposalCost->ofOnePost($plan->channels, $plan->pillar, $plan->idea, $brief, $this->generators->contextFor($workspace)));
+            return self::figures($this->proposalCost->ofOnePost($plan->channels, $plan->pillar, $plan->idea, $brief, $this->generators->contextFor($workspace), $plan->plannedAt));
         } catch (DraftGeneratorNotAvailable|LlmCredentialMissing) {
             return null;
         }
+    }
+
+    /**
+     * What the pages say about examples: how many approved posts a draft
+     * for these channels carries for each channel at most. Null when
+     * examples are turned off or the workspace has no approved text that
+     * would be sent for these channels now.
+     *
+     * @param  list<Channel>  $channels  every channel the plan drafts for
+     * @return array{per_channel: int}|null
+     */
+    public function examples(array $channels): ?array
+    {
+        if ($channels === [] || $this->selectExamples->handle($channels)->isEmpty()) {
+            return null;
+        }
+
+        return ['per_channel' => DraftingConfig::examplesPerChannel()];
+    }
+
+    /**
+     * The same for a planned week: every channel one of its posts is for.
+     *
+     * @return array{per_channel: int}|null
+     */
+    public function examplesOfWeek(WeekPlan $plan): ?array
+    {
+        $channels = [];
+
+        foreach ($plan->posts as $post) {
+            foreach ($post->channels as $channel) {
+                $channels[$channel->id] = $channel;
+            }
+        }
+
+        return $this->examples(array_values($channels));
     }
 
     /**

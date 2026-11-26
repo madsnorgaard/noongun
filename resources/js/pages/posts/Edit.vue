@@ -1252,6 +1252,24 @@ const locked = computed(() => {
                             </dd>
                         </div>
                         <div
+                            v-if="post.origin.examples > 0"
+                            class="grid gap-0.5"
+                            data-test="post-origin-examples"
+                        >
+                            <dt class="text-sm text-muted-foreground">
+                                Examples
+                            </dt>
+                            <dd>
+                                Written with
+                                {{
+                                    post.origin.examples === 1
+                                        ? '1 earlier post as an example'
+                                        : `${post.origin.examples} earlier posts as examples`
+                                }}
+                                of your voice.
+                            </dd>
+                        </div>
+                        <div
                             v-if="post.origin.input_tokens !== null"
                             class="grid gap-0.5"
                             data-test="post-origin-cost"
