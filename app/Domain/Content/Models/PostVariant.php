@@ -2,9 +2,11 @@
 
 namespace App\Domain\Content\Models;
 
+use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Channels\Contracts\PublishResult;
 use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Channels\Support\LinkWithUtm;
 use App\Domain\Content\Exceptions\PostNotEditable;
 use App\Domain\Content\Exceptions\VariantAlreadyPublished;
 use App\Domain\Workspaces\Concerns\BelongsToWorkspace;
@@ -14,9 +16,11 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Attributes\UseFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * What one post says on one channel, and what became of it there.
@@ -32,6 +36,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * the app knowing". It is set before a platform is called and cleared only
  * when the platform certainly made no post or the result is recorded. A
  * variant that carries it cannot be deleted or moved to another channel.
+ *
+ * The images of a variant are its attachments, in their order. They are
+ * content as well and lock with the text: see MediaAttachment.
  *
  * @property int $id
  * @property int $workspace_id
@@ -51,6 +58,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * @property CarbonImmutable|null $updated_at
  * @property-read Post|null $post
  * @property-read Channel|null $channel
+ * @property-read Collection<int, MediaAttachment> $attachments
  */
 #[Fillable(['post_id', 'channel_id', 'body', 'link', 'link_title', 'link_description', 'utm'])]
 #[UseFactory(PostVariantFactory::class)]
@@ -82,6 +90,16 @@ class PostVariant extends Model
 
             if (! $variant->exists || $variant->isDirty(self::CONTENT)) {
                 $variant->guardEditable();
+            }
+        });
+
+        // What a platform holds of an image belongs to the account it was
+        // sent to. On another channel the files are sent again.
+        static::updated(function (PostVariant $variant): void {
+            if ($variant->wasChanged('channel_id')) {
+                MediaAttachment::query()
+                    ->where('post_variant_id', $variant->id)
+                    ->update(['external_id' => null, 'uploaded_at' => null]);
             }
         });
 
@@ -120,6 +138,50 @@ class PostVariant extends Model
     public function channel(): BelongsTo
     {
         return $this->belongsTo(Channel::class);
+    }
+
+    /**
+     * The images of this variant, in the order they are shown.
+     *
+     * @return HasMany<MediaAttachment, $this>
+     */
+    public function attachments(): HasMany
+    {
+        return $this->hasMany(MediaAttachment::class, 'post_variant_id')->orderBy('position')->orderBy('id');
+    }
+
+    /**
+     * The attachments with their stored images, in order: what an adapter
+     * reads when it uploads or publishes this variant. Each gives its image
+     * (MediaAttachment::image()), a stream of the file (readStream()), the
+     * alternative text and what the platform called the image when it was
+     * uploaded (external_id).
+     *
+     * @return Collection<int, MediaAttachment>
+     */
+    public function images(): Collection
+    {
+        return $this->attachments->loadMissing('media');
+    }
+
+    /**
+     * The link as it is sent: with the campaign parameters of the variant.
+     */
+    public function linkToSend(): ?string
+    {
+        return blank($this->link) ? null : LinkWithUtm::apply((string) $this->link, $this->utm ?? []);
+    }
+
+    /**
+     * The text as the platform gets it. On a platform where images take
+     * the place of the link preview, a variant with images carries its
+     * link as the last line of the text (ChannelCapabilities::textFor()).
+     * The readiness check measures this text, and an adapter that
+     * publishes images sends exactly this.
+     */
+    public function textFor(ChannelCapabilities $capabilities): string
+    {
+        return $capabilities->textFor($this->body, $this->linkToSend(), $this->attachments->count());
     }
 
     /**

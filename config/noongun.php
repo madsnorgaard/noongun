@@ -134,6 +134,11 @@ return [
     | "stuck_after_minutes" is how long a post may stay in the publishing
     | state without a sign of life from its job before it is treated as
     | failed. The largest backoff is added to it.
+    | "media_timeout" is the limit in seconds for sending one image to a
+    | platform, all calls for that image together. "media_uploads_per_job" is
+    | how many images one run of the job sends before it hands the rest to a
+    | successor. The time limit of a job grows by media_timeout x
+    | media_uploads_per_job when its post has images.
     */
 
     'publishing' => [
@@ -144,6 +149,49 @@ return [
         'calls_per_job' => (int) env('NOONGUN_PUBLISH_CALLS_PER_JOB', 3),
         'lock_seconds' => (int) env('NOONGUN_PUBLISH_LOCK_SECONDS', 120),
         'stuck_after_minutes' => (int) env('NOONGUN_PUBLISH_STUCK_AFTER_MINUTES', 30),
+        'media_timeout' => (int) env('NOONGUN_PUBLISH_MEDIA_TIMEOUT', 60),
+        'media_uploads_per_job' => (int) env('NOONGUN_PUBLISH_MEDIA_UPLOADS_PER_JOB', 2),
+    ],
+
+    /*
+    | Images on posts. See docs/adr/0017-images-on-posts.md.
+    |
+    | "disk" names a disk in config/filesystems.php. Files are private: they
+    | are read through the application and never through a public address,
+    | so the "public" disk is refused.
+    |
+    | "max_bytes" is the largest file one upload may be. PHP must allow it as
+    | well: upload_max_filesize and post_max_size in docker/app/php.ini, and
+    | the request_body limit of the web server in docker-compose.yml. The
+    | smallest of them is what applies.
+    | "max_megapixels" and "max_side" are checked from the header of the
+    | file, before the image is decoded: decoding takes four bytes of memory
+    | for every pixel. "memory_limit" is the PHP memory limit while one image
+    | is processed and must cover max_megapixels x 4 MB plus a margin.
+    | An image with a longer side than "stored_side" is scaled down to it.
+    | "thumbnail_side" is the longest side of the small copy the lists show.
+    |
+    | "quota_bytes" is the most all stored images of one workspace may take
+    | together; 0 means no limit. "uploads_per_minute" is per user.
+    | "max_per_variant" is the most images one text may carry, whatever its
+    | platform would take.
+    | An image that no post uses is deleted "unused_grace_hours" after the
+    | clean-up first saw it unused.
+    */
+
+    'media' => [
+        'disk' => env('NOONGUN_MEDIA_DISK', 'media'),
+        'max_bytes' => (int) env('NOONGUN_MEDIA_MAX_BYTES', 20 * 1024 * 1024),
+        'max_megapixels' => (float) env('NOONGUN_MEDIA_MAX_MEGAPIXELS', 50),
+        'max_side' => (int) env('NOONGUN_MEDIA_MAX_SIDE', 16000),
+        'memory_limit' => env('NOONGUN_MEDIA_MEMORY_LIMIT', '512M'),
+        'stored_side' => (int) env('NOONGUN_MEDIA_STORED_SIDE', 4096),
+        'thumbnail_side' => (int) env('NOONGUN_MEDIA_THUMBNAIL_SIDE', 480),
+        'jpeg_quality' => (int) env('NOONGUN_MEDIA_JPEG_QUALITY', 90),
+        'quota_bytes' => (int) env('NOONGUN_MEDIA_QUOTA_BYTES', 2 * 1024 * 1024 * 1024),
+        'uploads_per_minute' => (int) env('NOONGUN_MEDIA_UPLOADS_PER_MINUTE', 30),
+        'max_per_variant' => (int) env('NOONGUN_MEDIA_MAX_PER_VARIANT', 10),
+        'unused_grace_hours' => (int) env('NOONGUN_MEDIA_UNUSED_GRACE_HOURS', 24),
     ],
 
     /*

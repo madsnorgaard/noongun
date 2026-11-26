@@ -2,6 +2,7 @@
 
 namespace App\Domain\Content\Exceptions;
 
+use App\Domain\Content\Models\MediaAttachment;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
 use LogicException;
@@ -45,5 +46,20 @@ class PostNotEditable extends LogicException
     public static function movedToAnotherPost(PostVariant $variant): self
     {
         return new self("Variant #{$variant->getKey()} cannot be moved to another post.");
+    }
+
+    public static function uploadWrittenDirectly(MediaAttachment $attachment): self
+    {
+        return new self("The upload of attachment #{$attachment->getKey()} cannot be written directly. Use markUploaded() or forgetUpload().");
+    }
+
+    public static function attachmentMoved(MediaAttachment $attachment): self
+    {
+        return new self("Attachment #{$attachment->getKey()} cannot be moved to another variant or another image. Remove it and add a new one.");
+    }
+
+    public static function attachmentWithoutVariant(MediaAttachment $attachment): self
+    {
+        return new self("Attachment #{$attachment->getKey()} has no variant in the current workspace.");
     }
 }

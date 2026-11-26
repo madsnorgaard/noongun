@@ -47,6 +47,18 @@ return [
             'report' => false,
         ],
 
+        // Images on posts (ADR 0003, ADR 0017). Private: no "url", not
+        // served by the framework, never linked into public/. On a volume
+        // of its own in Docker.
+        'media' => [
+            'driver' => 'local',
+            'root' => storage_path('app/media'),
+            'visibility' => 'private',
+            'serve' => false,
+            'throw' => true,
+            'report' => false,
+        ],
+
         's3' => [
             'driver' => 's3',
             'key' => env('AWS_ACCESS_KEY_ID'),
