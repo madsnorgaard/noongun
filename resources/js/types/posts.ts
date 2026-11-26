@@ -15,7 +15,12 @@ export type PostVariant = {
     max_body_length: number | null;
     body: string;
     link: string | null;
+    /** The card for the link on a platform that builds none itself. */
+    link_title: string | null;
+    link_description: string | null;
     published: boolean;
+    /** A platform was called for it and nothing says how that ended. */
+    outcome_unknown: boolean;
     permalink: string | null;
     published_at: string | null;
     error: string | null;
@@ -64,6 +69,8 @@ export type PostOrigin = {
     alt_text: string | null;
     /** The model suggested a link the author never gave, and it was left out. */
     link_dropped: boolean;
+    /** Channels the draft was planned for but could not be written for. */
+    left_out: string[];
     drafted_at: string | null;
     /** Tokens the draft used, as the provider reported them. */
     input_tokens: number | null;
@@ -80,6 +87,11 @@ export type ChannelOption = {
     can_publish: boolean;
     problem: string | null;
     max_body_length: number | null;
+    /** Whether the platform shows a link as a preview card. Null when unknown. */
+    link_previews: boolean | null;
+    /** Set when the platform shows a link only as the card the author types. */
+    link_title_length: number | null;
+    link_description_length: number | null;
 };
 
 export type CalendarEntry = {

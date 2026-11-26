@@ -4,7 +4,9 @@ namespace App\Http\Presenters;
 
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\Pillar;
+use App\Domain\Drafting\CostEstimate;
 use App\Domain\Drafting\DraftGenerators;
+use App\Domain\Drafting\DraftingConfig;
 use App\Domain\Drafting\DraftingLimits;
 use App\Domain\Drafting\DraftRunStatus;
 use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
@@ -12,6 +14,7 @@ use App\Domain\Drafting\Exceptions\LlmCredentialMissing;
 use App\Domain\Drafting\Exceptions\ProposalRefused;
 use App\Domain\Drafting\Models\Brief;
 use App\Domain\Drafting\Models\DraftRun;
+use App\Domain\Drafting\Planning\IdeaDraftPlan;
 use App\Domain\Drafting\Planning\PlannedPost;
 use App\Domain\Drafting\Planning\ProposalCost;
 use App\Domain\Drafting\Planning\WeekPlan;
@@ -19,11 +22,11 @@ use App\Domain\Workspaces\Models\Workspace;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Support\Str;
 
 /**
- * What the pages show of a week proposal: the plan before it starts, and
- * the draft runs while and after they are worked on. Everything a provider
+ * What the pages show of a week proposal and of one post drafted from an
+ * idea: the plan before it starts, and the draft runs while and after they
+ * are worked on. Everything a provider
  * wrote (rationale, failure reasons) goes out as plain text.
  */
 final class ProposalPresenter
@@ -46,6 +49,7 @@ final class ProposalPresenter
         ProposalRefused::NO_CHANNEL => ['routes' => ['channels.index'], 'label' => 'Go to Channels'],
         ProposalRefused::NO_SLOT => ['routes' => ['slots.index'], 'label' => 'Set the slots'],
         ProposalRefused::NO_KEY => ['routes' => ['llm-key.edit'], 'label' => 'Add an API key'],
+        ProposalRefused::CHOICE_NOT_OFFERED => ['routes' => ['llm-key.edit'], 'label' => 'Choose a provider'],
         ProposalRefused::NOTHING_TO_DRAFT => ['routes' => ['slots.index'], 'label' => 'Look at the slots'],
         ProposalRefused::IN_PROGRESS => ['routes' => ['queue.index'], 'label' => 'See the progress in the queue'],
     ];
@@ -96,6 +100,10 @@ final class ProposalPresenter
             'taken' => $plan->taken,
             'unavailable' => $plan->unavailable,
             'left_out' => $plan->leftOut,
+            // One post for several channels, and posts that reach one
+            // channel although the plan drafts for more than one.
+            'shared' => $plan->sharedPosts(),
+            'for_one_channel' => $plan->postsForOneChannel(),
             'pillars_with_target' => Pillar::query()->where('weekly_target', '>', 0)->count(),
             'short' => array_map(fn (array $short): array => [
                 'pillar' => $short['pillar']->name,
@@ -137,7 +145,7 @@ final class ProposalPresenter
             return null;
         }
 
-        return ['provider' => Str::headline($context->provider), 'model' => $context->model];
+        return ['provider' => DraftingConfig::label($context->provider), 'model' => $context->model];
     }
 
     /**
@@ -156,11 +164,76 @@ final class ProposalPresenter
         }
 
         try {
-            $cost = $this->proposalCost->of($plan, $brief, $this->generators->contextFor($workspace));
+            return self::figures($this->proposalCost->of($plan, $brief, $this->generators->contextFor($workspace)));
         } catch (DraftGeneratorNotAvailable|LlmCredentialMissing) {
             return null;
         }
+    }
 
+    /**
+     * The same two figures for the one post "Draft a post" on an idea
+     * would draft, for the channels that are chosen.
+     *
+     * @return array{currency: string, expected: string, worst: string}|null
+     */
+    public function costOfIdeaDraft(Workspace $workspace, IdeaDraftPlan $plan): ?array
+    {
+        $brief = Brief::current();
+
+        if ($brief === null) {
+            return null;
+        }
+
+        try {
+            return self::figures($this->proposalCost->ofOnePost($plan->channels, $plan->pillar, $plan->idea, $brief, $this->generators->contextFor($workspace)));
+        } catch (DraftGeneratorNotAvailable|LlmCredentialMissing) {
+            return null;
+        }
+    }
+
+    /**
+     * What "Draft a post" on an idea would do, for its page: the idea, the
+     * channels to choose from and what is chosen, the planned time on the
+     * clock of the workspace, and what is wrong with the choice.
+     *
+     * @return array<string, mixed>
+     */
+    public function ideaDraft(Workspace $workspace, IdeaDraftPlan $plan): array
+    {
+        $chosen = $plan->channelIds();
+
+        return [
+            'fingerprint' => $plan->fingerprint(),
+            'idea' => [
+                'id' => $plan->idea->id,
+                'title' => $plan->idea->title,
+                'notes' => $plan->idea->notes,
+                'source_url' => $plan->idea->source_url,
+                'pillar' => $plan->pillar?->name,
+                'used_in' => $plan->usedIn,
+            ],
+            'channels' => array_map(fn (Channel $channel): array => [
+                'id' => $channel->id,
+                'name' => $channel->display_name,
+                'platform_label' => PlatformLabel::for($channel->platform),
+                'chosen' => in_array($channel->id, $chosen, true),
+            ], $plan->offered),
+            'scheduled_at' => $plan->plannedAt !== null
+                ? $workspace->toLocal($plan->plannedAt)->format(PostPresenter::LOCAL_FORMAT)
+                : '',
+            'problems' => [
+                'channels' => $plan->channelProblems,
+                'scheduled_at' => $plan->timeProblems,
+            ],
+        ];
+    }
+
+    /**
+     * @param  array{expected: CostEstimate, worst: CostEstimate}|null  $cost
+     * @return array{currency: string, expected: string, worst: string}|null
+     */
+    private static function figures(?array $cost): ?array
+    {
         if ($cost === null) {
             return null;
         }
@@ -191,7 +264,8 @@ final class ProposalPresenter
     /**
      * The latest proposal of the workspace, for the queue: while it is at
      * work, and for a while after, longer when a draft failed. Null when
-     * there is nothing to show.
+     * there is nothing to show. One post that was asked for on an idea is
+     * shown the same way, with kind "idea" and no week.
      *
      * @return array<string, mixed>|null
      */
@@ -232,8 +306,13 @@ final class ProposalPresenter
         $channelNames = Channel::query()->whereKey($channelIds)->pluck('display_name', 'id');
         $first = $runs->first();
 
+        $idea = $latest->isFromIdea() ? $shown->first()?->idea : null;
+
         return [
+            'kind' => $latest->isFromIdea() ? 'idea' : 'week',
             'week' => self::text($latest->request['week'] ?? null),
+            // Where the post can be asked for again, while the idea exists.
+            'idea' => $idea !== null ? ['id' => $idea->id, 'title' => $idea->title] : null,
             'requested_at' => $first?->created_at?->toIso8601String(),
             'requested_by' => $first?->requester?->name,
             'active' => $active,

@@ -2,8 +2,8 @@
 
 namespace App\Domain\Drafting\Exceptions;
 
+use App\Domain\Drafting\DraftingConfig;
 use App\Domain\Workspaces\Models\Workspace;
-use Illuminate\Support\Str;
 
 /**
  * No API key is available for the provider: the workspace has none of its
@@ -33,7 +33,7 @@ class LlmCredentialMissing extends DraftingException
     {
         return new static(
             $provider,
-            'No API key is set for '.Str::headline($provider).'. An owner of this workspace can add one under Settings, Drafting.',
+            'No API key is set for '.DraftingConfig::label($provider).'. An owner of this workspace can add one under Settings, Drafting.',
             false,
             null,
             [

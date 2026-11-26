@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "3c0863eb-cfe9-4824-b267-c003c2b91432",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:29.294Z",
+  "payload": {
+    "title": "Drafted posts are always drafts",
+    "description": "A post created from model output is created only through CreateDraftFromResult and SaveDraft, always in the draft state. GeneratedPostsStayDraftsTest fails if another path appears.",
+    "rationale": "Model output must never reach a platform without a human reading it."
+  },
+  "seq": 1
+}

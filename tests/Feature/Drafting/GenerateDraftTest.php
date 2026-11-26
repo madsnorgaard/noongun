@@ -293,7 +293,7 @@ describe('GenerateDraft', function () {
     });
 
     it('fails the run when the generator returns output that does not validate', function () {
-        $this->generator->returnsOutput(['variants' => [], 'link' => null, 'alt_text' => null, 'rationale' => 'None.']);
+        $this->generator->returnsOutput(['variants' => [], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'None.']);
         $request = draftRequestIn($this->workspace, [$this->facebook]);
         $run = draftRunIn($this->workspace, $this->editor);
 

@@ -39,15 +39,78 @@ class DraftGenerators
     ) {}
 
     /**
-     * The provider a workspace drafts with. Every workspace uses the
-     * configured default for now; a choice per workspace (M5) is added here
-     * and nowhere else.
+     * The provider a workspace drafts with: the one it is settled on, or
+     * the default of the instance while it is settled on none. This is the
+     * one place that decides it.
+     *
+     * A workspace is settled on a provider when an owner chooses it, when
+     * an owner stores a key for the provider in use, and when its first
+     * draft is asked of a provider (settleOn()). From then on a change of
+     * the default by the operator does not move it: its brief has gone to
+     * one company and does not go to another without an owner saying so.
+     * Only a workspace that has done none of these follows the default.
+     *
+     * A choice the instance does not offer (any more) is not replaced by
+     * the default: the brief would go to a vendor the workspace did not
+     * choose. Drafting stops until an owner chooses again.
      *
      * @throws DraftGeneratorNotAvailable
      */
     public function providerFor(Workspace $workspace): string
     {
-        return DraftingConfig::defaultProvider() ?? throw DraftGeneratorNotAvailable::noDefaultProvider();
+        $chosen = $workspace->drafting_provider;
+
+        if ($chosen === null) {
+            return DraftingConfig::defaultProvider() ?? throw DraftGeneratorNotAvailable::noDefaultProvider();
+        }
+
+        if (! in_array($chosen, $this->offered(), true)) {
+            throw DraftGeneratorNotAvailable::notOffered($chosen, $workspace->id);
+        }
+
+        return $chosen;
+    }
+
+    /**
+     * The providers a workspace may choose from: those the operator offers
+     * (the default one and NOONGUN_DRAFT_PROVIDERS) that are configured.
+     *
+     * @return list<string>
+     */
+    public function offered(): array
+    {
+        return array_values(array_intersect(DraftingConfig::offeredProviders(), $this->providers()));
+    }
+
+    /**
+     * Makes the provider the one the workspace drafts with from now on.
+     * Runs that were opened for another provider are not drafted with this
+     * one (DraftingContextChanged), and the daily limits count runs
+     * whatever their provider, so a change opens no new allowance.
+     *
+     * @throws DraftGeneratorNotAvailable when the instance does not offer the provider
+     */
+    public function choose(Workspace $workspace, string $provider): void
+    {
+        if (! in_array($provider, $this->offered(), true)) {
+            throw DraftGeneratorNotAvailable::notOffered($provider, $workspace->id);
+        }
+
+        $workspace->drafting_provider = $provider;
+        $workspace->save();
+    }
+
+    /**
+     * Settles a workspace that follows the default on the given provider,
+     * and leaves one that is settled as it is. Not a choice: it records
+     * the provider the workspace is using already.
+     */
+    public function settleOn(Workspace $workspace, string $provider): void
+    {
+        if ($workspace->drafting_provider === null && in_array($provider, $this->offered(), true)) {
+            $workspace->drafting_provider = $provider;
+            $workspace->save();
+        }
     }
 
     /**

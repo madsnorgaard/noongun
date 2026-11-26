@@ -4,15 +4,18 @@ namespace App\Domain\Content;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\ChannelStatus;
+use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Exceptions\IllegalPostTransition;
 use App\Domain\Content\Exceptions\PostActionNotAllowed;
 use App\Domain\Content\Exceptions\PostNotPublishable;
 use App\Domain\Content\Models\Post;
+use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Exceptions\CrossWorkspaceWrite;
 use App\Domain\Workspaces\Exceptions\MissingWorkspaceContext;
+use App\Http\Presenters\PlatformLabel;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
@@ -71,8 +74,8 @@ class PostPreconditions
 
     /**
      * The post has at least one variant, and every variant that is not on
-     * its platform yet has a channel that can publish and a text the
-     * platform accepts.
+     * its platform yet has a channel that can publish, a text the platform
+     * accepts and, where the platform builds no preview, a card for its link.
      *
      * @throws PostNotPublishable
      */
@@ -135,6 +138,48 @@ class PostPreconditions
                     'limit' => $capabilities->maxBodyLength,
                 ])];
             }
+
+            $errors += $this->linkCardProblems($variant, $channel, $capabilities);
+        }
+
+        return $errors;
+    }
+
+    /**
+     * A platform that reads nothing from a linked page shows the link only
+     * as the card the author typed. Without a title there is no card, so the
+     * post is held back rather than sent with a bare link.
+     *
+     * @return array<string, non-empty-list<string>>
+     */
+    private function linkCardProblems(PostVariant $variant, Channel $channel, ChannelCapabilities $capabilities): array
+    {
+        if (blank($variant->link) || $capabilities->linkTitleLength === null) {
+            return [];
+        }
+
+        $name = ['channel' => $channel->display_name, 'platform' => PlatformLabel::for($channel->platform)];
+        $title = trim((string) $variant->link_title);
+        $errors = [];
+
+        if ($title === '') {
+            $errors["variants.{$variant->id}.link_title"] = [self::text('The link for :channel has no title. :platform shows a link with the title you give it and reads nothing from the page. Open the post and type a title under the link.', $name)];
+        } elseif (mb_strlen($title) > $capabilities->linkTitleLength) {
+            $errors["variants.{$variant->id}.link_title"] = [self::text('The link title for :channel is :length characters long. The limit is :limit.', [
+                ...$name,
+                'length' => mb_strlen($title),
+                'limit' => $capabilities->linkTitleLength,
+            ])];
+        }
+
+        $description = (string) $variant->link_description;
+
+        if ($capabilities->linkDescriptionLength !== null && mb_strlen($description) > $capabilities->linkDescriptionLength) {
+            $errors["variants.{$variant->id}.link_description"] = [self::text('The link description for :channel is :length characters long. The limit is :limit.', [
+                ...$name,
+                'length' => mb_strlen($description),
+                'limit' => $capabilities->linkDescriptionLength,
+            ])];
         }
 
         return $errors;
@@ -142,21 +187,83 @@ class PostPreconditions
 
     /**
      * The time is not in the past (with a minute of grace, so that "now" is
-     * accepted) and not more than a year ahead.
+     * accepted), not more than a year ahead, and not after the access to one
+     * of the post's channels ends.
+     *
+     * The last one is a refusal and not advice: the publishing job does not
+     * call a platform with an access that has run out, so such a post would
+     * fail for certain. Connecting the channel again gives it a new end
+     * date, and that can be done straight away.
      *
      * @throws PostNotPublishable
      */
     public function assertSensibleTime(Post $post, DateTimeInterface $at): void
     {
+        $channels = [];
+
+        foreach ($post->variants()->unpublished()->with('channel')->orderBy('id')->get() as $variant) {
+            if ($variant->channel !== null) {
+                $channels[] = $variant->channel;
+            }
+        }
+
+        $problems = $this->timeProblems($channels, $at);
+
+        if ($problems !== []) {
+            throw new PostNotPublishable($post, ['scheduled_at' => $problems]);
+        }
+    }
+
+    /**
+     * The same rule for a post that does not exist yet: what is wrong with
+     * the time for a post on the given channels, in words for the user.
+     * Empty when the time makes sense.
+     *
+     * @param  iterable<Channel>  $channels
+     * @return list<string>
+     */
+    public function timeProblems(iterable $channels, DateTimeInterface $at): array
+    {
         $at = CarbonImmutable::instance($at);
 
         if ($at->lt(now()->subSeconds(self::PAST_GRACE_SECONDS))) {
-            throw new PostNotPublishable($post, ['scheduled_at' => [self::text('The scheduled time has passed. Choose a time in the future.')]]);
+            return [self::text('The scheduled time has passed. Choose a time in the future.')];
         }
 
         if ($at->gt(now()->addDays(self::MAX_DAYS_AHEAD))) {
-            throw new PostNotPublishable($post, ['scheduled_at' => [self::text('The scheduled time is more than a year ahead.')]]);
+            return [self::text('The scheduled time is more than a year ahead.')];
         }
+
+        return $this->accessEndingBefore($channels, $at);
+    }
+
+    /**
+     * One sentence for each of the channels whose access ends at or before
+     * the given time, with the date on the clock of the workspace. A
+     * channel whose access has already ended is left to channelProblem().
+     *
+     * @param  iterable<Channel>  $channels
+     * @return list<string>
+     */
+    private function accessEndingBefore(iterable $channels, CarbonImmutable $at): array
+    {
+        $workspace = $this->currentWorkspace->getOrFail();
+        $messages = [];
+
+        foreach ($channels as $channel) {
+            $endsAt = $channel->token_expires_at;
+
+            if ($endsAt === null || $channel->tokenExpired() || $endsAt->gt($at)) {
+                continue;
+            }
+
+            $messages[] = self::text('The access to :channel ends on :date, before this post is due. Connect :channel again on the Channels page before then, or choose an earlier time.', [
+                'channel' => $channel->display_name,
+                'date' => $workspace->toLocal($endsAt)->format('j F Y'),
+            ]);
+        }
+
+        return $messages;
     }
 
     /**
@@ -190,7 +297,7 @@ class PostPreconditions
      */
     public static function platformUnavailable(Channel $channel): string
     {
-        return self::text('Publishing to :platform is not available on this instance.', ['platform' => $channel->platform]);
+        return self::text('Publishing to :platform is not available on this instance.', ['platform' => PlatformLabel::for($channel->platform)]);
     }
 
     /**

@@ -357,6 +357,115 @@ describe('changing the key needs a confirmed password', function () {
     it('still shows the page without a confirmation, to every member', function (Role $role) {
         $this->actingAs(workspaceMember($this->workspace, $role))->get(route('llm-key.edit'))->assertOk();
     })->with([Role::Owner, Role::Editor, Role::Viewer]);
+
+    it('leaves no key in the session when the confirmation ran out before the submit', function () {
+        $response = $this->actingAs($this->owner)
+            ->withSession(['auth.password_confirmed_at' => now()->unix() - config('auth.password_timeout') - 1])
+            ->from(route('llm-key.edit'))
+            ->put(route('llm-key.update'), ['provider' => 'anthropic', 'api_key' => PAGE_TEST_KEY]);
+
+        $response->assertRedirect(route('password.confirm'));
+
+        expect(DB::table('llm_credentials')->count())->toBe(0)
+            ->and(session('url.intended'))->toBe(route('llm-key.edit'))
+            ->and(session()->getOldInput())->toBe([])
+            ->and(everythingSentBack($response))->not->toContain(PAGE_TEST_KEY)->not->toContain('PageTestKey');
+
+        $afterwards = $this->actingAs($this->owner)->get(route('llm-key.edit'));
+
+        expect(everythingSentBack($afterwards))->not->toContain('PageTestKey');
+    });
+});
+
+/*
+ * The page asks for the password before it shows the key form, so it has to
+ * know what the middleware on the changing routes will decide.
+ */
+describe('the page knows whether the password is confirmed', function () {
+    it('tells an owner without a recent confirmation that the password is needed', function (array $session) {
+        $this->actingAs($this->owner)->withSession($session)->get(route('llm-key.edit'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('password', ['confirmed' => false, 'seconds_left' => null])
+                ->where('can.manage', true));
+    })->with([
+        'never confirmed' => [[]],
+        'confirmed too long ago' => [['auth.password_confirmed_at' => 1]],
+    ]);
+
+    it('tells an owner with a recent confirmation how long it holds', function () {
+        config(['auth.password_timeout' => 900]);
+
+        $this->actingAs($this->owner)
+            ->withSession(['auth.password_confirmed_at' => now()->unix() - 300])
+            ->get(route('llm-key.edit'))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('password', ['confirmed' => true, 'seconds_left' => 600]));
+    });
+
+    it('agrees with the routes that change something, up to the second the confirmation runs out', function (int $age, bool $confirmed) {
+        config(['auth.password_timeout' => 900]);
+
+        $session = ['auth.password_confirmed_at' => now()->unix() - $age];
+
+        $this->actingAs($this->owner)->withSession($session)->get(route('llm-key.edit'))
+            ->assertInertia(fn (Assert $page) => $page->where('password.confirmed', $confirmed));
+
+        $store = $this->actingAs($this->owner)->withSession($session)->from(route('llm-key.edit'))
+            ->put(route('llm-key.update'), ['api_key' => PAGE_TEST_KEY]);
+        $choose = $this->actingAs($this->owner)->withSession($session)->from(route('llm-key.edit'))
+            ->put(route('llm-key.choose'), ['provider' => 'anthropic']);
+        $remove = $this->actingAs($this->owner)->withSession($session)->from(route('llm-key.edit'))
+            ->delete(route('llm-key.destroy'));
+
+        foreach ([$store, $choose, $remove] as $response) {
+            $response->assertRedirect($confirmed ? route('llm-key.edit') : route('password.confirm'));
+        }
+    })->with([
+        'one second before it runs out' => [899, true],
+        'the second it runs out' => [900, true],
+        'one second after' => [901, false],
+    ]);
+
+    it('tells editors and viewers nothing about a confirmation', function (Role $role, array $session) {
+        $this->actingAs(workspaceMember($this->workspace, $role))->withSession($session)->get(route('llm-key.edit'))
+            ->assertOk()
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('password', ['confirmed' => false, 'seconds_left' => null])
+                ->where('providers', [])
+                ->where('can.manage', false));
+    })->with([Role::Editor, Role::Viewer])->with([
+        'never confirmed' => [[]],
+        'confirmed just now' => [fn () => ['auth.password_confirmed_at' => now()->unix()]],
+    ]);
+
+    it('sends an owner from the confirm link to the password page and back to the settings page', function () {
+        $this->actingAs($this->owner)->get(route('llm-key.confirm'))
+            ->assertRedirect(route('password.confirm'));
+
+        expect(session('url.intended'))->toBe(route('llm-key.confirm'));
+
+        $this->actingAs($this->owner)->post(route('password.confirm.store'), ['password' => 'password'])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('llm-key.confirm'));
+
+        $this->actingAs($this->owner)->get(route('llm-key.confirm'))
+            ->assertRedirect(route('llm-key.edit'));
+
+        $this->actingAs($this->owner)->get(route('llm-key.edit'))
+            ->assertInertia(fn (Assert $page) => $page->where('password.confirmed', true));
+
+        $this->actingAs($this->owner)->from(route('llm-key.edit'))
+            ->put(route('llm-key.update'), ['api_key' => PAGE_TEST_KEY])
+            ->assertSessionHasNoErrors()
+            ->assertRedirect(route('llm-key.edit'));
+
+        expect(storedKey($this->workspace)?->api_key)->toBe(PAGE_TEST_KEY);
+    });
+
+    it('does not ask a signed out visitor for a password', function () {
+        $this->get(route('llm-key.confirm'))->assertRedirect(route('login'));
+    });
 });
 
 describe('removing a key', function () {

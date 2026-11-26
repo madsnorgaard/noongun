@@ -1,0 +1,14 @@
+{
+  "type": "GuidelineAddedEvent",
+  "aggregateId": "5183f620-e5db-4ec9-bb1f-c786bb6bce75",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:31.504Z",
+  "payload": {
+    "category": "process",
+    "title": "Conventional commits with the issue number, no AI attribution",
+    "description": "feat, fix, chore, docs, test, refactor prefixes; one logical change per commit; the issue number in brackets; no Co-Authored-By, no generated-with lines.",
+    "rationale": "History must read as the owner's own and explain why.",
+    "examples": []
+  },
+  "seq": 1
+}

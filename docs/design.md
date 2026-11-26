@@ -266,13 +266,18 @@ decide. Until then the interface follows the system and borrows only the look.
   time. The system separates `approved` and `scheduled`, and also has
   `publishing` and `rejected`. All seven keep their own word.
 - **What blocks an approval.** The guide: only the platform limit. The system also
-  blocks an empty text and a channel that cannot publish.
+  blocks an empty text, a channel that cannot publish, a link without a title
+  (or with a title or description that is too long) on a platform that builds
+  no preview, and a planned time after the access to a channel ends.
 - **Fixing a failed post.** The guide has one button that reconnects and
   publishes. The system opens the post first, because sending again can make a
   duplicate.
 - **Slots.** The guide calls them firing time slots. A slot only proposes a time
   for a draft, so the pages say "planned time"; "firing time" stays for a post
   that is approved.
+- **Built in M5.** The texts of a post side by side, one column per channel,
+  with "Copy text from" between them (ADR 0014). The unit of approval is still
+  the post.
 - **Built in M4.** Brief, slots, idea and pillar, and "Why it was drafted this
   way".
 - **Not built yet.** Voice rule checks, photos and alt text, the platform

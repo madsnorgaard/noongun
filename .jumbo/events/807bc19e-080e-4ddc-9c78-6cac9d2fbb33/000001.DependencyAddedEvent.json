@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "807bc19e-080e-4ddc-9c78-6cac9d2fbb33",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:34.346Z",
+  "payload": {
+    "name": "OpenAI API",
+    "ecosystem": "service",
+    "packageName": "api.openai.com",
+    "versionConstraint": null,
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

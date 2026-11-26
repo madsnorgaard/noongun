@@ -4,11 +4,16 @@ namespace App\Providers;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Drafting\DraftGenerators;
+use App\Domain\Drafting\Generators\ProviderReplies;
 use App\Domain\Drafting\PromptRenderer;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Support\Health\CheckBackingServices;
+use App\Support\PasswordConfirmation;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Routing\ResponseFactory;
+use Illuminate\Contracts\Routing\UrlGenerator;
 use Illuminate\Foundation\Events\DiagnosingHealth;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
@@ -30,6 +35,15 @@ class AppServiceProvider extends ServiceProvider
         $this->app->scoped(CurrentWorkspace::class);
         $this->app->singleton(ChannelManager::class);
         $this->app->scoped(DraftGenerators::class);
+        $this->app->singleton(ProviderReplies::class);
+
+        // Built the way the framework builds RequirePassword, from the same
+        // setting, so that a page says what the middleware will decide.
+        $this->app->bind(PasswordConfirmation::class, fn (Application $app): PasswordConfirmation => new PasswordConfirmation(
+            $app->make(ResponseFactory::class),
+            $app->make(UrlGenerator::class),
+            $app->make('config')->get('auth.password_timeout'),
+        ));
     }
 
     /**

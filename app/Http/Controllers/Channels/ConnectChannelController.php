@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Channels;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\Contracts\ChannelAdapter;
+use App\Domain\Channels\Contracts\ConnectedChannels;
+use App\Domain\Channels\Contracts\ExplainsMissingAccounts;
 use App\Domain\Channels\Exceptions\ChannelException;
+use App\Domain\Channels\Exceptions\NothingToConnect;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Http\Controllers\Channels\Concerns\PresentsChannels;
@@ -30,6 +33,13 @@ class ConnectChannelController extends Controller
 
     /** How long the user has to come back from the platform. */
     private const STATE_MINUTES = 15;
+
+    /**
+     * The error values with which a platform says that the user said no:
+     * the OAuth standard one, and the two LinkedIn sends for a cancelled
+     * sign-in and a refused consent. Anything else is reported as a problem.
+     */
+    private const DECLINED = ['access_denied', 'user_cancelled_login', 'user_cancelled_authorize'];
 
     public function __construct(
         private readonly ChannelManager $manager,
@@ -59,6 +69,7 @@ class ConnectChannelController extends Controller
 
         // A new connect replaces a choice that was left open by an earlier one.
         (new ConnectSelection($request->session(), $this->current))->abandon();
+        (new ConnectReport($request->session(), $this->current))->forget();
 
         $request->session()->put(self::PENDING, [
             'platform' => $platform,
@@ -91,7 +102,7 @@ class ConnectChannelController extends Controller
         }
 
         if ($request->query('error') !== null) {
-            $request->query('error') === 'access_denied'
+            in_array($request->query('error'), self::DECLINED, true)
                 ? $this->toast('info', __('Access was not granted on :platform. Nothing was connected.', ['platform' => $label]))
                 : $this->toast('error', __(':platform reported a problem during sign-in. Nothing was connected.', ['platform' => $label]));
 
@@ -106,14 +117,25 @@ class ConnectChannelController extends Controller
             return to_route('channels.index');
         }
 
+        $report = new ConnectReport($request->session(), $this->current);
+        $hint = $adapter instanceof ExplainsMissingAccounts ? $adapter->missingAccountsHint() : null;
+
         try {
             $channels = $adapter->connect($workspace, $code);
         } catch (ChannelException $exception) {
             report($exception);
             $this->toast('error', $exception->getMessage());
 
+            // Nothing could be connected, but the platform did answer: say
+            // what it listed and what it may have left out.
+            if ($exception instanceof NothingToConnect) {
+                $report->record($platform, $exception->skipped(), $hint);
+            }
+
             return to_route('channels.index');
         }
+
+        $report->record($platform, $channels instanceof ConnectedChannels ? $channels->skipped() : [], $hint);
 
         // The adapter saved what the user already has connected as active
         // (renewed) and everything else as pending, which cannot publish.

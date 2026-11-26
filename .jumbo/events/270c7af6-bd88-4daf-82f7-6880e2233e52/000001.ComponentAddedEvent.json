@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "270c7af6-bd88-4daf-82f7-6880e2233e52",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:29.402Z",
+  "payload": {
+    "name": "LlmCredentials",
+    "type": "db",
+    "description": "Encrypted API keys per workspace and provider, and the instance-level key rows. A key is bound to its provider.",
+    "responsibility": "Hold drafting keys at rest",
+    "path": "app/Domain/Drafting/Models/LlmCredential.php",
+    "status": "active"
+  },
+  "seq": 1
+}

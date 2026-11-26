@@ -80,6 +80,10 @@ final class GenerateDraft
                 throw $changed;
             }
 
+            // From here the brief goes to this provider. The workspace
+            // stays with it until an owner chooses another one.
+            $this->generators->settleOn($workspace, $context->provider);
+
             $result = $this->generators->for($context)->generate($request, $context);
 
             return $this->createDraft->handle($actor, $run, $result, $plannedAt);
@@ -97,7 +101,7 @@ final class GenerateDraft
                     // The messages of these two name classes, settings and
                     // user ids. Members read the reason, so it is a fixed
                     // sentence; the caller logs the detail.
-                    $failure instanceof DraftGeneratorNotAvailable => DraftGeneratorNotAvailable::FOR_MEMBERS,
+                    $failure instanceof DraftGeneratorNotAvailable => $failure->forMembers(),
                     $failure instanceof DraftingNotAllowed => self::NOT_ALLOWED,
                     $used !== null => self::NOT_SAVED,
                     default => 'The post could not be drafted because of an unexpected error.',
@@ -112,7 +116,7 @@ final class GenerateDraft
 
     /**
      * Marks the run failed and lets the caller react, as one step for
-     * everyone else: under the lock on the workspace row that ProposeWeek
+     * everyone else: under the lock on the workspace row that StartDraftRuns
      * takes, in one transaction. A run for a retry that $afterFailure opens
      * therefore exists the moment the failed run stops being open, and no
      * proposal can start in between.

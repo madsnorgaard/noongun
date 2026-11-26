@@ -349,9 +349,193 @@ the spike must check them against the live form and correct this list.
 11. Every 60 days Noon Gun will ask you to reconnect. Click **Reconnect** and, if you are
     still logged in to LinkedIn, it completes without a new consent screen.
 
+## 2026-11-25 - second review, and what the adapter does (M5)
+
+The pages below were read again on 2026-11-25, before the adapter was written.
+Nothing in them contradicts the brief in a way that blocks the design. The
+spike has still not been run, so everything here rests on documentation.
+
+### Confirmed unchanged
+
+- **Products and scopes.** Share on LinkedIn grants `w_member_social`; Sign In
+  with LinkedIn using OpenID Connect grants `openid`, `profile` and `email`.
+  Both are listed as open permissions, "available to all developers without
+  special approval". The adapter asks for `openid profile w_member_social` and
+  not for `email`.
+  Source: getting-access (updated 2026-06-03), share-on-linkedin (updated
+  2023-12-14), sign-in-with-linkedin-v2 (updated 2024-08-08).
+- **Posts API.** `POST https://api.linkedin.com/rest/posts` with
+  `Linkedin-Version` and `X-Restli-Protocol-Version: 2.0.0`; `201` with the URN
+  in `x-restli-id` (`urn:li:share:{id}` or `urn:li:ugcPost:{id}`); delete with
+  `X-RestLi-Method: DELETE`, `204`, idempotent. `w_member_social` is in the
+  permission table of the page. Latest version is still `202611`.
+  Source: posts-api (updated 2026-05-13), versioning (updated 2026-11-16).
+- **Userinfo.** `GET https://api.linkedin.com/v2/userinfo` returns `sub`,
+  `name`, `given_name`, `family_name`, `picture`, `locale`, and `email` only
+  when that scope was granted.
+- **Tokens.** 60 days for an access token, 30 minutes for the code, refresh
+  tokens only "for all approved Marketing Developer Platform (MDP) partners".
+  Renewal for a self-serve app is the member going through the sign-in again.
+  Source: authorization-code-flow (updated 2026-05-15),
+  programmatic-refresh-tokens (updated 2025-10-08).
+- **Rate limits.** 150 requests per member and 100,000 per application per day
+  (UTC) on the Share on LinkedIn page; "Standard rate limits are not published"
+  on the general page. A throttled call answers `429`.
+
+### New findings
+
+1. **Article posts.** The article schema makes `source` and `title` required
+   and `description`, `thumbnail` and `thumbnailAltText` optional. The title
+   must be "less than 400 characters", the description "less than 4,086
+   characters". "thumbnail is optional when creating an Article Post". The
+   earlier note said Noon Gun "must fetch the page title and image itself";
+   that is not what is built. See "Decisions" below.
+   Source: article-ads-integrations (updated 2025-10-16).
+2. **The commentary format.** The reserved characters of the "little" text
+   format are `| { } @ [ ] ( ) < > # \ * _ ~`. "All reserved characters need
+   to be escaped with a backslash, even if those characters are not used in
+   one of the supported elements or templates." A hashtag is `#` followed by a
+   single word. This closes the open point of the first review.
+   Source: little-text-format (updated 2025-10-16).
+3. **Image upload uses PUT.** The Images API page defers to the Assets API
+   page, which says "Use a PUT method to upload the image", with
+   `Authorization: Bearer` and a `201` answer in its sample. The sample upload
+   addresses are on `www.linkedin.com/dms-uploads/`. No page states which
+   hosts an upload address may use.
+   Source: vector-asset-api (updated 2026-01-28), images-api (updated
+   2026-06-24).
+4. **Token introspection exists.** `POST https://www.linkedin.com/oauth/v2/introspectToken`
+   as a form with `client_id`, `client_secret` and `token` answers with
+   `active`, `status` (`active`, `expired`, `revoked`), `expires_at` in Unix
+   seconds and a comma separated `scope`. The page does not say whether a
+   self-serve app may use it.
+   Source: token-introspection (updated 2023-12-01).
+5. **Declined consent.** The browser comes back with
+   `error=user_cancelled_login` or `error=user_cancelled_authorize`, not with
+   the standard `access_denied`.
+6. **Errors.** The Posts API page now has an error table: `400`
+   (`MISSING_FIELD`, `FIELD_LENGTH_TOO_LONG` and others), `401`, `403`
+   `ACCESS_DENIED`, `404`, `409` `CONFLICT` ("A write conflict occurred. Retry
+   the request."), `422`, `429` `TOO_MANY_REQUESTS`, `500`, `503`. A sunset
+   version answers `426` `NONEXISTENT_VERSION`; a missing version header `400`
+   `VERSION_MISSING`. The body is `status`, `code`, `message` and sometimes
+   `serviceErrorCode`. `401` covers an expired token and one "revoked by the
+   member from their privacy settings". No `Retry-After` header is documented.
+   Source: posts-api, error-handling (updated 2025-03-26), error-responses
+   (updated 2025-10-16), rate-limits (updated 2025-08-20).
+
+### Still not stated anywhere that was read
+
+- The maximum length of `commentary`. The schema page gives none; the API
+  answers `FIELD_LENGTH_TOO_LONG` above it. 3000 is the limit of the LinkedIn
+  composer and is what the adapter uses, from `config/noongun.php`.
+- Whether the backslashes of escaped text count towards that limit.
+- Whether a throttled call (`429`) is certain not to have been carried out.
+- Whether an app with only the two self-serve products may call
+  `/rest/posts` (the Share on LinkedIn page still shows `/v2/ugcPosts`).
+- Whether `urn:li:person:{sub}` is the right author for a `sub` from OpenID
+  Connect.
+- Whether the `scope` of the token answer lists `openid` and `profile`, and
+  with which separator. The page says "space-delimited"; the introspection
+  page says comma separated.
+- A permalink form for share URNs.
+
+### Decisions taken in the adapter
+
+- **Idempotency.** LinkedIn has no idempotency key, and reading a member's
+  posts back needs `r_member_social`, which a self-serve app does not get. So
+  after a publish whose outcome is unknown, nothing can find out what
+  happened. `PublishPostJob` already gives each round and step out once and
+  marks the variant before the call; the adapter adds that a publish is
+  retryable only when LinkedIn certainly made no post: the connection was
+  never established, or the answer was a `429` in LinkedIn's own error format.
+  A timeout after the request was sent, a `5xx`, a `409`, a `429` or `4xx`
+  that is not in LinkedIn's format, a redirect and a `201` without a readable
+  URN are all reported as "outcome unknown". The variant keeps its mark, the
+  post fails, nothing is sent again by itself, and the editor asks the member
+  to look at the profile before sending again.
+- **Error mapping.** `401` and `403`: the channel needs a reconnect. `400`,
+  `404`, `422`, `426`: permanent, with LinkedIn's message; `426` also names
+  `LINKEDIN_API_VERSION`. `429` in LinkedIn's format: retryable. Calls that
+  are safe to repeat (userinfo, introspection, the token endpoint, delete)
+  are retryable on every temporary failure.
+- **Member identity from userinfo, not from the ID token.** The ID token is
+  not read, so no JWT validation is needed. The `sub` comes from a TLS call to
+  LinkedIn made with the token that was just issued.
+- **Link posts take a typed card.** The author types the title and
+  description in the editor. The app never fetches the linked page, so there
+  is no server-side request to an address a member chose. A link without a
+  title is held back by the readiness check.
+- **No thumbnail and no image posts yet.** Both need an image that the member
+  uploads, and the media model of ADR 0003 is not built. A link card without a
+  thumbnail is valid. When uploads are built: the upload address LinkedIn
+  returns must be HTTPS and on `linkedin.com` before the token or the image is
+  sent to it, the method is `PUT`, and an image post makes three calls, which
+  the time limit of the publishing job must allow for.
+- **No mentions.** Everything an author types is escaped except the `#` of a
+  hashtag, so a typed `@[Name](urn)` is sent as plain text.
+- **Token checks.** `refreshToken()` uses token introspection to record the
+  expiry and to notice a revoked token. A stored refresh token (approved
+  partners only) is exchanged instead.
+- **Hosts.** The adapter calls `LINKEDIN_API_URL` and `LINKEDIN_WEB_URL` only,
+  both must be HTTPS, and redirects are not followed.
+
+### Onboarding checklist, corrected
+
+Steps 1 to 9 of the checklist above stand. The redirect address to register
+is `<APP_URL>/auth/linkedin/callback`. There is no setup wizard: the Client ID
+and Client Secret go into `.env` as `LINKEDIN_CLIENT_ID` and
+`LINKEDIN_CLIENT_SECRET`, and the Channels page shows the redirect address.
+
+## 2026-11-25 - after the review of the combined M5 branch
+
+No new documentation was read. These are changes to what the adapter does
+with what was already known, and things that are still open.
+
+- **Scopes at sign-in.** The adapter no longer asks the token answer for every
+  configured scope. It is not known whether LinkedIn lists `openid` and
+  `profile` in `scope`, and refusing a correct app would send the member to
+  fix something that is not broken. Now: when the answer names scopes and the
+  one for posting (`publish_scope` in `config/noongun.php`, `w_member_social`)
+  is not among them, the sign-in is refused. When the answer names no scopes,
+  it is accepted. `openid` and `profile` are proven by the userinfo call that
+  follows. A token that cannot post after all is found out by the first
+  publish, which answers `403` and marks the channel. The same rule applies
+  to token introspection and to a renewed token from the refresh grant.
+- **Hashtags.** A hashtag is kept only at the start of the text or after
+  white space, made of letters and digits, and ending there. The `#` of an
+  address fragment (`page#section`), of `C#`, and of a tag with an underscore
+  (`#cape_town`) is escaped and sent as plain text, because the underscore is
+  reserved too and nothing documents how the two meet. Still unverified:
+  whether LinkedIn turns an unescaped `#word` from the API into a hashtag at
+  all, how a tag in a non-Latin alphabet behaves, whether an escaped `\#`
+  shows as a plain number sign, and whether a web address with escaped
+  characters in it (`a\_b`) is still recognised as a link in the text.
+- **Text that is not valid UTF-8** is refused before anything is sent. The
+  database does not store such text, so this is a second line.
+- **Messages.** What a member reads is written by the adapter, in plain words
+  with a next step. What LinkedIn itself wrote is kept in the log context as
+  `platform_message` and `code`, with the credentials of the request removed
+  and cut to 300 characters. Status codes and scope names are in the context
+  only.
+- **A post planned for after the access ends** cannot be approved or
+  scheduled. This is a refusal and not advice, because the publishing job
+  does not call a platform with an access that has run out, so the post would
+  fail for certain. The check compares the time with `token_expires_at` as
+  recorded at sign-in.
+- **Nothing calls `refreshToken()` yet.** Checking tokens on a schedule is M7.
+  Until then a token that the member revoked on LinkedIn is noticed only when
+  a publish fails with `401`, and `token_expires_at` is whatever the sign-in
+  reported.
+- **Outcome unknown.** A LinkedIn post can end as failed although it is
+  public, and there is no action yet to record that it is there. See
+  `docs/adr/0015-linkedin-publishing-without-idempotency.md`.
+
 ## Spike results
 
-To be filled in after a LinkedIn spike under `scripts/spike/`.
+To be filled in after running `scripts/spike/linkedin/publish-and-delete.sh`
+and one real connect through the Channels page. Until then the fixtures under
+`tests/Fixtures/linkedin/` are hand-written, not recorded.
 
 - Date run:
 - `/rest/posts` accepted with Share on LinkedIn only (yes or no):
@@ -363,3 +547,9 @@ To be filled in after a LinkedIn spike under `scripts/spike/`.
 - `http://localhost` redirect accepted (yes or no):
 - `expires_in` returned, `refresh_token` returned (yes or no):
 - Rate limit shown in the Analytics tab for `/rest/posts`:
+- `scope` in the token answer and in the introspection answer (values and separator):
+- Token introspection allowed for a self-serve app (yes or no):
+- How escaped reserved characters render, and whether the hashtag is one:
+- Whether an address with an escaped character in it is still a link in the text:
+- Length limit of `commentary`, and whether backslashes count:
+- Link post without a thumbnail: how the card looks:

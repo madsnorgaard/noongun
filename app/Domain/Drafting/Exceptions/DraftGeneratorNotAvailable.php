@@ -17,6 +17,31 @@ class DraftGeneratorNotAvailable extends RuntimeException
 {
     public const FOR_MEMBERS = 'Drafting is not set up on this instance. The person who runs the instance can find the reason in the log.';
 
+    /**
+     * For the one cause a workspace puts right itself: it chose a provider
+     * that the instance no longer offers.
+     */
+    public const CHOICE_NOT_OFFERED = 'The provider this workspace chose for drafting is no longer offered on this instance. An owner of this workspace can choose another one under Settings, Drafting.';
+
+    private bool $choiceNotOffered = false;
+
+    /**
+     * The sentence a member of the workspace reads instead of the message.
+     */
+    public function forMembers(): string
+    {
+        return $this->choiceNotOffered ? self::CHOICE_NOT_OFFERED : self::FOR_MEMBERS;
+    }
+
+    /**
+     * Whether an owner of the workspace can put it right by choosing a
+     * provider, without the operator.
+     */
+    public function isChoiceNotOffered(): bool
+    {
+        return $this->choiceNotOffered;
+    }
+
     public static function notConfigured(string $provider): self
     {
         return new self("No draft generator is configured for provider [{$provider}]. Add it to config/noongun.php under drafting.providers.");
@@ -25,6 +50,14 @@ class DraftGeneratorNotAvailable extends RuntimeException
     public static function noDefaultProvider(): self
     {
         return new self('No default drafting provider is set. Set NOONGUN_DRAFT_PROVIDER.');
+    }
+
+    public static function notOffered(string $provider, int $workspaceId): self
+    {
+        $unavailable = new self("Workspace #{$workspaceId} chose provider [{$provider}], which this instance does not offer. Add it to NOONGUN_DRAFT_PROVIDERS, or an owner of the workspace chooses another provider under Settings, Drafting.");
+        $unavailable->choiceNotOffered = true;
+
+        return $unavailable;
     }
 
     public static function modelMissing(string $provider): self

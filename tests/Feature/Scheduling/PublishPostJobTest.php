@@ -542,7 +542,7 @@ describe('things that changed since the post was claimed', function () {
         runPublishJob($job);
 
         expect(freshPost($post)->state)->toBe(PostState::Failed)
-            ->and(variantsOf($post)[0]->error)->toBe('Publishing to telegraph is not available on this instance.');
+            ->and(variantsOf($post)[0]->error)->toBe('Publishing to Telegraph is not available on this instance.');
     });
 
     it('does nothing when the post is gone', function () {

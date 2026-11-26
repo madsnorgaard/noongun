@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "933c8943-746a-46f3-8e25-a2d3d569d516",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:29.712Z",
+  "payload": {
+    "name": "DraftRun",
+    "type": "db",
+    "description": "One request for one post: status, provider, model, prompt version, tokens, cost, channels and slots drafted for.",
+    "responsibility": "Record every draft request and what it cost",
+    "path": "app/Domain/Drafting/Models/DraftRun.php",
+    "status": "active"
+  },
+  "seq": 1
+}

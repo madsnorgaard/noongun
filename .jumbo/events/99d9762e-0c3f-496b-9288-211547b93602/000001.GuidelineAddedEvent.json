@@ -1,0 +1,14 @@
+{
+  "type": "GuidelineAddedEvent",
+  "aggregateId": "99d9762e-0c3f-496b-9288-211547b93602",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:31.819Z",
+  "payload": {
+    "category": "process",
+    "title": "Parallel agents build, the main session integrates and records",
+    "description": "Contract first, then parallel agents in worktrees, merge, two independent read-only reviews (security, and correctness and usability), fix pass, full check. Only the main session writes to Jumbo.",
+    "rationale": "Independent review catches what the builder cannot see, and one writer keeps Jumbo events free of conflicts.",
+    "examples": []
+  },
+  "seq": 1
+}

@@ -27,6 +27,11 @@ class SavePostRequest extends FormRequest
 
     private const MAX_VARIANTS = 20;
 
+    /** As the column allows. What a platform accepts is checked on approval. */
+    private const MAX_LINK_TITLE_LENGTH = 400;
+
+    private const MAX_LINK_DESCRIPTION_LENGTH = 5000;
+
     public function authorize(): bool
     {
         return $this->user()?->can('create', Post::class) ?? false;
@@ -48,6 +53,8 @@ class SavePostRequest extends FormRequest
             ],
             'variants.*.body' => ['nullable', 'string', 'max:'.self::MAX_BODY_LENGTH],
             'variants.*.link' => ['nullable', 'string', 'max:2048', 'url:http,https'],
+            'variants.*.link_title' => ['nullable', 'string', 'max:'.self::MAX_LINK_TITLE_LENGTH],
+            'variants.*.link_description' => ['nullable', 'string', 'max:'.self::MAX_LINK_DESCRIPTION_LENGTH],
         ];
     }
 
@@ -74,6 +81,8 @@ class SavePostRequest extends FormRequest
             'scheduled_at' => __('planned time'),
             'variants.*.body' => __('text'),
             'variants.*.link' => __('link'),
+            'variants.*.link_title' => __('link title'),
+            'variants.*.link_description' => __('link description'),
             'variants.*.channel_id' => __('channel'),
         ];
     }
@@ -131,7 +140,7 @@ class SavePostRequest extends FormRequest
     }
 
     /**
-     * @return list<array{channel_id: int, body: string, link: string|null}>
+     * @return list<array{channel_id: int, body: string, link: string|null, link_title: string|null, link_description: string|null}>
      */
     public function variantInputs(): array
     {
@@ -144,14 +153,23 @@ class SavePostRequest extends FormRequest
 
             $body = $variant['body'] ?? null;
             $link = $variant['link'] ?? null;
+            $hasLink = is_string($link) && $link !== '';
 
             $variants[] = [
                 'channel_id' => (int) $variant['channel_id'],
                 'body' => is_string($body) ? $body : '',
-                'link' => is_string($link) && $link !== '' ? $link : null,
+                'link' => $hasLink ? $link : null,
+                // A card belongs to its link: without one it is not kept.
+                'link_title' => $hasLink ? self::text($variant['link_title'] ?? null) : null,
+                'link_description' => $hasLink ? self::text($variant['link_description'] ?? null) : null,
             ];
         }
 
         return $variants;
+    }
+
+    private static function text(mixed $value): ?string
+    {
+        return is_string($value) && trim($value) !== '' ? trim($value) : null;
     }
 }

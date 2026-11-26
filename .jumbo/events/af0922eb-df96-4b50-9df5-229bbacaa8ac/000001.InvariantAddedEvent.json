@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "af0922eb-df96-4b50-9df5-229bbacaa8ac",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:29.934Z",
+  "payload": {
+    "title": "A key is never sent to another provider",
+    "description": "A drafting key is bound to its provider in code (LlmKey::revealFor, DraftingContext). An unreadable workspace key never falls back to the instance key.",
+    "rationale": "A key or a brief reaching the wrong vendor cannot be taken back."
+  },
+  "seq": 1
+}

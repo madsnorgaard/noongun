@@ -29,10 +29,16 @@ class ChannelController extends Controller
         $channels = Channel::query()->orderBy('platform')->orderBy('display_name')->get();
         $selection = new ConnectSelection($request->session(), $current);
         $canManage = $request->user()?->can('create', Channel::class) ?? false;
+        $selectionOpen = $canManage && ! $selection->expired() && $selection->waiting()->isNotEmpty();
 
         return Inertia::render('channels/Index', [
             'channels' => $channels->map($this->present(...))->all(),
-            'selection_open' => $canManage && ! $selection->expired() && $selection->waiting()->isNotEmpty(),
+            'selection_open' => $selectionOpen,
+            // Shown once after a connect that went straight through or
+            // connected nothing. While a choice is open, that page shows it.
+            'connect_report' => $canManage && ! $selectionOpen
+                ? (new ConnectReport($request->session(), $current))->presentOnce()
+                : null,
             'platforms' => array_map(function (string $platform) use ($manager): array {
                 $adapter = $manager->adapter($platform);
                 $setup = $adapter instanceof DescribesSetup ? $adapter : null;
@@ -41,6 +47,7 @@ class ChannelController extends Controller
                     'name' => $platform,
                     'label' => $this->platformLabel($platform),
                     'missing_settings' => $setup?->missingSettings() ?? [],
+                    'setup_steps' => $setup?->setupSteps() ?? [],
                     'redirect_uri' => $setup?->redirectUri(),
                 ];
             }, $manager->available()),

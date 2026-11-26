@@ -1,0 +1,14 @@
+{
+  "type": "GuidelineAddedEvent",
+  "aggregateId": "59fd0818-095d-46cd-bd97-f26af0b58105",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:33.120Z",
+  "payload": {
+    "category": "documentation",
+    "title": "Plain copy without contractions",
+    "description": "Docs, README and UI copy use no contractions, short hyphens only, plain direct language, and every message that states a problem gives the next step.",
+    "rationale": "The interface is a working tool for non-technical owners.",
+    "examples": []
+  },
+  "seq": 1
+}

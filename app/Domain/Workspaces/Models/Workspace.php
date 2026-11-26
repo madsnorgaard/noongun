@@ -26,6 +26,7 @@ use Illuminate\Support\Str;
  * @property string $slug
  * @property string $timezone
  * @property string $locale
+ * @property string|null $drafting_provider the LLM provider its owner chose; null follows the instance
  * @property Carbon|null $created_at
  * @property Carbon|null $updated_at
  */

@@ -21,6 +21,7 @@ use Prism\Prism\Exceptions\PrismException;
 use Prism\Prism\Exceptions\PrismProviderOverloadedException;
 use Prism\Prism\Exceptions\PrismRateLimitedException;
 use Prism\Prism\Exceptions\PrismRequestTooLargeException;
+use Prism\Prism\Exceptions\PrismStructuredDecodingException;
 use Prism\Prism\Facades\Prism;
 use Prism\Prism\Schema\RawSchema;
 use Prism\Prism\Structured\Response;
@@ -37,7 +38,10 @@ use Throwable;
  * handed to Prism for this one call and is never written into config.
  *
  * What the model answers is data. It is validated by DraftResult and stored
- * as text; nothing in it is followed, fetched or run.
+ * as text; nothing in it is followed, fetched or run. That holds for every
+ * provider alike: a schema a provider enforces is a help, not the check.
+ *
+ * What differs between providers is in PrismDialect and nowhere else.
  *
  * See docs/platform-notes/llm.md for what Prism does with each call.
  */
@@ -45,9 +49,12 @@ class PrismDraftGenerator implements DraftGenerator
 {
     private const ATTEMPTS = 2;
 
-    private const TRANSIENT_ERROR_TYPES = ['overloaded_error', 'rate_limit_error', 'api_error', 'timeout_error'];
+    private const OUT_OF_CREDIT = 'The provider refused the request because the account the API key belongs to has no credit left or has a billing problem.';
 
-    public function __construct(private readonly PromptRenderer $prompts) {}
+    public function __construct(
+        private readonly PromptRenderer $prompts,
+        private readonly ProviderReplies $replies,
+    ) {}
 
     public function generate(DraftRequest $request, DraftingContext $context): DraftResult
     {
@@ -56,12 +63,17 @@ class PrismDraftGenerator implements DraftGenerator
 
         for ($attempt = 1; ; $attempt++) {
             $response = $this->ask($prompt, $context, $usage);
-            $usage = $this->usageSoFar($usage, $response, $context);
 
-            $this->failUnlessAnswered($response, $context, $usage);
+            if ($response !== null) {
+                $usage = $this->usageSoFar($usage, $response, $context);
+
+                $this->failUnlessAnswered($response, $context, $usage);
+            } else {
+                $usage = $this->usageOfUnreadable($usage, $context);
+            }
 
             try {
-                return DraftResult::fromArray($this->storable($response->structured, $context, $usage), $request, $usage);
+                return DraftResult::fromArray($this->storable($response?->structured, $context, $usage), $request, $usage);
             } catch (InvalidDraftOutput $invalid) {
                 if ($attempt >= self::ATTEMPTS) {
                     throw $this->afterLastAttempt($invalid, $response, $context, $usage);
@@ -70,24 +82,28 @@ class PrismDraftGenerator implements DraftGenerator
         }
     }
 
-    private function ask(RenderedPrompt $prompt, DraftingContext $context, ?DraftUsage $usedBefore): Response
+    /**
+     * The answer, or null when one arrived whose text is not JSON. Prism
+     * throws for that and puts the text into the message; the text is not
+     * used, and the answer counts as an invalid one.
+     */
+    private function ask(RenderedPrompt $prompt, DraftingContext $context, ?DraftUsage $usedBefore): ?Response
     {
         try {
-            $pending = Prism::structured()
-                ->using($context->provider, $context->model, ['api_key' => $context->key->reveal()])
+            return $this->replies->watch(fn (): Response => Prism::structured()
+                ->using($context->provider, $context->model, [
+                    ...PrismDialect::connectionOptions($context->provider, $context->key->scope),
+                    'api_key' => $context->key->revealFor($context->provider),
+                ])
                 ->withSchema(new RawSchema(DraftSchema::NAME, DraftSchema::definition()))
                 ->withSystemPrompt($prompt->system)
                 ->withPrompt($prompt->user)
                 ->withMaxTokens($context->maxTokens)
-                ->withClientOptions(['timeout' => $context->timeoutSeconds]);
-
-            $effort = DraftingConfig::effort($context->provider);
-
-            if ($effort !== null) {
-                $pending = $pending->withProviderOptions(['effort' => $effort]);
-            }
-
-            return $pending->asStructured();
+                ->withClientOptions(['timeout' => $context->timeoutSeconds])
+                ->withProviderOptions(PrismDialect::requestOptions($context->provider, DraftingConfig::effort($context->provider)))
+                ->asStructured());
+        } catch (PrismStructuredDecodingException) {
+            return null;
         } catch (Throwable $failure) {
             throw $this->failure($failure, $context, $usedBefore);
         }
@@ -99,8 +115,24 @@ class PrismDraftGenerator implements DraftGenerator
      */
     private function failure(Throwable $failure, DraftingContext $context, ?DraftUsage $usage): DraftGenerationFailed
     {
-        $secrets = [$context->key->reveal()];
+        $secrets = [$context->key->revealFor($context->provider)];
         $provider = $context->provider;
+        $reply = $this->replies->last();
+
+        // An answer that arrived and says what it used was paid for, also
+        // when Prism made an exception of it.
+        $used = $reply?->usage($provider, $context->model);
+        $usage = $used !== null ? ($usage?->plus($used) ?? $used) : $usage;
+
+        if ($failure instanceof PrismRateLimitedException && PrismDialect::isOutOfCredit($reply?->errorType, $reply?->errorCode)) {
+            return DraftGenerationFailed::permanent(
+                $provider,
+                self::OUT_OF_CREDIT,
+                $usage,
+                ['status' => 429, 'error' => $reply->errorCode ?? $reply->errorType],
+                $secrets,
+            );
+        }
 
         if ($failure instanceof PrismRateLimitedException) {
             return DraftGenerationFailed::retryable(
@@ -136,10 +168,20 @@ class PrismDraftGenerator implements DraftGenerator
             return DraftGenerationFailed::retryable(
                 $provider,
                 "The provider could not be reached or did not answer within {$context->timeoutSeconds} seconds. The draft can be requested again.",
-                $usage,
+                // A request that timed out may have been received and
+                // billed. Nothing says what it used, so it is recorded as
+                // an attempt with no known tokens: the run then counts
+                // towards the daily limits like any run that reached a
+                // provider. A provider that could not be reached at all
+                // records nothing.
+                $usage ?? (self::timedOut($failure) ? new DraftUsage($provider, $context->model, 0, 0) : null),
                 ['error' => 'connection'],
                 $secrets,
             );
+        }
+
+        if ($failure instanceof PrismException && $reply?->wasCutOff() === true && $usage !== null) {
+            return $this->cutOff($context, $usage, ['finish_reason' => FinishReason::Length->value]);
         }
 
         if ($failure instanceof PrismException) {
@@ -152,10 +194,15 @@ class PrismDraftGenerator implements DraftGenerator
             $usage,
             [
                 'error' => class_basename($failure),
-                DraftingException::OPERATOR_DETAIL => class_basename($failure).': '.Str::limit($failure->getMessage(), 300),
+                DraftingException::OPERATOR_DETAIL => class_basename($failure).': '.Str::limit(DraftingException::redact($failure->getMessage(), ...$secrets), 300),
             ],
             $secrets,
         );
+    }
+
+    private static function timedOut(ConnectionException $failure): bool
+    {
+        return preg_match('/\bcURL error 28\b|timed out|timeout/i', $failure->getMessage()) === 1;
     }
 
     /**
@@ -163,16 +210,23 @@ class PrismDraftGenerator implements DraftGenerator
      */
     private function providerError(PrismException $failure, DraftingContext $context, ?DraftUsage $usage, #[SensitiveParameter] array $secrets): DraftGenerationFailed
     {
+        $reply = $this->replies->last();
         $status = $failure->httpStatus ?? ($failure->getCode() >= 400 && $failure->getCode() <= 599 ? $failure->getCode() : null);
-        $type = preg_match('/\b([a-z]+(?:_[a-z]+)*_error)\b/', $failure->getMessage(), $match) === 1 ? $match[1] : null;
+        $type = $reply->errorType ?? (preg_match('/\b([a-z]+(?:_[a-z]+)*_error)\b/', $failure->getMessage(), $match) === 1 ? $match[1] : null);
+        $code = $reply?->errorCode;
         $said = Str::limit(DraftingException::redact($failure->getMessage(), ...$secrets), 300);
         $details = [
             'status' => $status,
             'error' => $type,
+            'code' => $code,
             DraftingException::OPERATOR_DETAIL => "Asked for model [{$context->model}]. The provider said: {$said}",
         ];
 
-        if (($status !== null && $status >= 500) || in_array($type, self::TRANSIENT_ERROR_TYPES, true)) {
+        if (PrismDialect::isOutOfCredit($type, $code)) {
+            return DraftGenerationFailed::permanent($context->provider, self::OUT_OF_CREDIT, $usage, $details, $secrets);
+        }
+
+        if (($status !== null && $status >= 500) || PrismDialect::isTransient($type, $code)) {
             return DraftGenerationFailed::retryable(
                 $context->provider,
                 'The provider had a problem of its own and did not answer. The draft can be requested again in a little while.',
@@ -186,23 +240,47 @@ class PrismDraftGenerator implements DraftGenerator
             $status === 401 || $type === 'authentication_error' => 'The provider did not accept the API key. An owner of this workspace can check the key under Settings, Drafting.',
             $status === 403 || $type === 'permission_error' => 'The API key is not allowed to do this with the provider. An owner of this workspace can check the key under Settings, Drafting.',
             $status === 404 || $type === 'not_found_error' => 'The provider does not know the model this instance is set up to use. The operator of this instance can correct it.',
-            $type === 'billing_error' || str_contains(strtolower($said), 'credit balance') => 'The provider refused the request because the account the API key belongs to has no credit left or has a billing problem.',
+            str_contains(strtolower($said), 'credit balance') => self::OUT_OF_CREDIT,
             default => 'The provider refused the request. The operator of this instance can find the reason in the log.',
         };
 
         return DraftGenerationFailed::permanent($context->provider, $message, $usage, $details, $secrets);
     }
 
+    /**
+     * Prism reports input that went through a provider's prompt cache apart
+     * from the rest of the input, for every provider. It was all sent and
+     * is all billed, so it is all counted, and the two cache figures are
+     * kept for the price. Tokens spent on thinking are part of the output
+     * already.
+     */
     private function usageSoFar(?DraftUsage $before, Response $response, DraftingContext $context): DraftUsage
     {
         $answeredBy = $response->meta->model;
+        $read = max(0, (int) $response->usage->cacheReadInputTokens);
+        $written = max(0, (int) $response->usage->cacheWriteInputTokens);
 
         $attempt = new DraftUsage(
             $context->provider,
-            preg_match('/^[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,127}$/', $answeredBy) === 1 ? $answeredBy : $context->model,
-            max(0, $response->usage->promptTokens),
+            preg_match('/\A[A-Za-z0-9][A-Za-z0-9._:\/@-]{0,127}\z/', $answeredBy) === 1 ? $answeredBy : $context->model,
+            max(0, $response->usage->promptTokens) + $read + $written,
             max(0, $response->usage->completionTokens),
+            1,
+            $read,
+            $written,
         );
+
+        return $before?->plus($attempt) ?? $attempt;
+    }
+
+    /**
+     * The usage of an answer Prism could not read, taken from the answer
+     * itself. Without it the attempt is counted with no tokens.
+     */
+    private function usageOfUnreadable(?DraftUsage $before, DraftingContext $context): DraftUsage
+    {
+        $attempt = $this->replies->last()?->usage($context->provider, $context->model)
+            ?? new DraftUsage($context->provider, $context->model, 0, 0);
 
         return $before?->plus($attempt) ?? $attempt;
     }
@@ -213,7 +291,7 @@ class PrismDraftGenerator implements DraftGenerator
      */
     private function failUnlessAnswered(Response $response, DraftingContext $context, DraftUsage $usage): void
     {
-        $secrets = [$context->key->reveal()];
+        $secrets = [$context->key->revealFor($context->provider)];
         $details = ['finish_reason' => $response->finishReason->value];
 
         if (in_array($response->finishReason, [FinishReason::Refusal, FinishReason::ContentFilter], true)) {
@@ -223,19 +301,13 @@ class PrismDraftGenerator implements DraftGenerator
                 $context->provider,
                 'The model declined to write this draft. Nothing was created. Change the brief, the pillar or the idea and ask again.',
                 $usage,
-                [...$details, 'category' => is_string($category) && preg_match('/^[a-z_]{1,40}$/', $category) === 1 ? $category : null],
+                [...$details, 'category' => is_string($category) && preg_match('/\A[a-z_]{1,40}\z/', $category) === 1 ? $category : null],
                 $secrets,
             );
         }
 
         if ($response->finishReason === FinishReason::Length) {
-            throw DraftGenerationFailed::permanent(
-                $context->provider,
-                'The answer was longer than this instance allows and was cut off, so there is no draft. Ask again; if it keeps happening, the operator of this instance can raise the limit.',
-                $usage,
-                [...$details, DraftingException::OPERATOR_DETAIL => "The answer reached the limit of {$context->maxTokens} tokens, which includes the tokens the model spends on thinking. Raise NOONGUN_DRAFT_MAX_TOKENS, or lower the effort of the provider."],
-                $secrets,
-            );
+            throw $this->cutOff($context, $usage, $details);
         }
 
         if (in_array($response->finishReason, [FinishReason::ToolCalls, FinishReason::Pause, FinishReason::Error], true)) {
@@ -247,6 +319,20 @@ class PrismDraftGenerator implements DraftGenerator
                 $secrets,
             );
         }
+    }
+
+    /**
+     * @param  array<string, mixed>  $details
+     */
+    private function cutOff(DraftingContext $context, DraftUsage $usage, array $details): DraftGenerationFailed
+    {
+        return DraftGenerationFailed::permanent(
+            $context->provider,
+            'The answer was longer than this instance allows and was cut off, so there is no draft. Ask again; if it keeps happening, the operator of this instance can raise the limit.',
+            $usage,
+            [...$details, DraftingException::OPERATOR_DETAIL => "The answer reached the limit of {$context->maxTokens} tokens, which includes the tokens the model spends on thinking. Raise NOONGUN_DRAFT_MAX_TOKENS, or lower the effort of the provider."],
+            [$context->key->revealFor($context->provider)],
+        );
     }
 
     /**
@@ -269,19 +355,19 @@ class PrismDraftGenerator implements DraftGenerator
         return $structured;
     }
 
-    private function afterLastAttempt(InvalidDraftOutput $invalid, Response $response, DraftingContext $context, DraftUsage $usage): DraftingException
+    private function afterLastAttempt(InvalidDraftOutput $invalid, ?Response $response, DraftingContext $context, DraftUsage $usage): DraftingException
     {
-        if ($response->structured === null || $response->structured === []) {
+        if ($response === null || $response->structured === null || $response->structured === []) {
             return DraftGenerationFailed::permanent(
                 $context->provider,
                 "The provider answered {$usage->attempts} times without a draft that could be read. Nothing was created. Ask again; if it keeps happening, tell the operator of this instance.",
                 $usage,
                 [
-                    'finish_reason' => $response->finishReason->value,
+                    'finish_reason' => ($response->finishReason ?? FinishReason::Stop)->value,
                     'error' => 'empty_output',
                     DraftingException::OPERATOR_DETAIL => "Check that the model [{$context->model}] supports structured output.",
                 ],
-                [$context->key->reveal()],
+                [$context->key->revealFor($context->provider)],
             );
         }
 

@@ -1,0 +1,19 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "6ce2534b-64af-43e1-af17-c286ba785ea2",
+  "version": 1,
+  "timestamp": "2026-11-26T19:44:57.515Z",
+  "payload": {
+    "title": "Ask for the password before the API key (#21)",
+    "objective": "Stop a pasted API key from being thrown away by the password confirmation.",
+    "successCriteria": [
+      "The key form shows only once the password is confirmed",
+      "Same for replacing, removing and choosing a provider",
+      "The key is never flashed or kept across a redirect"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined"
+  },
+  "seq": 1
+}

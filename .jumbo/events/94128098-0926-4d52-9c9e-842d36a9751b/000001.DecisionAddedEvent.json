@@ -1,0 +1,16 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "94128098-0926-4d52-9c9e-842d36a9751b",
+  "version": 1,
+  "timestamp": "2026-11-25T18:53:17.904Z",
+  "payload": {
+    "title": "A workspace settles on its drafting provider",
+    "context": "M5 review (#5), extends ADR 0013: a workspace following the instance default would silently move to another vendor when the operator changed the default.",
+    "rationale": "The provider is fixed on the workspace when an owner chooses, stores a key for the provider in use, or the first draft is requested. A brief never moves to another vendor without an owner action.",
+    "alternatives": [
+      "Always follow the instance default"
+    ],
+    "consequences": "There is no setting to follow the default again. Timed-out draft requests now count towards the daily caps (ADR 0012)."
+  },
+  "seq": 1
+}

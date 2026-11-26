@@ -93,6 +93,33 @@ return [
             // See docs/platform-notes/meta.md.
             'max_body_length' => 63206,
         ],
+
+        // A member's own profile, through the self-serve products "Share on
+        // LinkedIn" and "Sign In with LinkedIn using OpenID Connect". See
+        // docs/platform-notes/linkedin.md and docs/adr/0007.
+        'linkedin' => [
+            'adapter' => 'App\\Domain\\Channels\\Adapters\\LinkedIn\\LinkedInAdapter',
+            'client_id' => env('LINKEDIN_CLIENT_ID'),
+            'client_secret' => env('LINKEDIN_CLIENT_SECRET'),
+            // Sent as the Linkedin-Version header, YYYYMM. LinkedIn supports
+            // a version for at least a year and refuses it after that.
+            'api_version' => env('LINKEDIN_API_VERSION', '202611'),
+            'api_url' => env('LINKEDIN_API_URL', 'https://api.linkedin.com'),
+            // Where the sign-in, the token endpoints and the posts live.
+            'web_url' => env('LINKEDIN_WEB_URL', 'https://www.linkedin.com'),
+            'scopes' => array_values(array_filter(array_map(
+                trim(...),
+                explode(',', (string) env('LINKEDIN_SCOPES', 'openid,profile,w_member_social')),
+            ))),
+            // The one scope that allows posting. A sign-in whose answer
+            // names its scopes without this one is refused.
+            'publish_scope' => 'w_member_social',
+            // Longest post text in characters. The Posts API documentation
+            // names no number; this is the limit of the LinkedIn composer.
+            'max_body_length' => 3000,
+            // Requests per member per day that Share on LinkedIn allows.
+            'rate_limit_per_day' => 150,
+        ],
     ],
 
     /*
@@ -120,15 +147,22 @@ return [
     ],
 
     /*
-    | Drafting with an LLM. "provider" is the provider every workspace uses
-    | unless it is given another one. Each entry under "providers" names the
+    | Drafting with an LLM. "provider" is the provider a workspace uses until
+    | its owner chooses another one. "offered" lists the providers an owner
+    | may choose from, comma separated in NOONGUN_DRAFT_PROVIDERS; the
+    | default provider is always among them, and a name without an entry
+    | under "providers" is ignored. Each entry under "providers" names the
     | DraftGenerator class, the instance API key and the model; adding a
     | provider means one entry here. Model names, limits and prices are set
-    | here and nowhere else.
+    | here and nowhere else. See docs/adr/0013-provider-per-workspace.md.
     |
-    | "api_key" is the instance key, set by the operator. A key stored for
-    | the instance in the database goes before it, and a workspace's own key
-    | goes before both. See docs/adr/0011-drafting-contract.md.
+    | "api_key" is the instance key of that provider, set by the operator. A
+    | key stored for the instance in the database goes before it, and a
+    | workspace's own key for that provider goes before both. A key is only
+    | ever used with the provider it was stored for. "key_prefix" is how the
+    | keys of a provider start; the key form uses it to refuse a key that
+    | was pasted under the wrong provider. See
+    | docs/adr/0011-drafting-contract.md.
     |
     | "max_tokens" limits one answer, including the tokens a model spends on
     | thinking. "timeout" is the limit in seconds for one call.
@@ -142,6 +176,9 @@ return [
     | adds or replaces entries, as JSON in the same shape:
     | {"anthropic":{"some-model":{"input":1.5,"output":7.5}}}
     | A model without a price gives a run without a cost estimate.
+    | "cached_input" and "cache_write" are optional prices for input tokens
+    | a provider read from or wrote to its prompt cache; without them such
+    | tokens are counted at the "input" price.
     |
     | "limits" bounds what "Propose a week" may spend. "posts_per_proposal"
     | is the most posts one proposal drafts, "runs_per_day" the most draft
@@ -161,17 +198,28 @@ return [
 
     'drafting' => [
         'provider' => env('NOONGUN_DRAFT_PROVIDER', 'anthropic'),
+        'offered' => array_values(array_filter(array_map(trim(...), explode(',', (string) env('NOONGUN_DRAFT_PROVIDERS', ''))))),
         'max_tokens' => (int) env('NOONGUN_DRAFT_MAX_TOKENS', 16000),
         'timeout' => (int) env('NOONGUN_DRAFT_TIMEOUT', 120),
-        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v1'),
+        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v2'),
         'currency' => env('NOONGUN_DRAFT_PRICE_CURRENCY', 'USD'),
 
         'providers' => [
             'anthropic' => [
+                'label' => 'Anthropic',
                 'generator' => 'App\\Domain\\Drafting\\Generators\\PrismDraftGenerator',
                 'api_key' => env('ANTHROPIC_API_KEY'),
                 'model' => env('NOONGUN_DRAFT_ANTHROPIC_MODEL', 'claude-opus-5-5'),
                 'effort' => env('NOONGUN_DRAFT_ANTHROPIC_EFFORT'),
+                'key_prefix' => 'sk-ant-',
+            ],
+            'openai' => [
+                'label' => 'OpenAI',
+                'generator' => 'App\\Domain\\Drafting\\Generators\\PrismDraftGenerator',
+                'api_key' => env('OPENAI_API_KEY'),
+                'model' => env('NOONGUN_DRAFT_OPENAI_MODEL', 'gpt-6.2-sol'),
+                'effort' => env('NOONGUN_DRAFT_OPENAI_EFFORT'),
+                'key_prefix' => 'sk-',
             ],
         ],
 
@@ -181,6 +229,12 @@ return [
                     'claude-opus-5-5' => ['input' => 4.00, 'output' => 20.00],
                     'claude-sonnet-5-5' => ['input' => 2.00, 'output' => 10.00],
                     'claude-haiku-5-5' => ['input' => 0.10, 'output' => 0.50],
+                ],
+                'openai' => [
+                    'gpt-6.2-astra' => ['input' => 8.00, 'output' => 40.00, 'cached_input' => 0.40, 'cache_write' => 10.00],
+                    'gpt-6.2-sol' => ['input' => 2.00, 'output' => 10.00, 'cached_input' => 0.10, 'cache_write' => 2.50],
+                    'gpt-6.1-terra' => ['input' => 1.00, 'output' => 5.00, 'cached_input' => 0.05, 'cache_write' => 1.25],
+                    'gpt-6-luna' => ['input' => 0.10, 'output' => 0.50, 'cached_input' => 0.01, 'cache_write' => 0.125],
                 ],
             ],
             (array) json_decode((string) env('NOONGUN_DRAFT_PRICES', '{}'), true),

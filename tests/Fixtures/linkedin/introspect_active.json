@@ -1,0 +1,10 @@
+{
+    "active": true,
+    "client_id": "test-client-id",
+    "authorized_at": 1795600800,
+    "created_at": 1795600800,
+    "status": "active",
+    "expires_at": 1800784800,
+    "scope": "openid,profile,w_member_social",
+    "auth_type": "3L"
+}

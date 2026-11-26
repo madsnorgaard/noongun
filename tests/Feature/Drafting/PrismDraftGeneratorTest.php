@@ -289,6 +289,8 @@ describe('the answer', function () {
                 ['channel_id' => 1, 'body' => 'First channel.'],
             ],
             'link' => 'https://example.com/coffee',
+            'link_title' => null,
+            'link_description' => null,
             'alt_text' => 'A cup of coffee.',
             'rationale' => 'It fits the brief.',
         ], input: 1234, output: 567)]);
@@ -309,7 +311,7 @@ describe('the answer', function () {
             ]);
     });
 
-    it('does not count thinking or cache tokens twice', function () {
+    it('counts input that went through the prompt cache as input, and thinking once', function () {
         Prism::fake([new StructuredResponse(
             steps: collect([]),
             text: '',
@@ -321,7 +323,10 @@ describe('the answer', function () {
 
         $usage = $this->generator->generate($this->request, $this->context)->usage;
 
-        expect($usage->inputTokens)->toBe(100)->and($usage->outputTokens)->toBe(400);
+        expect($usage->inputTokens)->toBe(116)
+            ->and($usage->cacheWriteTokens)->toBe(7)
+            ->and($usage->cacheReadTokens)->toBe(9)
+            ->and($usage->outputTokens)->toBe(400);
     });
 
     it('records the model that was asked for when the answer names none that can be stored', function (string $answeredBy) {
@@ -332,12 +337,13 @@ describe('the answer', function () {
         'empty' => [''],
         'a path' => ['../../etc/passwd'],
         'a header' => ["model\r\nX-Injected: 1"],
+        'a name and a line break' => ["answering-model\n"],
         'too long' => [str_repeat('m', 200)],
     ]);
 
     it('asks once more after an invalid answer and reports the usage of both', function () {
         $fake = Prism::fake([
-            prismAnswer(['variants' => [['channel_id' => 1, 'body' => 'Only one channel.']], 'link' => null, 'alt_text' => null, 'rationale' => 'Why.'], input: 900, output: 250, model: 'first-model'),
+            prismAnswer(['variants' => [['channel_id' => 1, 'body' => 'Only one channel.']], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Why.'], input: 900, output: 250, model: 'first-model'),
             prismAnswer(input: 910, output: 260, model: 'second-model'),
         ]);
 
@@ -363,7 +369,7 @@ describe('the answer', function () {
         $tooLong = ['variants' => [
             ['channel_id' => 1, 'body' => str_repeat('a', 501)],
             ['channel_id' => 2, 'body' => 'Fine.'],
-        ], 'link' => null, 'alt_text' => null, 'rationale' => 'Why.'];
+        ], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Why.'];
 
         $fake = Prism::fake([prismAnswer($tooLong, 900, 250), prismAnswer($tooLong, 900, 250), prismAnswer()]);
 
@@ -485,7 +491,7 @@ describe('a failed call', function () {
         'overloaded' => [fn () => PrismProviderOverloadedException::make('anthropic'), true, 'overloaded', ['status' => 529]],
         'overloaded in a 200 answer' => [fn () => PrismException::providerResponseError('Anthropic Error: [overloaded_error] Overloaded'), true, 'problem of its own', ['error' => 'overloaded_error']],
         'server error' => [fn () => anthropicError(500, 'api_error', 'Internal server error'), true, 'problem of its own', ['status' => 500, 'error' => 'api_error']],
-        'timeout' => [fn () => new ConnectionException('cURL error 28: Operation timed out'), true, 'within 20 seconds', ['error' => 'connection']],
+        'not reachable' => [fn () => new ConnectionException('cURL error 6: Could not resolve host: api.example'), true, 'could not be reached', ['error' => 'connection']],
         'too large' => [fn () => PrismRequestTooLargeException::make('anthropic'), false, 'too large', ['status' => 413]],
         'rejected key' => [fn () => anthropicError(401, 'authentication_error', 'invalid x-api-key'), false, 'did not accept the API key', ['status' => 401, 'error' => 'authentication_error']],
         'no permission' => [fn () => anthropicError(403, 'permission_error', 'Not allowed'), false, 'is not allowed to do this with the provider', ['status' => 403, 'operator_detail' => 'Asked for model [fake-model]. The provider said: Anthropic Error [403]: permission_error - Not allowed']],
@@ -497,9 +503,39 @@ describe('a failed call', function () {
         'anything else' => [fn () => new TypeError('Something internal'), false, 'unexpected error', ['error' => 'TypeError']],
     ]);
 
+    it('records a timeout as an attempt with no known tokens, because the provider may have billed it', function (string $message) {
+        prismGives([new ConnectionException($message)]);
+
+        $failed = generationFailure(fn () => $this->generator->generate($this->request, $this->context));
+
+        expect($failed->retryable)->toBeTrue()
+            ->and($failed->getMessage())->toContain('within 20 seconds')
+            ->and($failed->usage?->toArray())->toBe([
+                'provider' => DRAFT_TEST_PROVIDER,
+                'model' => DRAFT_TEST_MODEL,
+                'input_tokens' => 0,
+                'output_tokens' => 0,
+                'attempts' => 1,
+            ]);
+    })->with([
+        'cURL error 28: Operation timed out after 20001 milliseconds with 0 bytes received',
+        'Connection timed out after 30001 milliseconds',
+    ]);
+
+    it('removes the key from the detail of an unexpected error before it is cut, also when the cut falls inside the key', function (int $before) {
+        prismGives([new RuntimeException(str_repeat('x', $before).' '.PRISM_TEST_KEY.' and more')]);
+
+        $failed = generationFailure(fn () => $this->generator->generate($this->request, $this->context));
+
+        expect(everythingOf($failed))->not->toContain(PRISM_TEST_KEY)
+            ->not->toContain(substr(PRISM_TEST_KEY, 0, 16))
+            ->not->toContain('sk-ant-')
+            ->and($failed->operatorDetail())->toStartWith('RuntimeException: xxx');
+    })->with([250, 270, 285, 292, 297]);
+
     it('keeps the usage of the first attempt when the second call fails', function () {
         prismGives([
-            prismAnswer(['variants' => [], 'link' => null, 'alt_text' => null, 'rationale' => 'Why.'], 900, 250),
+            prismAnswer(['variants' => [], 'link' => null, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => 'Why.'], 900, 250),
             PrismRateLimitedException::make([], 5),
         ]);
 
@@ -563,8 +599,8 @@ describe('the API key', function () {
         'a cut off answer' => [fn () => [prismAnswer(finish: FinishReason::Length)]],
         'two invalid answers' => [fn () => [prismAnswer([], empty: true), prismAnswer(['variants' => PRISM_TEST_KEY], empty: true)]],
         'two answers that hold the key' => [fn () => [
-            prismAnswer(['variants' => [], 'link' => PRISM_TEST_KEY, 'alt_text' => null, 'rationale' => PRISM_TEST_KEY]),
-            prismAnswer(['variants' => [], 'link' => PRISM_TEST_KEY, 'alt_text' => null, 'rationale' => PRISM_TEST_KEY]),
+            prismAnswer(['variants' => [], 'link' => PRISM_TEST_KEY, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => PRISM_TEST_KEY]),
+            prismAnswer(['variants' => [], 'link' => PRISM_TEST_KEY, 'link_title' => null, 'link_description' => null, 'alt_text' => null, 'rationale' => PRISM_TEST_KEY]),
         ]],
     ]);
 
@@ -667,6 +703,8 @@ describe('what the model writes is data', function () {
         $fake = Prism::fake([prismAnswer([
             'variants' => [['channel_id' => $this->channel->id, 'body' => $body]],
             'link' => 'https://example.com/a?b=<script>&c=%0d%0aX-Injected:1',
+            'link_title' => null,
+            'link_description' => null,
             'alt_text' => $altText,
             'rationale' => $rationale,
         ])]);
@@ -725,6 +763,8 @@ describe('what the model writes is data', function () {
                 ['channel_id' => 999, 'body' => 'For a channel of someone else.'],
             ],
             'link' => null,
+            'link_title' => null,
+            'link_description' => null,
             'alt_text' => null,
             'rationale' => 'Why.',
         ])));

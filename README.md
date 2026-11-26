@@ -158,8 +158,13 @@ Four things to know when operating it:
   workspace. A draft or an approved post with a planned time is drawn with a
   dashed outline: it is a plan and does not go out until it is scheduled.
 - **Editor** (`/posts/{id}`) is where a post is written: one text per channel,
-  an optional link and an optional planned time. It shows the characters that
-  are left for each channel and what stands in the way of approval.
+  an optional link and an optional planned time. Each channel is a column with
+  its own count against the limit of its platform. The columns stand next to
+  each other on a wide screen and under each other on a narrow one. A channel
+  you add starts from the first text, and "Copy text from" brings the text of
+  another column in at any time; each text is then changed by itself. One
+  approval covers every text of the post, and they fire together. The page
+  says what stands in the way of approval, per channel.
 
 Times are entered and shown on the clock of the workspace and stored in UTC.
 
@@ -213,42 +218,99 @@ A generated post is a draft like one you typed: nothing is approved, scheduled
 or published until a person does so. Drafting is optional. Without an API key
 the rest of the application works as before.
 
+### The provider
+
+Two providers are built in: Anthropic (`anthropic`) and OpenAI (`openai`).
+`NOONGUN_DRAFT_PROVIDER` names the one a workspace drafts with until its owner
+chooses another, and is `anthropic` unless you change it.
+
+An owner can choose another provider under Settings, Drafting, but only among
+those the operator offers. `NOONGUN_DRAFT_PROVIDERS` lists them, comma
+separated; the default provider is always offered, and with the variable empty
+it is the only one. To offer both:
+
+```
+NOONGUN_DRAFT_PROVIDERS=anthropic,openai
+```
+
+Offering a provider means that the brief, the voice rules, the pillar and the
+idea of a workspace that chooses it are sent to that company. Decide that as
+the operator before you list it. When a provider is taken off the list,
+workspaces that chose it stop drafting until an owner chooses again; they are
+not moved to the default provider, because their content would then go to a
+company they did not choose.
+
+A workspace follows `NOONGUN_DRAFT_PROVIDER` only until it is settled on a
+provider: when an owner chooses one, when an owner stores a key for the
+provider in use, or when its first draft is asked of a provider. From then on
+changing `NOONGUN_DRAFT_PROVIDER` does not move it. Its brief has gone to one
+company and goes to another only when an owner chooses that, with a
+confirmation that says what is sent and who pays. There is no setting to
+follow the default again.
+
+Changing the provider opens no new allowance: the daily limits count draft
+runs whatever provider wrote them. A draft that was asked for before the
+change is not written with the new provider; it fails and says so, and
+nothing is spent.
+
 ### The key
 
-Drafting needs an API key of the provider, which is Anthropic unless you
-configure another one. There are two places for a key:
+Drafting needs an API key of the provider in use. Each provider has its own
+keys, and a key is only ever used with the provider it was stored for. There
+are two places for a key:
 
-- **The instance key** is set by the operator as `ANTHROPIC_API_KEY` in `.env`.
-  Every workspace that has no key of its own uses it, and the operator's
-  account is billed.
+- **The instance key** is set by the operator in `.env`: `ANTHROPIC_API_KEY`
+  for Anthropic, `OPENAI_API_KEY` for OpenAI. Every workspace that has no key
+  of its own for that provider uses it, and the operator's account is billed.
 - **A workspace key** is stored by an owner of the workspace under Settings,
-  Drafting. It goes before the instance key, and the account it belongs to is
-  billed. Removing it puts the workspace back on the instance key.
+  Drafting, for one provider. It goes before the instance key of that
+  provider, and the account it belongs to is billed. Removing it puts the
+  workspace back on the instance key of that provider. A workspace can hold a
+  key for each provider.
+
+The key form refuses a key that looks like the key of another provider (an
+Anthropic key pasted under OpenAI, or the reverse), so that it is not sent to
+the wrong company.
 
 A workspace key is stored encrypted with `APP_KEY` and is write-only: after it
 is saved, the page shows the provider, the last four characters, when it was
 stored and whose key drafting uses, and never the key. Editors and viewers see
-whether drafting is available and nothing about keys. Storing, replacing
-and removing the key needs a recently confirmed password, like the security
-settings, so a session that someone else got hold of cannot swap the key. Each
-draft run records whether the instance key or the workspace key paid for it.
+whether drafting is available and nothing about keys. Each draft run records
+whether the instance key or the workspace key paid for it.
 
-To create a key, sign in to the Claude Console at `platform.claude.com`, add
-credit to the account and create an API key. Set a spending limit for the
-account there: Noon Gun estimates cost, it does not cap what the provider
-charges.
+Choosing the provider and storing, replacing or removing a key need a recently
+confirmed password, like the security settings, so a session that someone else
+got hold of cannot swap the key. The page asks for the password first: until
+it is confirmed, it shows no key field and no buttons, only **Confirm your
+password**, which leads to the password page and back to Settings, Drafting.
+Then the form appears and the key is stored when you submit it. Paste the key
+only after that, because a provider shows a key once. A confirmation holds for
+`AUTH_PASSWORD_TIMEOUT` seconds (three hours unless set otherwise), and the
+page says until when. If it runs out while the page is open, you are asked for
+the password again and a key you had pasted must be pasted once more: Noon Gun
+does not keep a key anywhere while it waits for a password.
+
+To create an Anthropic key, sign in to the Claude Console at
+`platform.claude.com`, add credit to the account and create an API key. To
+create an OpenAI key, sign in at `platform.openai.com`, add credit and create
+a key for a project. Set a spending limit for the account or the project
+there: Noon Gun estimates cost, it does not cap what the provider charges.
 
 ### Settings
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | empty | The instance key. |
-| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The provider. Must be listed under `drafting.providers` in `config/noongun.php`. |
-| `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The model. |
+| `ANTHROPIC_API_KEY` | empty | The instance key for Anthropic. |
+| `OPENAI_API_KEY` | empty | The instance key for OpenAI. |
+| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The default provider. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `NOONGUN_DRAFT_PROVIDERS` | empty | The providers an owner may choose from, comma separated. The default provider is always one of them. |
+| `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The Anthropic model. |
 | `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
+| `NOONGUN_DRAFT_OPENAI_MODEL` | `gpt-6.2-sol` | The OpenAI model. |
+| `NOONGUN_DRAFT_OPENAI_EFFORT` | empty | The reasoning effort for OpenAI: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`, as far as the model accepts it. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call. |
-| `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | The folder under `resources/prompts/draft/` that holds the prompt. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v2` | The folder under `resources/prompts/draft/` that holds the prompt. `v2` asks for a text written for each channel; `v1` is kept for the runs that used it. |
 | `NOONGUN_DRAFT_PRICES`, `NOONGUN_DRAFT_PRICE_CURRENCY` | empty, `USD` | The price table for the cost estimate. |
 
 ### What is sent to the provider
@@ -264,7 +326,12 @@ conversation. The prompt is built in one place
 - a source address, when one is given. The address is sent as text. Noon Gun
   does not open it, and neither does the model;
 - for each target channel its number, its platform and the limits of that
-  platform, such as the longest text.
+  platform, such as the longest text;
+- earlier posts of the workspace as examples of its voice. None are sent
+  today: the list is filled from the insights milestone on.
+
+The Drafting settings page names the same parts to the owner who chooses a
+provider; a test holds that list against the request.
 
 Never sent: platform tokens, API keys, the names of your Pages and profiles,
 the name of the workspace, names or email addresses of users, and anything
@@ -290,6 +357,19 @@ run records that a link was left out. Text that is pasted into an idea can
 therefore not make a post point somewhere you did not choose. Add the link by
 hand in the editor when you do want another one.
 
+LinkedIn shows a link only with a title you give it. The model writes that
+title, and an optional description, with the post, and they are stored on the
+LinkedIn text only. When the model writes no title, the title of the idea is
+used. A title or a description that is too long is cut to what LinkedIn takes.
+A draft with a link can therefore be approved from the queue without opening
+it. When there is neither a title nor an idea, the draft says that the link
+needs a title.
+
+When a channel can no longer publish at the moment a shared post is drafted,
+the draft is written for the other channels and says which one was left out.
+The slot of that channel stays open: connect the channel and propose the week
+again.
+
 When an answer does not pass the check, the model is asked once more. After a
 second answer that cannot be used the run fails and says why. A run also fails,
 without a second request, when the model declines to write the post or the
@@ -304,9 +384,18 @@ tokens times the price per million tokens in `drafting.prices` of
 `config/noongun.php`, in `NOONGUN_DRAFT_PRICE_CURRENCY`. A run that needed a
 second request counts both. A failed run keeps the tokens it used.
 
+The price is that of the provider and model the run used, and both are stored
+on the run, so the estimate of an old run stays what it was when the workspace
+changes its provider or the operator changes a model. Input that a provider
+read from or wrote to its prompt cache is priced with `cached_input` and
+`cache_write` of the model when the table has them (OpenAI caches long prompts
+by itself), and as plain input otherwise. The worst case shown before a
+proposal counts all input at the dearest of these prices.
+
 It is an estimate, not an invoice. It leaves out anything the provider bills
 that is not an input or output token, and it is as good as the price table.
-The built-in prices were checked against Anthropic's price list on 2026-11-25.
+The built-in prices were checked against the price lists of Anthropic and
+OpenAI on 2026-11-25.
 Prices change: check them when you change the model, and add or replace
 entries with `NOONGUN_DRAFT_PRICES`. A model without a price gives runs with
 tokens and no estimate.
@@ -322,11 +411,18 @@ NOONGUN_DRAFT_ANTHROPIC_MODEL=claude-sonnet-5-5
 NOONGUN_DRAFT_PRICES={"anthropic":{"claude-sonnet-5-5":{"input":2,"output":10}}}
 ```
 
+For OpenAI the variables are `NOONGUN_DRAFT_OPENAI_MODEL` and
+`NOONGUN_DRAFT_OPENAI_EFFORT`, and the prices go under `"openai"`, with
+`cached_input` and `cache_write` when you know them. OpenAI recommends room
+for 25,000 tokens of reasoning and answer when you start with a reasoning
+model; with the default of 16,000 in `NOONGUN_DRAFT_MAX_TOKENS`, set a low
+effort or raise the limit if answers are cut off.
+
 The model must support structured outputs. A smaller model is cheaper and
 faster and writes plainer drafts. Thinking counts against
 `NOONGUN_DRAFT_MAX_TOKENS`, so if answers are cut off, raise that limit or set
 a lower `NOONGUN_DRAFT_ANTHROPIC_EFFORT`. To change what the model is told,
-copy `resources/prompts/draft/v1` to a new folder, edit it and point
+copy `resources/prompts/draft/v2` to a new folder, edit it and point
 `NOONGUN_DRAFT_PROMPT_VERSION` at it. Details are in
 `docs/platform-notes/llm.md` and `docs/adr/0011-drafting-contract.md`.
 
@@ -356,7 +452,11 @@ expected to cost. The plan is worked out by these rules, in this order:
    gaps and repeats nothing. Rejecting or deleting a draft opens its slot
    again.
 2. Channels whose slots fall on the same time share one post, with a text for
-   each channel, because a post is what you approve.
+   each channel, because a post is what you approve. It is one idea, drafted
+   in one call and written for each channel by its own rules and limits.
+   Channels with slots at different times get separate posts on separate
+   ideas, and the page says how many posts reach one channel only. To get one
+   idea on every channel, give the channels the same slot time.
 3. Each pillar needs its weekly target, minus the posts the week already holds
    for it. The pillars take turns, the largest target first and then by name,
    one post per turn, until every need is met. That sequence is laid over the
@@ -385,6 +485,41 @@ the key of the workspace or the key of the instance. If any of these is
 different when its job runs, because a key was added or removed or the model
 was changed in between, the run fails with that reason and nothing is spent.
 
+### Drafting one post from an idea
+
+"Draft a post" on an idea (`/ideas`) drafts one post from that idea without
+proposing a week. Owners and editors see it; viewers do not. It leads to a
+page that shows, before anything is spent:
+
+- the idea, and the pillar it belongs to. An idea without a pillar gives a
+  post without one. If the idea is already used, the page says in how many
+  posts; drafting from it again is allowed.
+- the channels to write for: every connected channel that can publish, all
+  ticked to begin with. At least one must stay ticked. The result is one post
+  with a text for each ticked channel, from one call to the provider.
+- an optional planned time on the clock of the workspace. Left empty, the
+  time is decided after approval, as for a post written by hand. A time that
+  is given must be more than `NOONGUN_DRAFT_LEAD_MINUTES` away and not more
+  than a year ahead, and no ticked channel may lose its access before it.
+- the model, the expected cost and the worst case for this one post, and the
+  drafts of the last 24 hours.
+
+No slot is needed. Everything else that refuses a proposed week refuses here,
+with the same sentence and the same link: no brief, no channel that can
+publish, no API key, a provider that is not offered, the limits below, and a
+draft that is still at work.
+
+"Draft the post" opens one draft run and queues one job, and leads to the
+queue, where the progress card shows it and "Stop waiting" works as for a
+week. A second press, from a second click or a second tab, is refused. The
+draft that arrives carries the idea and its pillar, so the idea counts as
+used and the next proposed week does not take it. If its planned time is the
+slot time of a channel, a proposed week leaves that slot alone, as it does for
+any post at that time; moving the post opens the slot again.
+
+The run counts towards the limits like any other, and is tried again, given
+up and stopped by the same code.
+
 ### What a proposal may spend
 
 - One proposal drafts at most `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` posts.
@@ -393,7 +528,10 @@ was changed in between, the run fails with that reason and nothing is spent.
   hours. A run counts when it reached the provider, whether it succeeded or
   failed, or is still waiting or at work. A run that spent nothing does not
   count: one that could not be queued, one no worker picked up, one the
-  provider turned away for a wrong key or an unknown model.
+  provider turned away for a wrong key or an unknown model, one whose
+  provider could not be reached at all. A call that timed out counts as a
+  run that reached the provider, with no tokens known: the provider may have
+  billed it.
 - All workspaces together draft at most
   `NOONGUN_DRAFT_MAX_INSTANCE_RUNS_PER_DAY` posts in 24 hours on the key of the
   instance, counted the same way. A workspace with a key of its own is not
@@ -558,6 +696,40 @@ git pull
 docker compose up -d --build --wait
 ```
 
+### Troubleshooting: "Facebook could not be reached"
+
+If connecting a channel says "Facebook could not be reached", the containers
+may have no DNS. This happens on a host whose `/etc/resolv.conf` has no
+`nameserver` line, because the host runs a local resolver. Docker's embedded
+DNS then has no upstream on the compose network, so no outside name resolves.
+Give the containers a resolver in a local compose file, `compose.local.yml`,
+which Git ignores:
+
+```yaml
+x-dns: &dns
+  dns:
+    - 1.1.1.1
+    - 9.9.9.9
+
+services:
+  app:
+    <<: *dns
+  horizon:
+    <<: *dns
+  scheduler:
+    <<: *dns
+```
+
+List it in `.env` after the main file and start the stack again:
+
+```
+COMPOSE_FILE=docker-compose.yml:compose.local.yml
+```
+
+```sh
+docker compose up -d --wait
+```
+
 ## Environment and secrets
 
 `.env` is created from `.env.example` by `./setup` and is never committed. Setup
@@ -592,6 +764,10 @@ it there.
 | `FACEBOOK_GRAPH_VERSION` | `v27.0` | Graph API version used for every Facebook call. |
 | `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
 | `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
+| `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | empty | Credentials of the LinkedIn app this instance connects profiles with. |
+| `LINKEDIN_API_VERSION` | `202611` | Value of the `Linkedin-Version` header on every LinkedIn API call, `YYYYMM`. LinkedIn refuses a version about a year after it came out. |
+| `LINKEDIN_SCOPES` | `openid,profile,w_member_social` | Permissions requested when a profile is connected, comma separated. |
+| `LINKEDIN_API_URL`, `LINKEDIN_WEB_URL` | `https://api.linkedin.com`, `https://www.linkedin.com` | Base addresses of the API and of the sign-in. Must be HTTPS. Change only for testing. |
 | `NOONGUN_PUBLISH_MAX_ATTEMPTS` | `5` | How many times one variant is sent before the post is marked as failed. Only retryable errors are tried again. |
 | `NOONGUN_PUBLISH_BACKOFF` | `60,300,900,3600` | Seconds to wait before each retry, comma separated. The last value repeats. The largest value is also the longest wait a platform may ask for; a longer one fails the post. |
 | `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
@@ -601,12 +777,16 @@ it there.
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
-| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider drafts are generated with. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `OPENAI_API_KEY` | empty | The instance key for drafting with OpenAI, used by every workspace that drafts with OpenAI and has no OpenAI key of its own. |
+| `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider a workspace drafts with until its owner chooses another. Must be listed under `drafting.providers` in `config/noongun.php`. |
+| `NOONGUN_DRAFT_PROVIDERS` | empty | The providers an owner may choose from, comma separated, for example `anthropic,openai`. The default provider is always one of them. |
+| `NOONGUN_DRAFT_OPENAI_MODEL` | `gpt-6.2-sol` | The OpenAI model drafts are generated with. |
+| `NOONGUN_DRAFT_OPENAI_EFFORT` | empty | The reasoning effort for OpenAI. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_ANTHROPIC_MODEL` | `claude-opus-5-5` | The Claude model drafts are generated with. |
 | `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call to the provider. |
-| `NOONGUN_DRAFT_PROMPT_VERSION` | `v1` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v2` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
 | `NOONGUN_DRAFT_PRICES` | empty | Prices per million tokens, as JSON, added to the table in `config/noongun.php`: `{"anthropic":{"model-name":{"input":4,"output":20}}}`. Only used to estimate what a draft run cost. |
 | `NOONGUN_DRAFT_PRICE_CURRENCY` | `USD` | Currency of the price table. |
 | `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` | `14` | Most posts one "Propose a week" drafts. |
@@ -671,6 +851,35 @@ What happens when Facebook sends you back:
   command `noongun:discard-pending-channels` does this every five minutes, so
   it also happens when nobody opens Noon Gun.
 
+### A Page is missing
+
+Noon Gun can only connect what Facebook hands over. A Page that Facebook
+listed but that cannot be connected is named after the connect, with the
+reason. A Page that Facebook did not list at all cannot be named, so check
+these causes:
+
+- **It was not ticked in Facebook's consent screen.** Choose **Connect
+  Facebook** again and, in the Facebook dialog, edit the access and tick the
+  Page.
+- **Your role on the Page does not allow creating content.** Noon Gun shows
+  this as "Your role on this Page does not allow creating posts." Change the
+  role under **Page access** in the settings of the Page, then connect again.
+- **The Page is held in a business portfolio.** Facebook leaves such Pages out
+  unless the app also has the `business_management` permission. Add
+  `business_management` to the use case in the Meta app, set this in `.env`,
+  restart with `docker compose up -d` and connect again:
+
+  ```
+  FACEBOOK_SCOPES=pages_show_list,pages_read_engagement,pages_manage_posts,business_management
+  ```
+
+  The Facebook dialog then has an extra step, **Choose the Businesses**. The
+  least that is needed there is **Opt in to current Businesses only**, with
+  the portfolios that hold the Pages ticked. We confirmed this with a real
+  connect; see the entries of 2026-11-26 in `docs/platform-notes/meta.md`.
+
+A profile in professional mode is not a Page and cannot be connected.
+
 Noon Gun stores one access token for each connected Page, encrypted with
 `APP_KEY`. It does not store your own Facebook token. A Page token has no
 expiry date, but Facebook withdraws it when you change your password, lose
@@ -681,6 +890,80 @@ keeps the history of what was published.
 Only owners of a workspace can connect and disconnect channels, because a
 channel holds the access to an account on a platform. Editors and viewers can
 see them.
+
+## Connecting a LinkedIn profile
+
+Noon Gun posts to your own LinkedIn profile. Company pages are not supported
+yet (see `docs/adr/0007-linkedin-self-serve-until-m9.md`). Each instance
+connects through a LinkedIn app that its owner creates. The two products it
+needs are open to every developer and need no review.
+`docs/platform-notes/linkedin.md` has the longer checklist; the short version:
+
+1. Create an app at linkedin.com/developers/apps. LinkedIn asks for a LinkedIn
+   Page to associate the app with; a Page of your own is fine. Do not use
+   "LinkedIn" in the app name.
+2. On the **Products** tab, add **Share on LinkedIn** and **Sign In with
+   LinkedIn using OpenID Connect**. Both are needed: the first lets Noon Gun
+   post, the second tells it whose profile it is. The **Auth** tab then lists
+   the scopes `openid`, `profile` and `w_member_social`.
+3. On the **Auth** tab, add this address as an authorised redirect URL:
+
+   ```
+   <APP_URL>/auth/linkedin/callback
+   ```
+
+   It must match `APP_URL` exactly and start with `https://`. The Channels
+   page shows the address this instance uses. If `APP_URL` changes, change it
+   in the app as well.
+4. Put the Client ID and Client Secret from the **Auth** tab in `.env` as
+   `LINKEDIN_CLIENT_ID` and `LINKEDIN_CLIENT_SECRET`, then restart with
+   `docker compose up -d`.
+5. Open **Channels** in Noon Gun and choose **Connect LinkedIn**. Sign in to
+   LinkedIn if asked and allow what is asked for.
+
+What to know about a LinkedIn channel:
+
+- **The access lasts 60 days.** LinkedIn gives an app like this no way to
+  renew it without you. The Channels page shows the date, warns two weeks
+  before it, and offers **Connect again**. If you are still signed in to
+  LinkedIn, connecting again takes one click. After the date nothing is
+  published to the profile until you have done so.
+- **Connecting again keeps the channel.** The same profile gets a new token on
+  the channel it already has. A profile you disconnected earlier is shown for
+  you to confirm first, as for Facebook.
+- **A link needs a title.** LinkedIn does not read the page behind a link. It
+  shows the link as a card with the title and description you type in the
+  editor, without an image for now. Noon Gun never fetches the page to fill
+  them in. A post with a link and no title cannot be approved.
+- **Text only, up to 3000 characters.** A hashtag works when it stands at the
+  start of a word and holds only letters and digits, such as `#coffee`. A tag
+  with an underscore and the `#` inside a web address are sent as plain text.
+  Mentions do not work: an `@` is sent as plain text. Image posts are not
+  built yet.
+- **A post cannot be planned for after the access ends.** If a post is due
+  after the date the Channels page shows for the profile, it cannot be
+  approved or scheduled. The editor and the queue say so, with the date.
+  Connect the profile again first, which gives it a new date, or choose an
+  earlier time.
+- **If a post fails with "the outcome is unknown"**, LinkedIn may or may not
+  have published it: the connection broke, or LinkedIn answered with an error,
+  after the post was sent. LinkedIn offers no way to ask, so Noon Gun does not
+  send it again by itself. Look at your profile.
+  - **The post is there:** leave it as it is. Do not choose **Send again**,
+    which would publish a second copy. The post stays listed as failed in Noon
+    Gun; there is no way yet to mark it as published.
+  - **The post is not there:** open the post in Noon Gun and choose **Send
+    again**.
+- **A withdrawn access is noticed late.** If you remove the app's access on
+  LinkedIn, Noon Gun finds out when the next post fails. The channel then
+  shows **Needs reconnecting**.
+- **Set `LINKEDIN_API_VERSION` to a current version about once a year.**
+  LinkedIn stops accepting a version roughly a year after it came out. A post
+  that fails for this reason says so.
+
+Noon Gun stores one access token for each connected profile, encrypted with
+`APP_KEY`. It asks LinkedIn for your name and member id and for nothing else:
+not your email address, your connections or your posts.
 
 ## Tests
 

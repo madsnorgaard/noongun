@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "47eaec95-ebe6-4435-bf94-dee964db2a79",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:34.307Z",
+  "payload": {
+    "name": "HorizonAccess",
+    "type": "service",
+    "description": "Gate limiting Horizon to instance operators in every environment.",
+    "responsibility": "Keep queue data to operators",
+    "path": "app/Providers/HorizonServiceProvider.php",
+    "status": "active"
+  },
+  "seq": 1
+}

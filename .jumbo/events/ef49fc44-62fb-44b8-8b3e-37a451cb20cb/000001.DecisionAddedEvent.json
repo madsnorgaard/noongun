@@ -1,0 +1,16 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "ef49fc44-62fb-44b8-8b3e-37a451cb20cb",
+  "version": 1,
+  "timestamp": "2026-11-25T18:19:18.592Z",
+  "payload": {
+    "title": "Host is taken from the Host header and checked against APP_URL",
+    "context": "Security review of M3 (#16): trusted proxies could set the host of generated links through forwarded headers. Extends ADR 0008.",
+    "rationale": "Proxies are trusted for client address and scheme only. Trusted hosts are the APP_URL host plus localhost, 127.0.0.1 and [::1]. The web port binds to loopback by default.",
+    "alternatives": [
+      "Trust X-Forwarded-Host from the proxy"
+    ],
+    "consequences": "A reverse proxy must pass the original Host header and APP_URL must match the public address, or requests get 400."
+  },
+  "seq": 1
+}

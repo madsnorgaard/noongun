@@ -41,7 +41,10 @@ final class SaveDraft
      * (the platform was called and may hold the post) can be reworded but
      * is never removed: it and its error text are the only trace.
      *
-     * @param  list<array{channel_id: int, body: string, link: string|null}>  $variants
+     * link_title and link_description are the card for the link on a
+     * platform that builds none itself. Left out, they are stored as empty.
+     *
+     * @param  list<array{channel_id: int, body: string, link: string|null, link_title?: string|null, link_description?: string|null}>  $variants
      *
      * @throws PostActionNotAllowed the actor is not an owner or editor of the workspace
      * @throws PostNotEditable the post is not a draft
@@ -78,7 +81,7 @@ final class SaveDraft
     }
 
     /**
-     * @param  list<array{channel_id: int, body: string, link: string|null}>  $variants
+     * @param  list<array{channel_id: int, body: string, link: string|null, link_title?: string|null, link_description?: string|null}>  $variants
      */
     private function syncVariants(Post $post, array $variants): void
     {
@@ -98,13 +101,15 @@ final class SaveDraft
 
         foreach ($wanted as $channelId => $input) {
             $variant = $existing->get($channelId);
+            $content = [
+                'body' => $input['body'],
+                'link' => $input['link'],
+                'link_title' => $input['link_title'] ?? null,
+                'link_description' => $input['link_description'] ?? null,
+            ];
 
             if ($variant === null) {
-                $post->variants()->create([
-                    'channel_id' => $channelId,
-                    'body' => $input['body'],
-                    'link' => $input['link'],
-                ]);
+                $post->variants()->create(['channel_id' => $channelId, ...$content]);
 
                 continue;
             }
@@ -113,7 +118,7 @@ final class SaveDraft
                 continue;
             }
 
-            $variant->fill(['body' => $input['body'], 'link' => $input['link']])->save();
+            $variant->fill($content)->save();
         }
     }
 

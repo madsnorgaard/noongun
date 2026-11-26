@@ -82,6 +82,12 @@ class DraftRun extends Model
 
     public const MAX_FAILURE_REASON_LENGTH = 1000;
 
+    /** request['source'] of a run for one post that was asked for on an idea, outside a proposed week. */
+    public const SOURCE_IDEA = 'idea';
+
+    /** What a failed run of that kind says in place of "propose the week again". */
+    public const DRAFT_AGAIN = 'draft the post again from the Ideas page';
+
     /** Attributes that only the mark methods may change. */
     private const GUARDED_BY_TRANSITIONS = [
         'status', 'attempts', 'input_tokens', 'output_tokens', 'cost_estimate', 'cost_currency',
@@ -209,6 +215,59 @@ class DraftRun extends Model
     }
 
     /**
+     * Notes on a pending run that it is drafted for fewer channels than it
+     * was planned for, because the others can no longer publish. The run
+     * then names only the channels it writes for and only their slots, so
+     * that the slot of a channel that was left out counts as open when the
+     * week is proposed again. Returns false when the run is no longer
+     * pending.
+     *
+     * @param  list<int>  $channelIds  the channels that are drafted for
+     * @param  list<int>  $slotIds  the slots of those channels
+     * @param  list<int>  $leftOutChannelIds
+     */
+    public function draftForFewer(array $channelIds, array $slotIds, array $leftOutChannelIds): bool
+    {
+        return $this->move([DraftRunStatus::Pending], [
+            'request' => json_encode([
+                ...$this->request,
+                'channel_ids' => $channelIds,
+                'slot_ids' => $slotIds,
+                'left_out_channel_ids' => $leftOutChannelIds,
+            ]),
+        ]);
+    }
+
+    /**
+     * Whether the run drafts one post that was asked for on an idea, and
+     * not a post of a proposed week.
+     */
+    public function isFromIdea(): bool
+    {
+        return ($this->request['source'] ?? null) === self::SOURCE_IDEA;
+    }
+
+    /**
+     * The reasons this application gives for a failed run end with what to
+     * do next, and that was written for a proposed week. A run for one post
+     * from an idea has no week to propose again, so its reason names the
+     * Ideas page. Every failure is stored through markFailed(), which is
+     * why this is the one place.
+     */
+    private function inItsOwnWords(string $reason): string
+    {
+        if (! $this->isFromIdea()) {
+            return $reason;
+        }
+
+        return (string) preg_replace_callback(
+            '/\b(p)ropose the week again(?: to [^.]*)?\./i',
+            fn (array $found): string => ($found[1] === 'P' ? ucfirst(self::DRAFT_AGAIN) : self::DRAFT_AGAIN).'.',
+            $reason,
+        );
+    }
+
+    /**
      * pending -> running. Returns whether this call started the run: a job
      * that gets false was queued twice or arrives after the run was
      * settled, and must do nothing.
@@ -247,7 +306,7 @@ class DraftRun extends Model
      */
     public function markFailed(string $reason, ?DraftUsage $usage = null, ?CostEstimate $cost = null): bool
     {
-        $reason = Str::limit(trim(DraftingException::redact($reason)), self::MAX_FAILURE_REASON_LENGTH);
+        $reason = Str::limit(trim(DraftingException::redact($this->inItsOwnWords($reason))), self::MAX_FAILURE_REASON_LENGTH);
 
         return $this->move([DraftRunStatus::Pending, DraftRunStatus::Running], [
             'status' => DraftRunStatus::Failed,

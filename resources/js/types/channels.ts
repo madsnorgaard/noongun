@@ -20,5 +20,19 @@ export type ChannelPlatform = {
     name: string;
     label: string;
     missing_settings: string[];
+    /** What else to do in the platform's own app, as sentences. */
+    setup_steps: string[];
     redirect_uri: string | null;
+};
+
+export type SkippedAccount = {
+    id: string;
+    name: string;
+    reason: string;
+};
+
+export type ConnectReport = {
+    platform_label: string;
+    skipped: SkippedAccount[];
+    hint: string | null;
 };

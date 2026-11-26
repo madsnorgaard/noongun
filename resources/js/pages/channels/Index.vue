@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import ConnectReportNote from '@/components/channels/ConnectReport.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -13,7 +14,7 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { connect, destroy, index } from '@/routes/channels';
 import { edit as chooseChannels } from '@/routes/channels/selection';
-import type { Channel, ChannelPlatform } from '@/types/channels';
+import type { Channel, ChannelPlatform, ConnectReport } from '@/types/channels';
 
 defineOptions({
     layout: {
@@ -30,6 +31,7 @@ const props = defineProps<{
     channels: Channel[];
     platforms: ChannelPlatform[];
     selection_open: boolean;
+    connect_report: ConnectReport | null;
     can: { manage: boolean };
 }>();
 
@@ -186,6 +188,9 @@ function access(channel: Channel): string {
                         >{{ platform.redirect_uri }}</code
                     >
                 </li>
+                <li v-for="step in platform.setup_steps" :key="step">
+                    {{ step }}
+                </li>
                 <li>
                     Set
                     <template
@@ -216,9 +221,9 @@ function access(channel: Channel): string {
             <h2 class="text-heading">No channels are connected yet</h2>
             <p class="mt-1 max-w-[72ch] text-muted-foreground">
                 <template v-if="can.manage">
-                    Connect a Page to start publishing. You are sent to the
-                    platform to sign in and choose what Noon Gun may post to,
-                    and then brought back here.
+                    Connect a Page or a profile to start publishing. You are
+                    sent to the platform to sign in and choose what Noon Gun may
+                    post to, and then brought back here.
                 </template>
                 <template v-else>
                     Only an owner of this workspace can connect one.
@@ -360,6 +365,8 @@ function access(channel: Channel): string {
                 </div>
             </li>
         </ul>
+
+        <ConnectReportNote v-if="connect_report" :report="connect_report" />
 
         <p
             v-if="!can.manage && channels.length"

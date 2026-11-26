@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, router, useForm } from '@inertiajs/vue3';
+import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
 import IdeaFields from '@/components/brief/IdeaFields.vue';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,7 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { webAddress } from '@/lib/posts';
 import { destroy, index, store, update } from '@/routes/ideas';
+import { create as draft } from '@/routes/ideas/draft';
 import type { Idea, PillarOption } from '@/types/brief';
 
 defineOptions({
@@ -31,7 +32,7 @@ defineProps<{
     ideas: Idea[];
     pillars: PillarOption[];
     limits: { title: number; source_url: number; notes: number };
-    can: { manage: boolean };
+    can: { manage: boolean; draft: boolean };
 }>();
 
 type IdeaForm = {
@@ -124,7 +125,8 @@ function confirmDelete(): void {
             <p class="text-muted-foreground">
                 Topics to draft posts from. When a week is proposed, each
                 drafted post takes the oldest unused idea of its pillar, then
-                the oldest unused idea without a pillar.
+                the oldest unused idea without a pillar. "Draft a post" drafts
+                one post from one idea straight away.
             </p>
         </header>
 
@@ -258,10 +260,25 @@ function confirmDelete(): void {
                     </div>
 
                     <div
-                        v-if="can.manage"
+                        v-if="can.manage || can.draft"
                         class="flex shrink-0 flex-wrap justify-end gap-2 max-sm:w-full"
                     >
                         <Button
+                            v-if="can.draft"
+                            size="sm"
+                            variant="outline"
+                            as-child
+                        >
+                            <Link
+                                :href="draft({ idea: idea.id })"
+                                :aria-label="`Draft a post from ${idea.title}`"
+                                :data-test="`draft-idea-${idea.id}`"
+                            >
+                                Draft a post
+                            </Link>
+                        </Button>
+                        <Button
+                            v-if="can.manage"
                             size="sm"
                             variant="outline"
                             :aria-label="`Edit ${idea.title}`"
@@ -270,6 +287,7 @@ function confirmDelete(): void {
                             Edit
                         </Button>
                         <Button
+                            v-if="can.manage"
                             size="sm"
                             variant="ghost"
                             class="text-destructive hover:text-destructive"

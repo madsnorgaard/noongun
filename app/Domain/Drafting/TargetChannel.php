@@ -18,7 +18,7 @@ final readonly class TargetChannel
     ) {}
 
     /**
-     * @return array{channel_id: int, platform: string, max_body_length: int, link_previews: bool, media_types: list<string>, max_media_items: int}
+     * @return array{channel_id: int, platform: string, max_body_length: int, link_previews: bool, media_types: list<string>, max_media_items: int, link_title_length: int|null, link_description_length: int|null}
      */
     public function toArray(): array
     {
@@ -29,6 +29,8 @@ final readonly class TargetChannel
             'link_previews' => $this->capabilities->linkPreviews,
             'media_types' => $this->capabilities->mediaTypes,
             'max_media_items' => $this->capabilities->maxMediaItems,
+            'link_title_length' => $this->capabilities->linkTitleLength,
+            'link_description_length' => $this->capabilities->linkDescriptionLength,
         ];
     }
 }

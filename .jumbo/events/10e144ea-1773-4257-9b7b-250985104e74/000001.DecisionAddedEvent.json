@@ -1,0 +1,18 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "10e144ea-1773-4257-9b7b-250985104e74",
+  "version": 1,
+  "timestamp": "2026-11-25T18:26:59.526Z",
+  "payload": {
+    "title": "ADR 0014: One variant per channel, shared by slot time",
+    "context": "M5 (#5): one idea should produce one variant per channel, edited side by side.",
+    "rationale": "Channels with a slot at the same instant share one post with a text for each; slots at different times get separate posts. Variants of a post share one planned and firing time and one approval, because the claim, the publishing round and stuck-post recovery are per post and that is what keeps publishing idempotent. Prompt v2 is the default and writes each text for its own channel; v1 is frozen. Platform conventions stay data: capabilities and voice rules.",
+    "alternatives": [
+      "Join slots on the same day",
+      "A firing time per variant",
+      "Approval per variant"
+    ],
+    "consequences": "One idea on every channel needs the same slot time. Per-variant times or approvals would need a state machine change."
+  },
+  "seq": 1
+}

@@ -55,17 +55,30 @@ function fullRequest(): DraftRequest
     );
 }
 
-it('registers resources/prompts as the prompts view namespace', function () {
-    expect(View::exists('prompts::draft.v1.system'))->toBeTrue()
-        ->and(View::exists('prompts::draft.v1.user'))->toBeTrue()
-        ->and($this->renderer->has('v1'))->toBeTrue()
+/*
+ * Every version that exists is held to the same line: a run of an earlier
+ * week can still name v1, and v2 is what a new run is sent.
+ */
+dataset('prompt versions', ['v1', 'v2']);
+
+it('registers resources/prompts as the prompts view namespace', function (string $version) {
+    expect(View::exists("prompts::draft.{$version}.system"))->toBeTrue()
+        ->and(View::exists("prompts::draft.{$version}.user"))->toBeTrue()
+        ->and($this->renderer->has($version))->toBeTrue()
         ->and($this->renderer->has(config('noongun.drafting.prompt_version')))->toBeTrue();
+})->with('prompt versions');
+
+it('covers every version that has templates', function () {
+    $folders = array_map('basename', glob(resource_path('prompts/draft/*'), GLOB_ONLYDIR));
+
+    expect($folders)->toEqualCanonicalizing(['v1', 'v2'])
+        ->and(config('noongun.drafting.prompt_version'))->toBe('v2');
 });
 
-it('renders the request into a system and a user text for the version', function () {
-    $prompt = $this->renderer->render(fullRequest(), 'v1');
+it('renders the request into a system and a user text for the version', function (string $version) {
+    $prompt = $this->renderer->render(fullRequest(), $version);
 
-    expect($prompt->version)->toBe('v1')
+    expect($prompt->version)->toBe($version)
         ->and($prompt->system)->not->toBe('')
         ->and($prompt->user)
         ->toContain('Table Bay Coffee')
@@ -84,44 +97,174 @@ it('renders the request into a system and a user text for the version', function
         ->toContain('- Old school Facebook tone.')
         ->toContain('- Professional but human.')
         ->toContain('An earlier post that did well.');
-});
+})->with('prompt versions');
 
-it('does not escape the text as HTML', function () {
-    $prompt = $this->renderer->render(fullRequest(), 'v1');
+it('does not escape the text as HTML', function (string $version) {
+    $prompt = $this->renderer->render(fullRequest(), $version);
 
     expect($prompt->user.$prompt->system)->not->toMatch('/&(amp|quot|lt|gt|#0?39);/');
-});
+})->with('prompt versions');
 
-it('leaves out what the request does not have', function () {
-    $prompt = $this->renderer->render(plainDraftRequest(), 'v1');
+it('leaves out what the request does not have', function (string $version) {
+    $prompt = $this->renderer->render(plainDraftRequest(), $version);
 
     expect($prompt->user)
         ->toContain('<brief')
-        ->toContain('<target_channels>')
+        ->toContain('<target_channels')
         ->not->toContain('<pillar')
         ->not->toContain('<idea')
         ->not->toContain('<source_url>')
         ->not->toContain('<calls_to_action>')
         ->not->toContain('<example_posts>')
         ->not->toMatch("/\n{3,}/");
-});
+})->with('prompt versions');
 
-it('says the same thing for the same request', function () {
-    expect($this->renderer->render(fullRequest(), 'v1'))->toEqual($this->renderer->render(fullRequest(), 'v1'));
-});
+it('says the same thing for the same request', function (string $version) {
+    expect($this->renderer->render(fullRequest(), $version))->toEqual($this->renderer->render(fullRequest(), $version));
+})->with('prompt versions');
 
-it('keeps the system text free of anything from the request', function () {
-    expect($this->renderer->render(fullRequest(), 'v1')->system)->toBe($this->renderer->render(plainDraftRequest(), 'v1')->system);
+it('keeps the system text free of anything from the request', function (string $version) {
+    expect($this->renderer->render(fullRequest(), $version)->system)->toBe($this->renderer->render(plainDraftRequest(), $version)->system);
+})->with('prompt versions');
+
+describe('v2, one idea written for each channel', function () {
+    it('asks for a text of its own for each channel and says so in the system part', function () {
+        $prompt = $this->renderer->render(fullRequest(), 'v2');
+
+        expect($prompt->system)
+            ->toContain('written separately for every target channel')
+            ->toContain('Never paste one text into two channels')
+            ->toContain('Every text of a request says the same thing')
+            ->toContain('A text over the limit is thrown away')
+            ->and($prompt->user)
+            ->toContain('<target_channels count="2">')
+            ->toContain('Write the post 2 times, once for each target channel above.');
+    });
+
+    it('puts the rules of a platform inside the channel they are for, and nowhere else', function () {
+        $user = $this->renderer->render(fullRequest(), 'v2')->user;
+
+        preg_match_all('~<channel ([^>]*)>(.*?)</channel>~s', $user, $channels, PREG_SET_ORDER);
+
+        expect($channels)->toHaveCount(2)
+            ->and($channels[0][1])->toBe('channel_id="11" platform="facebook" max_characters="5000" link_previews="yes" images="no"')
+            ->and($channels[0][2])->toContain('- Old school Facebook tone.')->not->toContain('Professional but human.')
+            ->and($channels[1][1])->toBe('channel_id="12" platform="linkedin" max_characters="3000" link_previews="no" images="no"')
+            ->and($channels[1][2])->toContain('- Professional but human.')->not->toContain('Old school Facebook tone.')
+            ->and(substr_count($user, 'Old school Facebook tone.'))->toBe(1)
+            ->and(substr_count($user, 'Professional but human.'))->toBe(1);
+    });
+
+    it('says what a channel accepts from its capabilities', function () {
+        $request = new DraftRequest(
+            briefTitle: 'Table Bay Coffee',
+            briefBody: 'We roast coffee in Cape Town.',
+            voiceRules: new VoiceRules(['No contractions.']),
+            channels: [new TargetChannel(21, 'facebook', new ChannelCapabilities(400, ['image/jpeg'], 1, linkPreviews: true))],
+        );
+
+        expect($this->renderer->render($request, 'v2')->user)
+            ->toContain('<target_channels count="1">')
+            ->toContain('channel_id="21" platform="facebook" max_characters="400" link_previews="yes" images="yes"')
+            ->toContain('No rules of its own. The voice rules above apply.')
+            ->toContain('Write the post for the target channel above.');
+    });
+
+    it('tells the model which channel needs a title for the link, and how long it may be', function () {
+        $request = new DraftRequest(
+            briefTitle: 'Table Bay Coffee',
+            briefBody: 'We roast coffee in Cape Town.',
+            voiceRules: new VoiceRules(['No contractions.']),
+            channels: [
+                new TargetChannel(21, 'facebook', new ChannelCapabilities(400, linkPreviews: true)),
+                new TargetChannel(22, 'linkedin', new ChannelCapabilities(300, linkPreviews: true, linkTitleLength: 120, linkDescriptionLength: 200)),
+            ],
+            sourceUrl: 'https://example.com/roast',
+        );
+
+        $prompt = $this->renderer->render($request, 'v2');
+
+        expect($prompt->user)
+            ->toContain('channel_id="21" platform="facebook" max_characters="400" link_previews="yes" images="no">')
+            ->toContain('channel_id="22" platform="linkedin" max_characters="300" link_previews="yes" images="no" link_title_max_characters="120">')
+            ->and($prompt->system)
+            ->toContain('- link_title: when you set a link, a short plain title for the card')
+            ->toContain('- link_description: one plain sentence for the same card, or null.');
+    });
+
+    /*
+     * A draft once ended with "the link is in the first comment". The post
+     * carries its link itself, and no comment, image, poll or tag is ever
+     * published with it. These hold that the system part keeps saying so,
+     * by the points it makes and not by its wording as a whole.
+     */
+    it('says what is published with a post, so a text does not refer to anything else', function () {
+        $system = $this->renderer->render(fullRequest(), 'v2')->system;
+
+        expect($system)
+            ->toContain('Only the text and the link are published.')
+            ->toMatch('/must not promise or refer to/')
+            ->toContain('attached to the post itself');
+
+        foreach (['image', 'comment', 'poll', 'tag of a person'] as $notPublished) {
+            expect($system)->toMatch('/^- Only the text and the link are published\\..*\\bNo\\b.*\\b'.preg_quote($notPublished, '/').'\\b/mi');
+        }
+
+        foreach (['in the comments', 'in the first comment', 'in the bio', 'below'] as $place) {
+            expect($system)->toMatch('/^- The link,.*Never write that a link is .*\\b'.preg_quote($place, '/').'\\b/m');
+        }
+
+        expect($system)->toMatch('/^- The link,.*Only the text for a channel that shows link previews may say that the link is with the post\\.$/m');
+    });
+
+    it('keeps to the facts it is given', function () {
+        $system = $this->renderer->render(fullRequest(), 'v2')->system;
+
+        expect($system)
+            ->toContain('Use only facts that the brief, the pillar, the idea or its notes state')
+            ->toContain('When a detail is not given, write without it.');
+
+        foreach (['numbers', 'dates', 'names', 'quotes'] as $invented) {
+            expect($system)->toMatch('/no invented [^.]*\\b'.$invented.'\\b/');
+        }
+    });
+
+    it('names no platform in the system part', function () {
+        expect($this->renderer->render(fullRequest(), 'v2')->system)
+            ->not->toMatch('/facebook|linkedin|instagram|twitter|threads|mastodon|bluesky|tiktok/i');
+    });
+
+    it('leaves v1 as it was: it says nothing about a title for the link', function () {
+        $request = new DraftRequest(
+            briefTitle: 'Table Bay Coffee',
+            briefBody: 'We roast coffee in Cape Town.',
+            voiceRules: new VoiceRules(['No contractions.']),
+            channels: [new TargetChannel(22, 'linkedin', new ChannelCapabilities(300, linkPreviews: true, linkTitleLength: 120))],
+        );
+
+        $prompt = $this->renderer->render($request, 'v1');
+
+        expect($prompt->system.$prompt->user)->not->toContain('link_title')
+            ->and(hash('sha256', (string) file_get_contents(resource_path('prompts/draft/v1/system.blade.php'))))
+            ->toBe('4a0303cc90279b2ce19f3a776bbc7dcb9241ce3f7388449f1c449d33d581fade')
+            ->and(hash('sha256', (string) file_get_contents(resource_path('prompts/draft/v1/user.blade.php'))))
+            ->toBe('7dbe9fbd07976934664ee70cc697ba3c240aff81ef8ec5aa23144123b1f29489');
+    });
 });
 
 describe('what is sent to a provider', function () {
-    it('holds the brief, voice rules, pillar, idea and channel limits of the workspace, and nothing else it owns', function () {
+    it('holds the brief, voice rules, pillar, idea and channel limits of the workspace, and nothing else it owns', function (string $version) {
         $owner = userWithRole($this->workspace, Role::Owner);
         $channel = channelIn($this->workspace, [
             'display_name' => 'Page Name Kept Private',
             'external_id' => '990000000000001',
             'access_token' => 'page-access-token-kept-private',
             'refresh_token' => 'page-refresh-token-kept-private',
+        ]);
+        $second = channelIn($this->workspace, [
+            'display_name' => 'Second Page Kept Private',
+            'external_id' => '990000000000002',
+            'access_token' => 'second-access-token-kept-private',
         ]);
         $brief = briefIn($this->workspace, ['title' => 'Our own brief', 'body' => 'Our own brief text.']);
         $pillar = pillarIn($this->workspace, ['name' => 'Our own pillar', 'description' => 'Our own pillar text.']);
@@ -138,8 +281,8 @@ describe('what is sent to a provider', function () {
         ideaIn($other, null, ['title' => 'Their idea', 'notes' => 'Their notes.']);
         channelIn($other, ['display_name' => 'Their page', 'access_token' => 'their-access-token']);
 
-        $request = draftRequestIn($this->workspace, [$channel], $pillar, $idea);
-        $prompt = $this->renderer->render($request, 'v1');
+        $request = draftRequestIn($this->workspace, [$channel, $second], $pillar, $idea);
+        $prompt = $this->renderer->render($request, $version);
         $sent = $prompt->system."\n".$prompt->user;
 
         expect($sent)
@@ -148,18 +291,20 @@ describe('what is sent to a provider', function () {
             ->toContain('Our own pillar text.')
             ->toContain('Our own notes.')
             ->toContain('https://example.com/ours')
-            ->toContain('channel_id="'.$channel->id.'" platform="facebook" max_characters="1234"');
+            ->toContain('channel_id="'.$channel->id.'" platform="facebook" max_characters="1234"')
+            ->toContain('channel_id="'.$second->id.'" platform="facebook" max_characters="1234"');
 
         foreach ([
             'page-access-token-kept-private', 'page-refresh-token-kept-private', 'llm-key-kept-private', DRAFT_TEST_KEY,
             'Page Name Kept Private', '990000000000001', 'Workspace Name Kept Private',
+            'Second Page Kept Private', '990000000000002', 'second-access-token-kept-private',
             $owner->email, $owner->name, $theirUser->email, $theirUser->name,
             $unused->title,
             'Their brief', 'Their pillar', 'Their idea', 'Their notes', 'Their page', 'their-access-token', 'Their workspace',
         ] as $private) {
             expect($sent)->not->toContain($private);
         }
-    });
+    })->with('prompt versions');
 
     it('is built from a request that holds plain values only, with no model to reach through', function () {
         $request = draftRequestIn($this->workspace, 2, pillarIn($this->workspace), ideaIn($this->workspace));
@@ -174,7 +319,8 @@ describe('what is sent to a provider', function () {
         expect($holdsOnlyPlainValues($request->toArray()))->toBeTrue()
             ->and(array_keys($request->toArray()))->toBe(['brief', 'voice_rules', 'pillar', 'idea', 'source_url', 'channels', 'examples'])
             ->and(array_keys($request->toArray()['channels'][0]))->toBe([
-                'channel_id', 'platform', 'max_body_length', 'link_previews', 'media_types', 'max_media_items', 'voice_rules',
+                'channel_id', 'platform', 'max_body_length', 'link_previews', 'media_types', 'max_media_items',
+                'link_title_length', 'link_description_length', 'voice_rules',
             ]);
     });
 

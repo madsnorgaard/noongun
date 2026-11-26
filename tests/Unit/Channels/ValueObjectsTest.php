@@ -26,6 +26,8 @@ it('describes what a platform accepts', function () {
             'max_media_items' => 1,
             'link_previews' => true,
             'rate_limit' => ['max_calls' => 200, 'per_seconds' => 3600],
+            'link_title_length' => null,
+            'link_description_length' => null,
         ]);
 });
 
@@ -34,7 +36,16 @@ it('defaults to text only, with no rate limit known', function () {
 
     expect($capabilities->supportsMedia('image/jpeg'))->toBeFalse()
         ->and($capabilities->linkPreviews)->toBeFalse()
-        ->and($capabilities->rateLimit)->toBeNull();
+        ->and($capabilities->rateLimit)->toBeNull()
+        ->and($capabilities->needsLinkCard())->toBeFalse();
+});
+
+it('says when the author has to supply the card for a link', function () {
+    $capabilities = new ChannelCapabilities(maxBodyLength: 3000, linkTitleLength: 399, linkDescriptionLength: 4085);
+
+    expect($capabilities->needsLinkCard())->toBeTrue()
+        ->and($capabilities->toArray())->toMatchArray(['link_title_length' => 399, 'link_description_length' => 4085])
+        ->and(fn () => new ChannelCapabilities(maxBodyLength: 3000, linkTitleLength: 0))->toThrow(InvalidArgumentException::class);
 });
 
 it('refuses capabilities and rate limits that make no sense', function () {

@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "9cdee34a-7666-41b9-8903-28504905f8e8",
+  "version": 5,
+  "timestamp": "2026-11-26T19:44:46.989Z",
+  "payload": {
+    "taskDescription": "Two approved posts are scheduled on the home server for 2026-11-28 and 2026-11-29 at 09:30 Europe/Copenhagen."
+  },
+  "seq": 5
+}

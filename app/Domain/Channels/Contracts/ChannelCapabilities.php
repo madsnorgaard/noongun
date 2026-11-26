@@ -16,6 +16,8 @@ final readonly class ChannelCapabilities
      * @param  int  $maxMediaItems  most media items on one post
      * @param  bool  $linkPreviews  whether the platform renders a preview for PostVariant::$link
      * @param  RateLimit|null  $rateLimit  publishing rate limit per channel, null when unknown
+     * @param  int|null  $linkTitleLength  longest title of a link card the author must supply, in characters; null when the platform builds the card itself or shows none
+     * @param  int|null  $linkDescriptionLength  longest description of such a card; only read when $linkTitleLength is set
      */
     public function __construct(
         public int $maxBodyLength,
@@ -23,9 +25,15 @@ final readonly class ChannelCapabilities
         public int $maxMediaItems = 0,
         public bool $linkPreviews = false,
         public ?RateLimit $rateLimit = null,
+        public ?int $linkTitleLength = null,
+        public ?int $linkDescriptionLength = null,
     ) {
         if ($maxBodyLength < 1 || $maxMediaItems < 0) {
             throw new InvalidArgumentException('Capabilities need a positive body length and no negative media count.');
+        }
+
+        if (($linkTitleLength !== null && $linkTitleLength < 1) || ($linkDescriptionLength !== null && $linkDescriptionLength < 1)) {
+            throw new InvalidArgumentException('The lengths of a link card must be positive when they are given.');
         }
     }
 
@@ -34,13 +42,22 @@ final readonly class ChannelCapabilities
         return mb_strlen($body) <= $this->maxBodyLength;
     }
 
+    /**
+     * True when a link is shown as a card only from the title the author
+     * gives, because the platform reads nothing from the linked page.
+     */
+    public function needsLinkCard(): bool
+    {
+        return $this->linkTitleLength !== null;
+    }
+
     public function supportsMedia(string $mimeType): bool
     {
         return $this->maxMediaItems > 0 && in_array(strtolower($mimeType), $this->mediaTypes, true);
     }
 
     /**
-     * @return array{max_body_length: int, media_types: list<string>, max_media_items: int, link_previews: bool, rate_limit: array{max_calls: int, per_seconds: int}|null}
+     * @return array{max_body_length: int, media_types: list<string>, max_media_items: int, link_previews: bool, rate_limit: array{max_calls: int, per_seconds: int}|null, link_title_length: int|null, link_description_length: int|null}
      */
     public function toArray(): array
     {
@@ -50,6 +67,8 @@ final readonly class ChannelCapabilities
             'max_media_items' => $this->maxMediaItems,
             'link_previews' => $this->linkPreviews,
             'rate_limit' => $this->rateLimit?->toArray(),
+            'link_title_length' => $this->linkTitleLength,
+            'link_description_length' => $this->linkDescriptionLength,
         ];
     }
 }

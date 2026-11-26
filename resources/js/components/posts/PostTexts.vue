@@ -10,13 +10,21 @@ defineProps<{
     post: Post;
     /** Shorten each text to two lines, for rows that are not being reviewed. */
     clamp?: boolean;
+    /** One column per channel where there is room, to compare the texts. */
+    sideBySide?: boolean;
 }>();
 
 const timezone = useWorkspaceTimezone();
 </script>
 
 <template>
-    <div class="grid divide-y divide-border">
+    <div
+        :class="
+            sideBySide
+                ? 'grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] items-start gap-x-8 gap-y-6'
+                : 'grid divide-y divide-border'
+        "
+    >
         <p v-if="post.variants.length === 0" class="text-muted-foreground">
             No channel and no text yet.
         </p>
@@ -24,11 +32,16 @@ const timezone = useWorkspaceTimezone();
         <div
             v-for="variant in post.variants"
             :key="variant.id"
-            class="grid gap-x-6 gap-y-2 py-4 first:pt-0 last:pb-0 sm:grid-cols-[11rem_minmax(0,1fr)]"
+            :class="
+                sideBySide
+                    ? 'grid min-w-0 content-start gap-3'
+                    : 'grid gap-x-6 gap-y-2 py-4 first:pt-0 last:pb-0 sm:grid-cols-[11rem_minmax(0,1fr)]'
+            "
             :data-test="`variant-${variant.id}`"
         >
             <div
-                class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 sm:flex-col sm:items-start"
+                class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1"
+                :class="sideBySide ? '' : 'sm:flex-col sm:items-start'"
             >
                 <span
                     class="max-w-full truncate rounded-sm bg-secondary px-2.5 py-1 text-sm"
@@ -59,6 +72,19 @@ const timezone = useWorkspaceTimezone();
                 >
                     {{ variant.link }}
                 </a>
+                <p
+                    v-if="webAddress(variant.link) && variant.link_title"
+                    class="max-w-[72ch] text-sm break-words"
+                    :data-test="`link-card-${variant.id}`"
+                >
+                    <span class="font-semibold">{{ variant.link_title }}</span>
+                    <span
+                        v-if="variant.link_description && !clamp"
+                        class="block text-muted-foreground"
+                    >
+                        {{ variant.link_description }}
+                    </span>
+                </p>
 
                 <p
                     v-if="variant.published"

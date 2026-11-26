@@ -1,0 +1,16 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "d7dcc9a2-da7b-4364-98a4-c893dc7f49d1",
+  "version": 1,
+  "timestamp": "2026-11-25T18:19:17.976Z",
+  "payload": {
+    "title": "Only owners connect and disconnect channels",
+    "context": "Security review of M3 (#16): any member could connect or disconnect a channel.",
+    "rationale": "A channel holds a token that publishes in the name of the business. Granting and removing that is an owner decision.",
+    "alternatives": [
+      "Editors may connect channels"
+    ],
+    "consequences": "ChannelPolicy create and delete use canManageWorkspace."
+  },
+  "seq": 1
+}

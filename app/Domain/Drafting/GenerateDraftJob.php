@@ -13,6 +13,7 @@ use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\Exceptions\DraftingNotAllowed;
 use App\Domain\Drafting\Exceptions\DraftingStateConflict;
 use App\Domain\Drafting\Models\DraftRun;
+use App\Domain\Scheduling\Models\Slot;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Models\User;
@@ -123,6 +124,24 @@ final class GenerateDraftJob implements ShouldQueue
                 $run->markFailed(self::CHANNELS_GONE);
 
                 return;
+            }
+
+            $planned = self::ids($run->request['channel_ids'] ?? null);
+            $drafted = array_values($channels->modelKeys());
+
+            // A channel that dropped out since the plan keeps its slot
+            // open: the run must not answer for a slot it writes nothing for.
+            if (count($drafted) < count($planned)) {
+                $slots = Slot::query()
+                    ->whereKey(self::ids($run->request['slot_ids'] ?? null))
+                    ->whereIn('channel_id', $drafted)
+                    ->orderBy('id')
+                    ->pluck('id')
+                    ->all();
+
+                if (! $run->draftForFewer($drafted, array_values($slots), array_values(array_diff($planned, $drafted)))) {
+                    return;
+                }
             }
 
             try {

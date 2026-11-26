@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "f1e9ced9-ca31-4337-9ba5-a721bea1ba65",
+  "version": 5,
+  "timestamp": "2026-11-26T19:45:01.839Z",
+  "payload": {
+    "taskDescription": "Agent started on 2026-11-26 from feat/5-linkedin."
+  },
+  "seq": 5
+}

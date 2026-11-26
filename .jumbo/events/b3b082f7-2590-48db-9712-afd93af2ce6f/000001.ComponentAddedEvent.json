@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "b3b082f7-2590-48db-9712-afd93af2ce6f",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:31.235Z",
+  "payload": {
+    "name": "CostEstimator",
+    "type": "lib",
+    "description": "Prices tokens by the configured price table, expected and worst case, measured from the rendered prompt.",
+    "responsibility": "Say what a draft costs before and after",
+    "path": "app/Domain/Drafting/CostEstimator.php",
+    "status": "active"
+  },
+  "seq": 1
+}

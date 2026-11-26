@@ -1,0 +1,12 @@
+{
+  "type": "GoalUpdatedEvent",
+  "aggregateId": "f1496cab-4158-4957-bd98-a4d60018aadb",
+  "version": 4,
+  "timestamp": "2026-11-26T19:44:26.529Z",
+  "payload": {
+    "prerequisiteGoals": [
+      "304e5dfe-c8eb-428d-9f9b-a50f2bd1e5c0"
+    ]
+  },
+  "seq": 4
+}

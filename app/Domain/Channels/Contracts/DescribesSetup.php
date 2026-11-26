@@ -18,6 +18,15 @@ interface DescribesSetup
     public function missingSettings(): array;
 
     /**
+     * What the instance owner has to do in the platform's own app beyond
+     * registering the callback address, in sentences the Channels page shows
+     * as they are. Empty when there is nothing more.
+     *
+     * @return list<string>
+     */
+    public function setupSteps(): array;
+
+    /**
      * The exact callback address the instance owner registers with the
      * platform. It is the one sent in authorizationUrl() and connect().
      */

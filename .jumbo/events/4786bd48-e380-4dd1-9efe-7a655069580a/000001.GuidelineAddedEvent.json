@@ -1,0 +1,14 @@
+{
+  "type": "GuidelineAddedEvent",
+  "aggregateId": "4786bd48-e380-4dd1-9efe-7a655069580a",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:31.177Z",
+  "payload": {
+    "category": "process",
+    "title": "Feature branch and pull request, never push to main",
+    "description": "Work on a branch named for its issue, open a pull request, let CI pass. Push only when the owner asks.",
+    "rationale": "The owner reviews and merges; main is what the home server deploys.",
+    "examples": []
+  },
+  "seq": 1
+}

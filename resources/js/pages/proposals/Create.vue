@@ -169,9 +169,9 @@ function start(): void {
                             {{ posts(count) }} would be drafted
                         </h2>
                         <p class="mt-1 text-muted-foreground">
-                            One post for each open slot time. Channels that
-                            share a time share a post, with a text for each of
-                            them.
+                            One post for each open slot time. Channels with a
+                            slot at the same time share one post: one idea,
+                            written once for each of them.
                         </p>
                     </div>
 
@@ -197,6 +197,14 @@ function start(): void {
                                         </span>
                                     </span>
                                 </div>
+                                <p
+                                    v-if="post.channels.length > 1"
+                                    class="text-sm text-muted-foreground"
+                                >
+                                    One post, a text for each of these
+                                    {{ post.channels.length }} channels. One
+                                    draft, one approval, one planned time.
+                                </p>
                                 <p class="text-base">
                                     <template v-if="post.pillar">
                                         {{ post.pillar }}
@@ -257,6 +265,25 @@ function start(): void {
                         <li>
                             Each post takes the oldest unused idea of its
                             pillar, then the oldest idea without a pillar.
+                        </li>
+                        <li
+                            v-if="plan.for_one_channel > 0"
+                            data-test="proposal-for-one-channel"
+                        >
+                            {{ posts(plan.for_one_channel) }}
+                            {{ plan.for_one_channel === 1 ? 'goes' : 'go' }}
+                            to one channel only, because no other channel has an
+                            open slot at that time. To get one idea on every
+                            channel,
+                            <Link
+                                v-if="links.slots"
+                                :href="links.slots"
+                                class="font-semibold underline underline-offset-4"
+                            >
+                                give the channels the same slot time</Link
+                            ><template v-else>
+                                give the channels the same slot time</template
+                            >.
                         </li>
                         <li v-for="short in plan.short" :key="short.pillar">
                             {{ short.pillar }} gets {{ short.missing }} fewer

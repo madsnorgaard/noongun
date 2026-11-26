@@ -1,0 +1,18 @@
+{
+  "type": "GoalUpdatedEvent",
+  "aggregateId": "6a649184-de59-40e9-83bb-9ff92c370c78",
+  "version": 4,
+  "timestamp": "2026-11-26T19:44:03.318Z",
+  "payload": {
+    "title": "M1: Meta app and Page connect proven for real (#1)",
+    "objective": "Prove against the real Graph API that an owner can create a Meta app without review, connect Pages they manage and hold Page tokens. Originally planned as throwaway spike scripts; done by real use on the home server on 2026-11-26 instead. Publishing and visibility moved to the goal 'First real publish and visibility check'.",
+    "successCriteria": [
+      "A Meta app with the use case Manage everything on your Page exists and needs no review for its own role users",
+      "Connect returns Page tokens with pages_show_list, pages_read_engagement and pages_manage_posts",
+      "Pages held in a business portfolio connect once business_management is requested",
+      "No token or secret is committed, printed or logged",
+      "docs/platform-notes/meta.md records the findings"
+    ]
+  },
+  "seq": 4
+}

@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "060394a9-b716-4054-8cc9-f26ee9444691",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:30.013Z",
+  "payload": {
+    "name": "StartDraftRuns",
+    "type": "service",
+    "description": "The one place draft runs are opened: actor check, workspace lock, setup checks, limits, dispatch. Used by ProposeWeek and DraftFromIdea.",
+    "responsibility": "Start drafting safely and within the caps",
+    "path": "app/Domain/Drafting/Actions/StartDraftRuns.php",
+    "status": "active"
+  },
+  "seq": 1
+}

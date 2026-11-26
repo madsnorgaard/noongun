@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "229e37ab-a1e1-4e2e-b242-48593e625c8a",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:33.362Z",
+  "payload": {
+    "name": "PostPreconditions",
+    "type": "service",
+    "description": "Readiness checks before approval and scheduling: text, limits, link card, channel can publish, sensible time, access ends before the post is due.",
+    "responsibility": "Say what blocks a post from approval",
+    "path": "app/Domain/Content/PostPreconditions.php",
+    "status": "active"
+  },
+  "seq": 1
+}

@@ -1,10 +1,18 @@
 <script setup lang="ts">
 import { Head, Link, router, useForm } from '@inertiajs/vue3';
 import { ChevronLeft } from '@lucide/vue';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+    computed,
+    nextTick,
+    onBeforeUnmount,
+    onMounted,
+    ref,
+    watch,
+} from 'vue';
 import InputError from '@/components/InputError.vue';
 import PostStateBadge from '@/components/posts/PostStateBadge.vue';
 import PostTexts from '@/components/posts/PostTexts.vue';
+import VariantColumn from '@/components/posts/VariantColumn.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -18,12 +26,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { usePostActions } from '@/composables/usePostActions';
-import {
-    formatDateTime,
-    problemList,
-    textLength,
-    useWorkspaceTimezone,
-} from '@/lib/posts';
+import { formatDateTime, problemList, useWorkspaceTimezone } from '@/lib/posts';
 import { index as channelsIndex } from '@/routes/channels';
 import {
     approve,
@@ -62,7 +65,13 @@ const props = defineProps<{
     planned: string | null;
 }>();
 
-type VariantFields = { channel_id: number; body: string; link: string };
+type VariantFields = {
+    channel_id: number;
+    body: string;
+    link: string;
+    link_title: string;
+    link_description: string;
+};
 
 const timezone = useWorkspaceTimezone();
 const { busy, errors: refused, run } = usePostActions();
@@ -105,7 +114,15 @@ function fieldsFromServer(): {
             // With a single channel there is nothing to choose.
             variants:
                 usable.length === 1
-                    ? [{ channel_id: usable[0].id, body: '', link: '' }]
+                    ? [
+                          {
+                              channel_id: usable[0].id,
+                              body: '',
+                              link: '',
+                              link_title: '',
+                              link_description: '',
+                          },
+                      ]
                     : [],
         };
     }
@@ -118,6 +135,8 @@ function fieldsFromServer(): {
                 channel_id: variant.channel_id,
                 body: variant.body,
                 link: variant.link ?? '',
+                link_title: variant.link_title ?? '',
+                link_description: variant.link_description ?? '',
             })),
     };
 }
@@ -149,36 +168,199 @@ function isChosen(id: number): boolean {
     return form.variants.some((variant) => variant.channel_id === id);
 }
 
-function toggleChannel(id: number, chosen: boolean): void {
-    if (!chosen) {
-        form.variants = form.variants.filter(
-            (variant) => variant.channel_id !== id,
-        );
+// A text whose outcome on its platform is unknown stays on the post
+// whatever is sent (ADR 0009), so the page does not offer to take it off.
+const keptChannelIds = computed(() =>
+    (props.post?.variants ?? [])
+        .filter((variant) => !variant.published && variant.outcome_unknown)
+        .map((variant) => variant.channel_id),
+);
+
+function removable(id: number): boolean {
+    return !keptChannelIds.value.includes(id);
+}
+
+// The errors of a refused save are keyed by the position of a text. Once
+// a column is added or taken off they would point at another column.
+function clearVariantErrors(): void {
+    const keys = Object.keys(form.errors).filter((key) =>
+        key.startsWith('variants'),
+    );
+
+    if (keys.length) {
+        form.clearErrors(...(keys as never[]));
+    }
+}
+
+function addChannel(id: number): void {
+    if (isChosen(id)) {
+        return;
+    }
+
+    // A further channel starts from the first text, to be adjusted. The
+    // card of a link is only for a platform that shows one.
+    const first = form.variants[0];
+    const card = (channel(id)?.link_title_length ?? null) !== null;
+
+    form.variants.push({
+        channel_id: id,
+        body: first?.body ?? '',
+        link: first?.link ?? '',
+        link_title: card ? (first?.link_title ?? '') : '',
+        link_description: card ? (first?.link_description ?? '') : '',
+    });
+
+    clearVariantErrors();
+}
+
+// Where the keyboard goes when a dialog of this page closes.
+const focusAfterDialog = ref<string | null>(null);
+
+function focusElement(id: string): void {
+    void nextTick(() => document.getElementById(id)?.focus());
+}
+
+function removeChannel(id: number): void {
+    form.variants = form.variants.filter(
+        (variant) => variant.channel_id !== id,
+    );
+
+    clearVariantErrors();
+    // The column is gone. Its tick box is where it can be brought back.
+    focusElement(`channel-option-${id}`);
+}
+
+// Taking a column off throws its text away. That is asked about when the
+// text is nowhere else: no other column holds the same, or it was changed
+// since it was saved.
+function losesText(variant: VariantFields): boolean {
+    if (variant.body.trim() === '') {
+        return false;
+    }
+
+    const elsewhere = form.variants.some(
+        (other) =>
+            other.channel_id !== variant.channel_id &&
+            other.body === variant.body,
+    );
+    const saved = props.post?.variants.find(
+        (candidate) => candidate.channel_id === variant.channel_id,
+    );
+
+    return !elsewhere || (saved !== undefined && saved.body !== variant.body);
+}
+
+const removing = ref<number | null>(null);
+
+function requestRemoval(id: number): void {
+    const variant = form.variants.find(
+        (candidate) => candidate.channel_id === id,
+    );
+
+    if (!variant || !removable(id)) {
+        return;
+    }
+
+    if (losesText(variant)) {
+        removing.value = id;
+        confirming.value = 'remove-channel';
 
         return;
     }
 
-    if (!isChosen(id)) {
-        // A further channel starts from the first text, to be adjusted.
-        const first = form.variants[0];
+    removeChannel(id);
+}
 
-        form.variants.push({
-            channel_id: id,
-            body: first?.body ?? '',
-            link: first?.link ?? '',
-        });
+function onChannelTicked(id: number, event: Event): void {
+    const box = event.target as HTMLInputElement;
+
+    if (box.checked) {
+        addChannel(id);
+
+        return;
     }
+
+    // The box follows the post, not the click: it stays ticked until the
+    // column is really taken off.
+    box.checked = true;
+    requestRemoval(id);
+}
+
+const copying = ref<{ from: number; into: number } | null>(null);
+
+function copyText(into: number, from: number): void {
+    const target = form.variants.find(
+        (candidate) => candidate.channel_id === into,
+    );
+    const source = form.variants.find(
+        (candidate) => candidate.channel_id === from,
+    );
+
+    if (target && source) {
+        target.body = source.body;
+    }
+}
+
+function requestCopy(into: number, from: number): void {
+    const target = form.variants.find(
+        (candidate) => candidate.channel_id === into,
+    );
+    const source = form.variants.find(
+        (candidate) => candidate.channel_id === from,
+    );
+
+    if (!target || !source || target.body === source.body) {
+        return;
+    }
+
+    if (target.body.trim() !== '') {
+        copying.value = { from, into };
+        confirming.value = 'copy-text';
+
+        return;
+    }
+
+    copyText(into, from);
+    focusElement(`body-${into}`);
+}
+
+function channelName(id: number | null | undefined): string {
+    return (id != null ? channel(id)?.display_name : undefined) ?? '';
 }
 
 function fieldError(key: string): string | undefined {
     return (form.errors as Record<string, string | undefined>)[key];
 }
 
-function remaining(variant: VariantFields): number | null {
-    const limit = channel(variant.channel_id)?.max_body_length ?? null;
+// One column per chosen channel, in the order the channels were chosen.
+const columns = computed(() =>
+    form.variants.flatMap((variant, position) => {
+        const option = channel(variant.channel_id);
 
-    return limit === null ? null : limit - textLength(variant.body);
+        return option ? [{ variant, position, option }] : [];
+    }),
+);
+
+function othersFor(
+    channelId: number,
+): { channel_id: number; name: string; body: string }[] {
+    return columns.value
+        .filter((column) => column.variant.channel_id !== channelId)
+        .map((column) => ({
+            channel_id: column.variant.channel_id,
+            name: column.option.display_name,
+            body: column.variant.body,
+        }));
 }
+
+// With more than one text the columns take the width of the page, and the
+// status and the actions follow below them until the screen is very wide.
+const sideBySide = computed(
+    () =>
+        (editable.value
+            ? form.variants.length
+            : (props.post?.variants.length ?? 0)) > 1,
+);
 
 function save(): void {
     if (!editable.value) {
@@ -206,7 +388,13 @@ const refusedMessages = computed(() =>
         .map(([, message]) => message),
 );
 
-type Confirmation = 'delete' | 'reopen' | 'publish-now' | 'retry';
+type Confirmation =
+    | 'delete'
+    | 'reopen'
+    | 'publish-now'
+    | 'retry'
+    | 'remove-channel'
+    | 'copy-text';
 
 const confirming = ref<Confirmation | null>(null);
 // What the dialog shows. Kept while it closes, so its text does not change
@@ -266,7 +454,43 @@ function requestReopen(): void {
     }
 }
 
+// A dialog gives the keyboard back to what opened it. When that is gone,
+// or the work goes on elsewhere, it is sent there instead.
+function onDialogClosed(event: Event): void {
+    const id = focusAfterDialog.value;
+    const element = id !== null ? document.getElementById(id) : null;
+
+    focusAfterDialog.value = null;
+
+    if (element) {
+        event.preventDefault();
+        element.focus();
+    }
+}
+
 function confirm(): void {
+    if (confirming.value === 'remove-channel') {
+        if (removing.value !== null) {
+            focusAfterDialog.value = `channel-option-${removing.value}`;
+            removeChannel(removing.value);
+        }
+
+        confirming.value = null;
+
+        return;
+    }
+
+    if (confirming.value === 'copy-text') {
+        if (copying.value !== null) {
+            focusAfterDialog.value = `body-${copying.value.into}`;
+            copyText(copying.value.into, copying.value.from);
+        }
+
+        confirming.value = null;
+
+        return;
+    }
+
     if (!props.post) {
         return;
     }
@@ -380,7 +604,12 @@ const locked = computed(() => {
         </header>
 
         <div
-            class="grid items-start gap-5.5 lg:grid-cols-[minmax(0,1fr)_22rem]"
+            class="grid items-start gap-5.5"
+            :class="
+                sideBySide
+                    ? '2xl:grid-cols-[minmax(0,1fr)_22rem]'
+                    : 'lg:grid-cols-[minmax(0,1fr)_22rem]'
+            "
         >
             <div class="grid content-start gap-4">
                 <template v-if="editable">
@@ -421,18 +650,17 @@ const locked = computed(() => {
                                 "
                             >
                                 <input
+                                    :id="`channel-option-${option.id}`"
                                     type="checkbox"
                                     class="mt-0.5 size-5 shrink-0 accent-primary"
                                     :checked="isChosen(option.id)"
-                                    :disabled="!selectable(option)"
-                                    :data-test="`channel-${option.id}`"
-                                    @change="
-                                        toggleChannel(
-                                            option.id,
-                                            ($event.target as HTMLInputElement)
-                                                .checked,
-                                        )
+                                    :disabled="
+                                        !selectable(option) ||
+                                        (isChosen(option.id) &&
+                                            !removable(option.id))
                                     "
+                                    :data-test="`channel-${option.id}`"
+                                    @change="onChannelTicked(option.id, $event)"
                                 />
                                 <span class="grid gap-0.5">
                                     <span>
@@ -452,100 +680,72 @@ const locked = computed(() => {
                                     >
                                         {{ option.problem }}
                                     </span>
+                                    <span
+                                        v-if="!removable(option.id)"
+                                        class="text-sm text-muted-foreground"
+                                        :data-test="`channel-kept-${option.id}`"
+                                    >
+                                        This channel was called for this post
+                                        and may hold it, so its text stays on
+                                        the post.
+                                    </span>
                                 </span>
                             </label>
                         </div>
+                        <p
+                            v-if="offered.length > 1"
+                            class="text-sm text-muted-foreground"
+                            data-test="channels-hint"
+                        >
+                            One post, a text for each channel you tick. A
+                            channel you add starts from the first text, and each
+                            text is then changed by itself.
+                        </p>
                         <InputError :message="fieldError('variants')" />
                     </fieldset>
 
-                    <section
-                        v-for="(variant, position) in form.variants"
-                        :key="variant.channel_id"
-                        class="grid gap-4 rounded-2xl bg-card p-5.5 shadow-xs"
-                        :data-test="`text-${variant.channel_id}`"
+                    <div
+                        v-if="columns.length"
+                        class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] items-start gap-4"
+                        data-test="variant-columns"
                     >
-                        <div class="grid gap-2">
-                            <Label :for="`body-${variant.channel_id}`">
-                                Post text for
-                                {{ channel(variant.channel_id)?.display_name }}
-                            </Label>
-                            <textarea
-                                :id="`body-${variant.channel_id}`"
-                                v-model="variant.body"
-                                rows="9"
-                                class="min-h-[220px] w-full resize-y rounded-lg border border-input bg-card p-4 text-lg leading-normal outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                            ></textarea>
-                            <div
-                                class="flex flex-wrap items-start justify-between gap-x-4 gap-y-1"
-                            >
-                                <div class="grid gap-1">
-                                    <InputError
-                                        :message="
-                                            fieldError(
-                                                `variants.${position}.body`,
-                                            )
-                                        "
-                                    />
-                                    <InputError
-                                        :message="
-                                            fieldError(
-                                                `variants.${position}.channel_id`,
-                                            )
-                                        "
-                                    />
-                                </div>
-                                <span
-                                    v-if="remaining(variant) !== null"
-                                    class="ml-auto font-mono text-sm"
-                                    :class="
-                                        (remaining(variant) ?? 0) < 0
-                                            ? 'text-destructive'
-                                            : 'text-muted-foreground'
-                                    "
-                                    :data-test="`remaining-${variant.channel_id}`"
-                                >
-                                    <template
-                                        v-if="(remaining(variant) ?? 0) < 0"
-                                    >
-                                        {{ -(remaining(variant) ?? 0) }} over
-                                        the limit of
-                                        {{
-                                            channel(variant.channel_id)
-                                                ?.max_body_length
-                                        }}
-                                    </template>
-                                    <template v-else>
-                                        <span class="sr-only">
-                                            {{ remaining(variant) }} characters
-                                            left:
-                                        </span>
-                                        {{ textLength(variant.body) }} /
-                                        {{
-                                            channel(variant.channel_id)
-                                                ?.max_body_length
-                                        }}
-                                    </template>
-                                </span>
-                            </div>
-                        </div>
-
-                        <div class="grid gap-1.5">
-                            <Label :for="`link-${variant.channel_id}`">
-                                Link (optional)
-                            </Label>
-                            <Input
-                                :id="`link-${variant.channel_id}`"
-                                v-model="variant.link"
-                                type="url"
-                                inputmode="url"
-                            />
-                            <InputError
-                                :message="
-                                    fieldError(`variants.${position}.link`)
-                                "
-                            />
-                        </div>
-                    </section>
+                        <VariantColumn
+                            v-for="column in columns"
+                            :key="column.variant.channel_id"
+                            v-model:body="column.variant.body"
+                            v-model:link="column.variant.link"
+                            v-model:link-title="column.variant.link_title"
+                            v-model:link-description="
+                                column.variant.link_description
+                            "
+                            :channel="column.option"
+                            :others="othersFor(column.variant.channel_id)"
+                            :errors="{
+                                body: fieldError(
+                                    `variants.${column.position}.body`,
+                                ),
+                                channel: fieldError(
+                                    `variants.${column.position}.channel_id`,
+                                ),
+                                link: fieldError(
+                                    `variants.${column.position}.link`,
+                                ),
+                                linkTitle: fieldError(
+                                    `variants.${column.position}.link_title`,
+                                ),
+                                linkDescription: fieldError(
+                                    `variants.${column.position}.link_description`,
+                                ),
+                            }"
+                            :removable="removable(column.variant.channel_id)"
+                            :data-test="`text-${column.variant.channel_id}`"
+                            @remove="requestRemoval(column.variant.channel_id)"
+                            @copy="
+                                (from: number) =>
+                                    requestCopy(column.variant.channel_id, from)
+                            "
+                        />
+                    </div>
 
                     <section
                         v-if="post && lockedVariants.length"
@@ -559,6 +759,7 @@ const locked = computed(() => {
                         </div>
                         <PostTexts
                             :post="{ ...post, variants: lockedVariants }"
+                            side-by-side
                         />
                     </section>
                 </template>
@@ -585,12 +786,15 @@ const locked = computed(() => {
                     </section>
 
                     <section class="rounded-2xl bg-card p-5.5 shadow-xs">
-                        <PostTexts :post="post" />
+                        <PostTexts :post="post" side-by-side />
                     </section>
                 </template>
             </div>
 
-            <aside class="grid content-start gap-4">
+            <aside
+                class="grid content-start items-start gap-4"
+                :class="sideBySide ? 'md:grid-cols-2 2xl:grid-cols-1' : ''"
+            >
                 <section
                     class="grid gap-2 rounded-xl p-5.5"
                     :class="
@@ -809,6 +1013,46 @@ const locked = computed(() => {
                     "
                     class="grid gap-2 rounded-xl bg-card p-5.5 shadow-xs"
                 >
+                    <!-- One approval covers every text that is still to
+                         be sent. This says which, and when they go. -->
+                    <div
+                        v-if="post?.can.approve && !form.isDirty"
+                        class="grid gap-1.5 pb-1 text-base"
+                        data-test="approval-covers"
+                    >
+                        <p>
+                            <template v-if="pending.length === 1">
+                                Approving covers the text for:
+                            </template>
+                            <template v-else>
+                                One approval covers all
+                                {{ pending.length }} texts of this post:
+                            </template>
+                        </p>
+                        <ul class="grid gap-1">
+                            <li v-for="variant in pending" :key="variant.id">
+                                {{ variant.channel_name }}
+                                <span class="text-muted-foreground">
+                                    - {{ variant.platform_label }}
+                                </span>
+                            </li>
+                        </ul>
+                        <p v-if="post.scheduled_at">
+                            {{
+                                pending.length === 1
+                                    ? 'Once approved it fires'
+                                    : 'Once approved they fire together,'
+                            }}
+                            <span class="font-mono">{{
+                                formatDateTime(post.scheduled_at, timezone)
+                            }}</span
+                            >.
+                        </p>
+                        <p v-else>
+                            Nothing is sent until the post has a firing time.
+                        </p>
+                    </div>
+
                     <!-- Approving is the one red action of this page. -->
                     <Button
                         v-if="post?.can.approve"
@@ -898,9 +1142,10 @@ const locked = computed(() => {
                         v-if="post && post.state === 'failed' && post.can.retry"
                         class="text-sm text-muted-foreground"
                     >
-                        Before you send it again, check the channel itself. If
-                        the post is there after all, sending it again makes a
-                        duplicate.
+                        Before you send it again, look at the channel itself. If
+                        the post is there, leave this post as it is: sending it
+                        again publishes a second copy. If it is not there, send
+                        it again.
                     </p>
                 </section>
 
@@ -986,6 +1231,27 @@ const locked = computed(() => {
                             </dd>
                         </div>
                         <div
+                            v-if="post.origin.left_out.length"
+                            class="grid gap-0.5"
+                            data-test="post-origin-left-out"
+                        >
+                            <dt class="text-sm text-muted-foreground">
+                                Left out
+                            </dt>
+                            <dd class="break-words">
+                                {{ post.origin.left_out.join(', ') }} could not
+                                publish when this was drafted, so there is no
+                                text for
+                                {{
+                                    post.origin.left_out.length === 1
+                                        ? 'it. Its slot is'
+                                        : 'them. Their slots are'
+                                }}
+                                open again: connect the channel and propose the
+                                week again.
+                            </dd>
+                        </div>
+                        <div
                             v-if="post.origin.input_tokens !== null"
                             class="grid gap-0.5"
                             data-test="post-origin-cost"
@@ -1031,7 +1297,7 @@ const locked = computed(() => {
         :open="confirming !== null"
         @update:open="(open: boolean) => !open && (confirming = null)"
     >
-        <DialogContent>
+        <DialogContent @close-auto-focus="onDialogClosed">
             <DialogHeader class="space-y-3">
                 <DialogTitle>
                     <template v-if="dialog === 'delete'">
@@ -1042,6 +1308,12 @@ const locked = computed(() => {
                     </template>
                     <template v-else-if="dialog === 'retry'">
                         Send this post again?
+                    </template>
+                    <template v-else-if="dialog === 'remove-channel'">
+                        Take {{ channelName(removing) }} off this post?
+                    </template>
+                    <template v-else-if="dialog === 'copy-text'">
+                        Replace the text for {{ channelName(copying?.into) }}?
                     </template>
                     <template v-else>Return this post to draft?</template>
                 </DialogTitle>
@@ -1056,9 +1328,22 @@ const locked = computed(() => {
                         out, it cannot be taken back from here.
                     </template>
                     <template v-else-if="dialog === 'retry'">
-                        Look at {{ pendingNames }} first. If the post is there
-                        after all, sending it again puts a second copy in
-                        public, and Noon Gun cannot see or undo that.
+                        Look at {{ pendingNames }} first. Noon Gun cannot see
+                        whether the post arrived. If the post is there, choose
+                        Cancel and leave this post as it is. It stays listed as
+                        failed here, and that is all right. If the post is not
+                        there, tick the box and send it again.
+                    </template>
+                    <template v-else-if="dialog === 'remove-channel'">
+                        The text for {{ channelName(removing) }} is not in any
+                        other column as it stands. It is removed from this post
+                        when you save. The other texts stay as they are.
+                    </template>
+                    <template v-else-if="dialog === 'copy-text'">
+                        The text for {{ channelName(copying?.into) }} is
+                        replaced with the text for
+                        {{ channelName(copying?.from) }}. The link stays as it
+                        is.
                     </template>
                     <template v-else-if="post?.state === 'failed'">
                         The approval is removed and the post must be approved
@@ -1106,7 +1391,11 @@ const locked = computed(() => {
                 </Button>
                 <Button
                     type="button"
-                    :variant="dialog === 'delete' ? 'destructive' : 'default'"
+                    :variant="
+                        dialog === 'delete' || dialog === 'remove-channel'
+                            ? 'destructive'
+                            : 'default'
+                    "
                     :disabled="
                         busy !== null || (dialog === 'retry' && !checkedChannel)
                     "
@@ -1120,6 +1409,12 @@ const locked = computed(() => {
                     </template>
                     <template v-else-if="dialog === 'retry'">
                         Send again
+                    </template>
+                    <template v-else-if="dialog === 'remove-channel'">
+                        Take it off
+                    </template>
+                    <template v-else-if="dialog === 'copy-text'">
+                        Replace the text
                     </template>
                     <template v-else>Return to draft</template>
                 </Button>

@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "1f65c7be-7eb1-4ed4-a5ad-fd7e1ab377b7",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:32.445Z",
+  "payload": {
+    "name": "DraftingPages",
+    "type": "ui",
+    "description": "Brief, pillars, slots, ideas, propose a week, draft a post from an idea, and Settings Drafting (provider and keys behind password confirmation).",
+    "responsibility": "Let a member set up and request drafts",
+    "path": "resources/js/pages",
+    "status": "active"
+  },
+  "seq": 1
+}
