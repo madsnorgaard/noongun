@@ -310,10 +310,12 @@ there: Noon Gun estimates cost, it does not cap what the provider charges.
 | `NOONGUN_DRAFT_OPENAI_EFFORT` | empty | The reasoning effort for OpenAI: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`, as far as the model accepts it. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call. |
-| `NOONGUN_DRAFT_PROMPT_VERSION` | `v2` | The folder under `resources/prompts/draft/` that holds the prompt. `v2` asks for a text written for each channel; `v1` is kept for the runs that used it. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v3` | The folder under `resources/prompts/draft/` that holds the prompt. `v3` asks for a text written for each channel and tells the model which examples did well; `v2` and `v1` are kept for the runs that used them. |
 | `NOONGUN_DRAFT_PRICES`, `NOONGUN_DRAFT_PRICE_CURRENCY` | empty, `USD` | The price table for the cost estimate. |
-| `NOONGUN_DRAFT_EXAMPLES` | `5` | How many of the texts the workspace approved most recently are sent with a draft request as examples, for each target channel. `0` sends none. Never more than 10. |
-| `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` | `6000` | The most characters all examples of one request hold together. Over that, the oldest are left out; a text is never cut. `0` sends none. Never more than 40000. |
+| `NOONGUN_DRAFT_EXAMPLES` | `5` | How many texts the workspace approved are sent with a draft request as examples, for each target channel. `0` sends none. Never more than 10. |
+| `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` | `6000` | The most characters all examples of one request hold together. Over that, the texts chosen for how they did are left out first, then the oldest; a text is never cut. `0` sends none. Never more than 40000. |
+| `NOONGUN_DRAFT_EXAMPLES_TOP_SHARE` | `50` | The share of the examples of a channel, in percent, that goes to the approved posts that did best instead of the most recent ones. Rounded down, and one example always stays with the most recent post. `0` takes only the most recent. |
+| `NOONGUN_DRAFT_EXAMPLES_TOP_DAYS` | `90` | How many days back a post may have been published to be taken as an example for how it did. `0` takes none that way. Never more than 365. |
 
 ### What is sent to the provider
 
@@ -329,12 +331,13 @@ conversation. The prompt is built in one place
   does not open it, and neither does the model;
 - for each target channel its number, its platform and the limits of that
   platform, such as the longest text;
-- the texts the workspace approved most recently, as examples of its voice
-  and of what has already been said: for each target channel the last
-  `NOONGUN_DRAFT_EXAMPLES` texts of that channel (see "Examples from approved
-  posts" below). With each text goes the platform, the number of the channel
-  when the draft is for that channel too, and the name of the pillar the post
-  had. `NOONGUN_DRAFT_EXAMPLES=0` sends none;
+- texts the workspace approved, as examples of its voice and of what has
+  already been said: for each target channel `NOONGUN_DRAFT_EXAMPLES` texts
+  of that channel, the most recent ones and those that did best (see
+  "Examples from approved posts" below). With each text goes the platform,
+  the number of the channel when the draft is for that channel too, the name
+  of the pillar the post had, and a mark when the text was chosen because it
+  did well. `NOONGUN_DRAFT_EXAMPLES=0` sends none;
 - a few words about the other posts of the same week, so that the same post
   is not written twice: for each at most 60 characters of the name of its
   pillar, of the title of its idea and of the first line of its text, for at
@@ -348,7 +351,9 @@ Never sent: platform tokens, API keys, the names of your Pages and profiles,
 the name of the workspace, names or email addresses of users, and anything
 that belongs to another workspace. Of an earlier post the text is sent and
 nothing else about it: not its link or the card of the link, not who wrote or
-approved it, not when, not its address on the platform and no figures. The API
+approved it, not when, not its address on the platform and no figures: of
+how a post did, the provider learns only whether it was marked as one that did
+well, never a score or a count. The API
 key travels in a request header to the provider and nowhere else. It is not
 written to logs, error messages, the queue or the draft run.
 
@@ -368,13 +373,14 @@ phrases, and that it must never copy a sentence.
   published, published, or failed on the way to the platform. A draft that
   waits for approval, a rejected post and a post that was returned to draft
   do not count.
-- For each channel a draft is for, the last `NOONGUN_DRAFT_EXAMPLES` texts of
-  that channel are taken, newest approval first. A channel with fewer is
-  topped up with texts of your other channels on the same platform. Nothing
-  is taken from another platform.
+- For each channel a draft is for, `NOONGUN_DRAFT_EXAMPLES` texts of that
+  channel are taken. Some of them are the posts that did best (see below),
+  the rest are the most recent, newest approval first. A channel with fewer
+  is topped up with the most recent texts of your other channels on the same
+  platform. Nothing is taken from another platform.
 - All examples of one request hold at most `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS`
-  characters together. Over that, the oldest are left out. A text is never
-  cut.
+  characters together. Over that, the texts chosen for how they did are left
+  out first, then the oldest. A text is never cut.
 - They are chosen when the draft is written, not when it is asked for. The
   drafts of one proposed week therefore do not see each other as examples
   until you approve them. What they do get is the list of the other posts of
@@ -383,11 +389,39 @@ phrases, and that it must never copy a sentence.
 - Only texts of your own workspace can be chosen.
 
 The pages that start a draft say when examples are sent. The editor says on
-a drafted post how many earlier posts it was written with; the draft run
-keeps the numbers of those posts and no text.
+a drafted post how many earlier posts it was written with and how many of
+them were chosen because they did well; the draft run keeps the numbers of
+those posts and no text.
 
-Noon Gun does not yet know how a post did. From the insights milestone on,
-the examples are chosen by that, not only by how recent they are.
+#### Posts that did well
+
+Once Noon Gun reads how your posts do (see "Insights"), some of the examples
+are chosen for that:
+
+- Of the examples of a channel, `NOONGUN_DRAFT_EXAMPLES_TOP_SHARE` percent
+  (default 50, which is 2 of 5) go to posts that did well. The others stay
+  with the most recent posts, and at least one always does, so a draft still
+  sees what you said last.
+- A post did well when its engagement score on that channel is above the
+  average of your approved posts on the same channel, among those published
+  in the last `NOONGUN_DRAFT_EXAMPLES_TOP_DAYS` days (default 90). After that
+  a post is no longer chosen for how it did, however well it did.
+- At most one post of each pillar is chosen this way, so that the drafts do
+  not all learn from the same theme.
+- A post without numbers is not a post that did badly. It is simply not
+  chosen this way and can still be one of the most recent. On a channel
+  without numbers, such as LinkedIn today, and in a new workspace, the
+  examples are the most recent posts, as before.
+- A post of another channel is never chosen for how it did there. Numbers of
+  two Pages cannot be compared.
+- The model is told which examples did well and to learn from how they are
+  made: the opening, one clear point, a concrete detail. It is also told not
+  to write about their topics again and not to reuse their wording. It is not
+  sent any number.
+
+`NOONGUN_DRAFT_EXAMPLES_TOP_SHARE=0` turns this off and takes only the most
+recent posts. Marking the examples needs prompt `v3`, the default; with `v2`
+the same posts are sent without the mark.
 
 ### What comes back
 
@@ -469,7 +503,7 @@ The model must support structured outputs. A smaller model is cheaper and
 faster and writes plainer drafts. Thinking counts against
 `NOONGUN_DRAFT_MAX_TOKENS`, so if answers are cut off, raise that limit or set
 a lower `NOONGUN_DRAFT_ANTHROPIC_EFFORT`. To change what the model is told,
-copy `resources/prompts/draft/v2` to a new folder, edit it and point
+copy `resources/prompts/draft/v3` to a new folder, edit it and point
 `NOONGUN_DRAFT_PROMPT_VERSION` at it. Details are in
 `docs/platform-notes/llm.md` and `docs/adr/0011-drafting-contract.md`.
 
@@ -609,7 +643,8 @@ Before the start the page shows two figures from the price table:
   more than this, however long the brief is.
 
 Both figures include the examples from approved posts. The expected cost
-counts the examples that would be sent now. The worst case counts the most
+counts the examples that would be sent now, chosen the way a draft run
+chooses them. The worst case counts the most
 there could be, at four tokens for each of the
 `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` characters, because a post can be approved
 between the start and the moment a draft is written. Lower that setting or
@@ -881,7 +916,7 @@ it there.
 | `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call to the provider. |
-| `NOONGUN_DRAFT_PROMPT_VERSION` | `v2` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v3` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
 | `NOONGUN_DRAFT_PRICES` | empty | Prices per million tokens, as JSON, added to the table in `config/noongun.php`: `{"anthropic":{"model-name":{"input":4,"output":20}}}`. Only used to estimate what a draft run cost. |
 | `NOONGUN_DRAFT_PRICE_CURRENCY` | `USD` | Currency of the price table. |
 | `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` | `14` | Most posts one "Propose a week" drafts. |

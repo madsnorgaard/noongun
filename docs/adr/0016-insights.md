@@ -165,6 +165,19 @@ variants, the history of one variant, totals for posts, a summary for each
 pillar over a period, and the variants of given channels that did best in the
 last N days. Each is one query, scoped to the current workspace.
 
+### Drafting learns from the score
+
+The examples a draft request carries lean towards the posts that did well:
+`Content\ApprovedTexts::best()` ranks the approved texts of one channel by
+`EngagementScore::SQL` and gives those above the average of that channel in a
+recent window. What that does, the limits it keeps and the three ways it
+could go wrong (collapse, staleness, repetition) are recorded in ADR 0011,
+"Chosen for how they did". It does not use `Performance::top()`, which ranks
+what is public without asking for an approval and without the pillar of a
+post; the formula is the same one. Null is not zero there either: a text
+without numbers is not ranked and does not count towards the average. No
+number is sent to a provider, only whether a text did well.
+
 ### What needs `read_insights`
 
 Reach and clicks on Facebook. Without it both are null and everything else

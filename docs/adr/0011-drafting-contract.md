@@ -217,6 +217,9 @@ M6, to be filled with the posts that did well. Two things were seen before M6:
 drafts on the same pillar were written blind to each other and repeated, and
 an edit made before approving was never picked up. So a first version is
 built without metrics: the texts the workspace approved, as it approved them.
+M6 added the choice by performance; see "Chosen for how they did" at the end
+of this section, which changes which texts are taken and the order in which
+they are left out, and nothing else described here.
 
 Selection (`Actions\SelectExamplePosts`, reading through
 `Content\ApprovedTexts`):
@@ -247,7 +250,8 @@ the post had (at most 60 characters), and the id of the channel only when
 that channel is a target of the same request, which already names it. It
 does not carry: the id of the post, the link or its card, the author or the
 approver, any time, the permalink, metrics, or the id of a channel the
-request does not name. Whether a human changed the text before approving is
+request does not name. (Since M6 it also carries whether the text was chosen
+because it did well; still no numbers.) Whether a human changed the text before approving is
 not sent either: nothing records it reliably today (a run does not keep the
 text the model gave), and edit tracking was not built for this.
 
@@ -313,13 +317,130 @@ text is copied. The editor reads the count for "Where this draft came from".
 A retry notes its own choice. The list of posts planned alongside is not
 recorded.
 
-#### What M6 changes
+#### Chosen for how they did (M6, issue #6)
 
-Selection becomes ranking: with metrics, the examples are the approved posts
-that did well, not only the most recent, and `ApprovedTexts::latest()` is the
-one place that order is decided. The limits, what an example carries and how
-it is printed stay. Whether metrics themselves are sent is a question for M6
-and needs a line in the README if the answer is yes.
+With M6 a post has numbers (ADR 0016), and the examples lean towards what
+worked. Selection is still `Actions\SelectExamplePosts` reading through
+`Content\ApprovedTexts`, which is the one place the order of approved texts is
+decided: `latest()` for the most recent, `best()` for those that did well.
+
+The rule in one sentence: of the examples of a channel, a share goes to the
+approved posts of that channel that scored above its average in a recent
+window, best first and at most one for each pillar, and every other place goes
+to the most recent approved posts as before.
+
+- **Places.** `NOONGUN_DRAFT_EXAMPLES_TOP_SHARE` (default 50) is the share in
+  percent of `NOONGUN_DRAFT_EXAMPLES`, rounded down, and never all of them: at
+  least one example of a channel is always its most recent approved text. With
+  the defaults that is 2 of 5. A share of 0, a window of 0 days, or one example
+  for a channel gives no such place, and then the choice is exactly the one
+  described above for issue #22.
+- **Did well.** The score is `EngagementScore` (ADR 0016), from the current
+  numbers of the text on that channel. A text qualifies when its score is
+  above the average score of the approved texts of the same channel that were
+  published in the window. "Best" alone would not be honest: the best of three
+  posts nobody reacted to did not do well, and the prompt says of a marked
+  example that it did better than the posts of the author usually do. With one
+  measured text, or with the same score for all, nothing is above the average
+  and nothing is chosen this way.
+- **Window.** `NOONGUN_DRAFT_EXAMPLES_TOP_DAYS` (default 90, at most 365),
+  counted from `post_variants.published_at`, because that is when the numbers
+  began. Approval can be much earlier than publication.
+- **Not measured is not zero.** A text without a snapshot has no score. It is
+  not in the ranking and not in the average; it competes for the places of the
+  most recent only. A workspace without numbers, and every LinkedIn channel
+  until M9, therefore gets exactly the choice of issue #22. A test compares
+  the two.
+- **One for each pillar.** Of the posts of one pillar, only the best can take
+  a place for how it did (`SelectExamplePosts::TOP_PER_PILLAR`). The second
+  place goes to the best post of another pillar, however close or far the
+  scores are, and when no other pillar has a post above the average the place
+  goes to a recent text. A closeness threshold ("prefer variety when scores
+  are within x percent") was considered and left out: it is one more number
+  nobody has data to set, and a fixed cap of one gives variety whenever there
+  is any to be had. Posts without a pillar are not held to the cap, because
+  nothing says they share a theme.
+- **Never from another channel.** A top-up from other channels of the same
+  platform is by recency only, as before, and is never marked. A score counts
+  absolute reactions, so it compares posts of one channel (ADR 0016); a hit on
+  a Page with many followers says little about what works on a small one, and
+  "above the average" would have no channel to be the average of. A channel
+  with too few measured posts simply gets recent texts.
+- **Order.** For each target channel: the texts that did well, best first,
+  then the recent ones, newest approval first, then top-ups. Every order ends
+  on the id of the text (score, then approval, then id), so the same state
+  gives the same request. The cost estimate and the tests rely on that.
+- **The character limit.** Over `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS`, the texts
+  chosen for how they did are left out first, the lowest score first, and
+  only then the text with the oldest approval. Under pressure the request
+  falls back towards the choice of issue #22: the recent texts are what keeps
+  a draft from repeating last week, which matters more than one more lesson
+  in what worked. A workspace with long posts raises the limit to see more of
+  the ranking.
+- **Approval and workspace.** `best()` reads the same states as `latest()`
+  through the workspace scope, and joins `metric_snapshots` on `workspace_id`
+  as well as on the variant. A post that did well and was returned to draft is
+  out, of the choice and of the average.
+
+The three ways this could go wrong, and what holds against each:
+
+1. *Collapse*: the same hits in every request, every draft imitates them,
+   and the feed narrows. Held by the share (never more than all but one place,
+   2 of 5 by default), by one place for each pillar, by the window, and by the
+   prompt, which asks the model to learn how a marked example is made and not
+   to return to its topic or wording.
+2. *Staleness*: an old hit is sent for ever. Held by the window: after 90
+   days a post cannot be chosen for how it did, whatever its score.
+3. *Repetition*: ranking alone loses what was said last week. Held by the
+   places that stay with the most recent texts, by leaving those out last
+   under the character limit, and by `<also_planned>`.
+
+What a provider is told. `ExamplePost` gains one value, `performedWell`, and
+nothing else. Prompt v3 prints it as `performed="well"` on the `<example>`
+and, only when a request holds such an example, adds these lines before the
+examples:
+
+> The examples marked performed="well" did better with readers than the posts
+> of this author usually do. Learn from how they are made: how they open, how
+> clearly they make one point, what concrete detail they use. Do not write
+> about their topics again and do not reuse their wording because they did
+> well: what is said above holds for them too. The examples without the mark
+> are the most recent posts.
+
+No number is sent: not the score and not reactions, comments, shares or
+clicks. A number costs tokens on every example, invites the model to chase it
+("write what got 400 reactions"), and cannot be read without knowing the size
+of the audience, which is not sent either. The yes or no carries what the
+model can use. Examples remain data: the mark is an attribute Noon Gun
+writes, and a text or a pillar name cannot produce it, because `<` and `"`
+are made harmless as before.
+
+Prompt versions. v2 has been used for real drafts, so it is frozen now and
+pinned by hash next to v1. v3 is a copy of v2 with the mark and the lines
+above, and is the default. Its system part is that of v2 word for word, and
+while no example is marked its user part is too; a test holds both. v1 and v2
+receive the same request and print the examples without the mark. An instance
+that sets `NOONGUN_DRAFT_PROMPT_VERSION=v2` still gets the new choice of
+examples, without being told which did well.
+
+Cost. The expected cost renders the request `SelectExamplePosts` would build
+now, so it includes the choice by performance, the mark and the lines about
+it, on both plan pages. The worst case renders every example a request could
+carry as marked, so it also holds if every post is measured between the start
+and the job. The allowance for the texts is unchanged: the number of examples
+and the character limit are the same.
+
+What is recorded. A run notes, next to `request['example_post_ids']`,
+`request['performance_example_post_ids']`: the posts with a text that was
+chosen because it did well. No score is copied. The editor says "Written with
+N earlier posts as examples, M of them chosen because they did well." The
+plan pages say that posts that did best go along when the choice made now
+holds one, and the Drafting settings page names it in what is sent.
+
+Not done: nothing rotates the hits within the window, so a workspace that
+posts rarely can see the same two marked examples for weeks. The pillar cap
+and the share bound the effect; rotation would make a request depend on the
+day and is left until there is evidence it is needed.
 
 ### Slots
 
