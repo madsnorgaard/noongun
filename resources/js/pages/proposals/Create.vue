@@ -37,6 +37,8 @@ const props = defineProps<{
     generator: { provider: string; model: string } | null;
     /** Expected and worst case cost by the price table, or null without a price. */
     cost: { currency: string; expected: string; worst: string } | null;
+    /** How many approved posts go along for each channel, or null when none do. */
+    examples: { per_channel: number } | null;
     limits: {
         posts_per_proposal: number;
         runs_per_day: number;
@@ -416,6 +418,23 @@ function start(): void {
                             <dd v-else class="text-sm text-muted-foreground">
                                 No price is set for this model, so there is no
                                 estimate.
+                            </dd>
+                        </div>
+
+                        <div
+                            v-if="examples"
+                            class="grid gap-0.5"
+                            data-test="proposal-examples"
+                        >
+                            <dt class="text-sm text-muted-foreground">
+                                Examples
+                            </dt>
+                            <dd class="text-sm">
+                                {{
+                                    examples.per_channel === 1
+                                        ? 'The last approved post for each channel is sent as an example.'
+                                        : `The last ${examples.per_channel} approved posts for each channel are sent as examples.`
+                                }}
                             </dd>
                         </div>
 

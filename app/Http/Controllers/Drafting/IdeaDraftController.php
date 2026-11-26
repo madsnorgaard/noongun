@@ -78,6 +78,7 @@ class IdeaDraftController extends Controller
             ]),
             'generator' => $this->presenter->generator($workspace),
             'cost' => $this->presenter->costOfIdeaDraft($workspace, $plan),
+            'examples' => $this->presenter->examples($plan->channels),
             'limits' => [
                 'runs_per_day' => DraftingLimits::runsPerDay(),
                 'runs_used' => $budget->usedByWorkspace(),
