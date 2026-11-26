@@ -82,6 +82,7 @@ Run `./dev help` for the full list.
 | `redis` | Redis for cache, sessions and queues, only reachable inside the compose network |
 
 `app`, `horizon` and `scheduler` use the same image; only the command differs.
+All three mount the `media` volume, which holds the images on posts.
 `compose.override.yml` is picked up automatically in development: it builds the
 `dev` image target and mounts the source code. To run the production image
 without the override:
@@ -180,6 +181,63 @@ in Noon Gun never deletes anything from a platform. See
 `docs/adr/0010-post-editing-and-deletion.md`.
 
 Owners and editors write, approve, schedule and delete. Viewers can look.
+
+### Images on posts
+
+A text can carry images. An owner or editor uploads one image at a time; it
+then belongs to the workspace and can be put on any text, also on several
+texts of one post without a second upload.
+
+What happens to an upload:
+
+- JPEG, PNG and WebP are accepted. What a file is, is read from its content,
+  not from its name. SVG, GIF, HEIC and everything else are refused.
+- The image is decoded and written again, and only that new file is kept. It
+  holds pixels and nothing else: the place a photo was taken, the camera and
+  every other piece of metadata are gone, and so is anything hidden in the
+  file. A photo is turned upright first.
+- It is stored as a JPEG or a PNG, the types both platforms take. A WebP
+  becomes a PNG when it has transparency and a JPEG when it has none.
+- An image with a longer side above 4096 pixels is scaled down to that.
+
+Images are private. They are shown to the members of their workspace through
+the app, at `/media/{id}`, and there is no address that reaches a file
+without signing in. A platform gets an image by upload from the server when
+the post is published; it is never given an address to fetch from, so this
+works on an instance that only a tailnet can reach.
+
+The images of a text, their order and their descriptions are part of the
+post like the text itself. They can only be changed while the post is a
+draft, and an approval covers them: approving is refused when an image was
+added, removed, moved or described differently after the page was opened.
+
+Before a post can be approved, each text is checked against what its platform
+takes: how many images, which types, how large. An image without a
+description does not hold a post back, but the page points it out, because a
+person who uses a screen reader gets nothing from such an image.
+
+On a platform that shows either pictures or a link preview, the pictures win:
+the link of such a text goes out as its last line, and the page says so. The
+text with that line must fit the limit of the platform.
+
+An image that is on no post is deleted a day after that was first noticed, so
+an upload that was abandoned does not stay. An image that is on a post is
+never deleted, and a published post keeps its images for as long as it
+exists.
+
+The limits, all of them settings (see "Environment and secrets"):
+
+| Limit | Default |
+|---|---|
+| Size of one file | 20 MB |
+| Size of one image | 50 megapixels, 16000 pixels on a side |
+| Images of one workspace together | 2 GB |
+| Uploads by one person | 30 a minute |
+| Images on one text | 10, or fewer where the platform takes fewer |
+
+See `docs/adr/0017-images-on-posts.md` for the reasons, and "Images, the
+media volume and backups" below for what the person who runs the instance
+needs to know.
 
 ## Brief, pillars and slots
 
@@ -750,6 +808,65 @@ git pull
 docker compose up -d --build --wait
 ```
 
+### Images, the media volume and backups
+
+The app keeps its data in three Docker volumes:
+
+| Volume | Holds | Lost without a backup |
+|---|---|---|
+| `noongun_postgres` | The database | Everything |
+| `noongun_media` | The uploaded images, mounted at `/app/storage/app/media` in `app`, `horizon` and `scheduler` | The pictures of every post, also of published ones |
+| `noongun_storage` | Logs and caches of the framework | Nothing that cannot be made again |
+
+`noongun_redis` holds queues, sessions and the cache.
+
+A backup is the database, the media volume and `.env`, taken together. A
+database without the media volume shows posts whose images are missing, and
+the media volume without the database is a folder of files with random names.
+To copy the images out while the stack runs:
+
+```sh
+mkdir -p backup && docker compose run --rm --no-deps --entrypoint "" -v "$PWD/backup:/backup" app \
+  tar -czf /backup/media-$(date +%F).tar.gz -C /app/storage/app media
+```
+
+and to put them back into an empty volume:
+
+```sh
+docker compose run --rm --no-deps --entrypoint "" -v "$PWD/backup:/backup" app \
+  tar -xzf /backup/media-2026-11-26.tar.gz -C /app/storage/app
+```
+
+Files are only ever added and removed, never changed, so a copy taken while
+the app runs is consistent with a database dump taken just before it.
+
+Processing images needs the GD extension of PHP, which the image installs.
+After an update that adds it, rebuild: `docker compose up -d --build --wait`.
+An instance without it refuses every upload and says why.
+
+**Raising the size of an upload.** Three settings bound it, and the smallest
+one applies:
+
+1. `NOONGUN_MEDIA_MAX_BYTES` in `.env`, 20 MB by default.
+2. PHP: `upload_max_filesize` and `post_max_size` in `docker/app/php.ini`,
+   both 32 MB. Changing them means rebuilding the image.
+3. The web server: `NOONGUN_MAX_REQUEST_SIZE` in `.env`, `32MiB` by default.
+   A larger request is answered with 413 before PHP sees it.
+
+Up to 30 MB only the first needs changing. Above that, raise all three and
+keep the second and third a little above the first, because a request is
+larger than the file in it. A reverse proxy in front of the app may have a
+limit of its own. Larger images also need more memory: `NOONGUN_MEDIA_MAX_MEGAPIXELS`
+times four megabytes, plus a margin, must fit in `NOONGUN_MEDIA_MEMORY_LIMIT`.
+
+**Another disk.** `NOONGUN_MEDIA_DISK` names a disk in
+`config/filesystems.php`. The default is the local disk `media`. An
+S3-compatible disk works without a change to the code; it needs the
+`league/flysystem-aws-s3-v3` package and a private bucket. An image
+remembers the disk it was stored on, so images stored before the change are
+still read from the old disk and must be kept there or copied over with
+their rows updated. The `public` disk is refused.
+
 ### Troubleshooting: "Facebook could not be reached"
 
 If connecting a channel says "Facebook could not be reached", the containers
@@ -827,9 +944,24 @@ it there.
 | `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
 | `NOONGUN_PUBLISH_CALLS_PER_JOB` | `3` | How many variants one run of the publishing job sends before it hands the rest to a successor. Bounds the time limit of a job; see "Publishing" for what the queue needs. |
 | `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Shortest lifetime of the lock on one variant. The lock always lives at least 30 seconds longer than the longest job. |
-| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `300` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of any job: 255 seconds for a drafting job with the defaults, 105 for a publishing job. Raise it when you raise `NOONGUN_DRAFT_TIMEOUT`. |
+| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `300` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of any job: 255 seconds for a drafting job with the defaults, 225 for a publishing job that uploads images. Raise it when you raise `NOONGUN_DRAFT_TIMEOUT`, `NOONGUN_PUBLISH_MEDIA_TIMEOUT` or `NOONGUN_PUBLISH_MEDIA_UPLOADS_PER_JOB`. |
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
+| `NOONGUN_PUBLISH_MEDIA_TIMEOUT` | `60` | Seconds allowed for sending one image to a platform, all calls for that image together. |
+| `NOONGUN_PUBLISH_MEDIA_UPLOADS_PER_JOB` | `2` | How many images one run of the publishing job sends before it hands the rest to a successor. The time limit of a job grows by this times `NOONGUN_PUBLISH_MEDIA_TIMEOUT` when its post has images. |
+| `NOONGUN_MEDIA_DISK` | `media` | The disk in `config/filesystems.php` that new images are written to. Must be private. See "Images, the media volume and backups". |
+| `NOONGUN_MEDIA_MAX_BYTES` | `20971520` | Largest file of one upload, in bytes. PHP and the web server must allow it as well; the smallest limit applies. |
+| `NOONGUN_MAX_REQUEST_SIZE` | `32MiB` | Largest request the web server passes on to the app. Read by `docker-compose.yml`. Keep it in step with `upload_max_filesize` and `post_max_size` in `docker/app/php.ini`. |
+| `NOONGUN_MEDIA_MAX_MEGAPIXELS` | `50` | Most pixels of one uploaded image, in millions. Checked from the header of the file before it is decoded. |
+| `NOONGUN_MEDIA_MAX_SIDE` | `16000` | Longest side of an uploaded image, in pixels. |
+| `NOONGUN_MEDIA_MEMORY_LIMIT` | `512M` | PHP memory limit while one image is processed. Decoding takes four bytes for every pixel. |
+| `NOONGUN_MEDIA_STORED_SIDE` | `4096` | An image with a longer side than this is scaled down to it before it is stored. |
+| `NOONGUN_MEDIA_THUMBNAIL_SIDE` | `480` | Longest side of the small copy the lists show. |
+| `NOONGUN_MEDIA_JPEG_QUALITY` | `90` | Quality of stored JPEG files, 50 to 100. |
+| `NOONGUN_MEDIA_QUOTA_BYTES` | `2147483648` | Most bytes all stored images of one workspace may take together. `0`: no limit. |
+| `NOONGUN_MEDIA_UPLOADS_PER_MINUTE` | `30` | Most uploads one person may make in a minute. |
+| `NOONGUN_MEDIA_MAX_PER_VARIANT` | `10` | Most images on one text, whatever its platform would take. |
+| `NOONGUN_MEDIA_UNUSED_GRACE_HOURS` | `24` | How long an image that is on no post is kept after the clean-up first saw it unused. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
 | `OPENAI_API_KEY` | empty | The instance key for drafting with OpenAI, used by every workspace that drafts with OpenAI and has no OpenAI key of its own. |
 | `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider a workspace drafts with until its owner chooses another. Must be listed under `drafting.providers` in `config/noongun.php`. |
