@@ -1,0 +1,23 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "a8bef1d2-969e-4ee6-8922-dff9cbd7d31f",
+  "version": 1,
+  "timestamp": "2026-11-26T20:46:37.640Z",
+  "payload": {
+    "title": "Images on posts (#25)",
+    "objective": "Let a member add images to a post, per channel text, and publish them to Facebook and LinkedIn with the same approval and idempotency rules as text.",
+    "successCriteria": [
+      "Images are uploaded in the editor and attached per channel within its capabilities",
+      "Each image has alt text",
+      "Stored as disk and path per workspace, never served across workspaces or to signed-out visitors",
+      "Uploads validated by content, metadata removed, limits configurable",
+      "Facebook and LinkedIn publish images idempotently and only after approval",
+      "Changing images after approval invalidates it",
+      "Workspace isolation and adapter tests"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined"
+  },
+  "seq": 1
+}

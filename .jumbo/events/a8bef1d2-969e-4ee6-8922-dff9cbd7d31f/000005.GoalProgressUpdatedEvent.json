@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "a8bef1d2-969e-4ee6-8922-dff9cbd7d31f",
+  "version": 5,
+  "timestamp": "2026-11-26T20:46:38.891Z",
+  "payload": {
+    "taskDescription": "Started 2026-11-26 on feat/25-media from feat/22-examples. Foundation first: media model, storage, upload and serving, capabilities and adapter contract; then Facebook, LinkedIn and the editor in parallel."
+  },
+  "seq": 5
+}
