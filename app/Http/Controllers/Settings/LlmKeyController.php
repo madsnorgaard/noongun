@@ -13,6 +13,7 @@ use App\Domain\Workspaces\Models\Workspace;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Settings\DraftingProviderRequest;
 use App\Http\Requests\Settings\LlmKeyRequest;
+use App\Support\PasswordConfirmation;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
@@ -34,6 +35,10 @@ use Inertia\Response;
  *
  * Owners choose the provider and manage the keys. Editors and viewers
  * learn whether drafting is available and nothing about keys.
+ *
+ * Every change needs a recently confirmed password. The page is told
+ * whether the owner has one, and asks for it before it shows the key form,
+ * so that a key is not typed into a form that cannot store it.
  */
 class LlmKeyController extends Controller
 {
@@ -55,7 +60,7 @@ class LlmKeyController extends Controller
         'examples' => 'earlier posts of this workspace as examples, once there are any',
     ];
 
-    public function edit(Request $request, CurrentWorkspace $current, DraftGenerators $generators, LlmCredentialResolver $keys): Response
+    public function edit(Request $request, CurrentWorkspace $current, DraftGenerators $generators, LlmCredentialResolver $keys, PasswordConfirmation $password): Response
     {
         $workspace = $current->get();
 
@@ -65,6 +70,7 @@ class LlmKeyController extends Controller
         $canManage = $request->user()?->can('viewAny', LlmCredential::class) ?? false;
         $credentials = $canManage ? LlmCredential::query()->get()->keyBy('provider') : new Collection;
         $inEffect = $provider !== null ? $credentials->get($provider) : null;
+        $secondsLeft = $canManage ? $password->secondsLeft($request) : null;
 
         return Inertia::render('settings/Drafting', [
             'provider' => $provider === null ? null : [
@@ -80,10 +86,24 @@ class LlmKeyController extends Controller
             'follows_default' => $workspace->drafting_provider === null,
             'sent_to_provider' => array_values(self::SENT_TO_PROVIDER),
             'providers' => $canManage ? $this->providerRows($workspace, $provider, $generators, $keys, $credentials) : [],
+            'password' => [
+                'confirmed' => $secondsLeft !== null,
+                'seconds_left' => $secondsLeft,
+            ],
             'can' => [
                 'manage' => $canManage,
             ],
         ]);
+    }
+
+    /**
+     * Where the page sends an owner to confirm the password. The route
+     * requires a confirmed password, so the middleware asks for it and
+     * brings the owner back to this address, which leads to the page.
+     */
+    public function confirm(): RedirectResponse
+    {
+        return to_route('llm-key.edit');
     }
 
     public function choose(DraftingProviderRequest $request, CurrentWorkspace $current, DraftGenerators $generators): RedirectResponse

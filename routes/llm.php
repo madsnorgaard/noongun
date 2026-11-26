@@ -11,8 +11,17 @@ Route::middleware(['auth', 'verified'])->group(function () {
     // so the form cannot be used to try keys out, and changing or removing
     // it needs a recently confirmed password, as the security settings do,
     // so that a session someone else got hold of cannot swap the key.
-    // Without a confirmation the request is sent to the password page and
-    // from there back to the settings page; the key is entered again.
+    //
+    // The page asks for the password before it shows the key form, through
+    // the route below: a key is shown once by its provider, and a member
+    // who pasted it first would have to paste it again. These routes stay
+    // guarded all the same. When the confirmation has run out by the time
+    // of the request, it is sent to the password page and from there back
+    // to the settings page, and the key is entered again.
+    Route::get('settings/drafting/confirm', [LlmKeyController::class, 'confirm'])
+        ->middleware(RequirePassword::class)
+        ->name('llm-key.confirm');
+
     Route::put('settings/drafting/key', [LlmKeyController::class, 'update'])
         ->middleware(['throttle:6,1', RequirePassword::class])
         ->name('llm-key.update');

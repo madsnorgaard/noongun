@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { Form, Head, router, usePage } from '@inertiajs/vue3';
-import { computed, nextTick, ref } from 'vue';
+import { Form, Head, Link, router, usePage } from '@inertiajs/vue3';
+import { computed, nextTick, ref, watch } from 'vue';
 import LlmKeyController from '@/actions/App/Http/Controllers/Settings/LlmKeyController';
 import Heading from '@/components/Heading.vue';
 import InputError from '@/components/InputError.vue';
@@ -54,6 +54,7 @@ const props = defineProps<{
     follows_default: boolean;
     sent_to_provider: string[];
     providers: ProviderRow[];
+    password: { confirmed: boolean; seconds_left: number | null };
     can: { manage: boolean };
 }>();
 
@@ -70,6 +71,60 @@ const removing = ref(false);
 const choiceOf = ref<ProviderRow | null>(null);
 const choosing = ref<string | null>(null);
 const chooseError = ref<string | null>(null);
+
+const confirmationEnds = ref<number | null>(null);
+const ranOut = ref(false);
+
+watch(
+    () => props.password,
+    (password) => {
+        confirmationEnds.value =
+            password.seconds_left === null
+                ? null
+                : Date.now() + password.seconds_left * 1000;
+        ranOut.value = false;
+    },
+    { immediate: true },
+);
+
+const mayChange = computed(() => props.password.confirmed && !ranOut.value);
+
+const confirmedUntil = computed(() =>
+    confirmationEnds.value === null
+        ? null
+        : formatDateTime(
+              new Date(confirmationEnds.value).toISOString(),
+              timezone.value,
+          ),
+);
+
+function stillConfirmed(): boolean {
+    if (
+        confirmationEnds.value !== null &&
+        Date.now() < confirmationEnds.value
+    ) {
+        return true;
+    }
+
+    ranOut.value = true;
+    keyFor.value = null;
+    choiceOf.value = null;
+    removalOf.value = null;
+
+    return false;
+}
+
+function askToChoose(row: ProviderRow): void {
+    if (stillConfirmed()) {
+        choiceOf.value = row;
+    }
+}
+
+function askToRemove(row: ProviderRow): void {
+    if (stillConfirmed()) {
+        removalOf.value = row;
+    }
+}
 
 const explanation = computed(() => {
     if (props.chosen_not_offered !== null) {
@@ -146,7 +201,7 @@ const stayLine = computed(() => {
 function choose(): void {
     const row = choiceOf.value;
 
-    if (row === null) {
+    if (row === null || !stillConfirmed()) {
         return;
     }
 
@@ -169,6 +224,10 @@ function choose(): void {
 }
 
 async function enterKeyFor(row: ProviderRow): Promise<void> {
+    if (!stillConfirmed()) {
+        return;
+    }
+
     keyFor.value = row;
 
     await nextTick();
@@ -177,7 +236,7 @@ async function enterKeyFor(row: ProviderRow): Promise<void> {
 }
 
 function remove(): void {
-    if (removalOf.value === null) {
+    if (removalOf.value === null || !stillConfirmed()) {
         return;
     }
 
@@ -250,6 +309,27 @@ function remove(): void {
             {{ stayLine }}
         </p>
 
+        <div
+            v-if="!mayChange"
+            class="grid gap-3"
+            data-test="drafting-needs-password"
+        >
+            <p class="max-w-[72ch] text-base">
+                {{
+                    ranOut
+                        ? 'Your password is needed again, so nothing was changed. Confirm it and make the change once more. A key you had pasted must be pasted again.'
+                        : 'Changing the drafting settings needs your password.'
+                }}
+            </p>
+            <Button class="w-fit" as-child>
+                <Link
+                    :href="LlmKeyController.confirm()"
+                    data-test="confirm-password-for-drafting"
+                    >Confirm your password</Link
+                >
+            </Button>
+        </div>
+
         <ul class="grid gap-2" data-test="drafting-providers">
             <li
                 v-for="row in providers"
@@ -311,7 +391,7 @@ function remove(): void {
                     </p>
                 </div>
 
-                <div class="flex flex-wrap items-center gap-2">
+                <div v-if="mayChange" class="flex flex-wrap items-center gap-2">
                     <Button
                         v-if="row.offered && !row.in_use"
                         type="button"
@@ -319,7 +399,7 @@ function remove(): void {
                         size="sm"
                         :disabled="choosing !== null"
                         :data-test="`use-provider-${row.name}`"
-                        @click="choiceOf = row"
+                        @click="askToChoose(row)"
                     >
                         Draft with {{ row.label }}
                     </Button>
@@ -340,7 +420,7 @@ function remove(): void {
                         size="sm"
                         class="text-muted-foreground"
                         :data-test="`remove-llm-key-${row.name}`"
-                        @click="removalOf = row"
+                        @click="askToRemove(row)"
                     >
                         Remove key
                     </Button>
@@ -350,14 +430,22 @@ function remove(): void {
 
         <InputError :message="chooseError ?? undefined" />
 
-        <p class="max-w-[72ch] text-sm text-muted-foreground">
-            Choosing a provider and changing or removing a key need your
-            password. If you have not given it for a while, you are asked for it
-            first and then brought back here to do it again.
+        <p
+            v-if="mayChange && confirmedUntil"
+            class="max-w-[72ch] text-sm text-muted-foreground"
+            data-test="drafting-password-confirmed"
+        >
+            Your password is confirmed until {{ confirmedUntil }}. A change
+            after that asks for your password first, and a key must then be
+            pasted once more.
         </p>
     </div>
 
-    <div v-if="can.manage && keyFor" class="space-y-6" data-test="llm-key-form">
+    <div
+        v-if="can.manage && mayChange && keyFor"
+        class="space-y-6"
+        data-test="llm-key-form"
+    >
         <Heading
             variant="small"
             :title="
@@ -374,6 +462,7 @@ function remove(): void {
             :options="{ preserveScroll: true }"
             reset-on-success
             reset-on-error
+            :on-before="stillConfirmed"
             class="space-y-6"
             @success="keyFor = null"
             v-slot="{ errors, processing }"

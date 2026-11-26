@@ -275,10 +275,20 @@ the wrong company.
 A workspace key is stored encrypted with `APP_KEY` and is write-only: after it
 is saved, the page shows the provider, the last four characters, when it was
 stored and whose key drafting uses, and never the key. Editors and viewers see
-whether drafting is available and nothing about keys. Storing, replacing
-and removing the key needs a recently confirmed password, like the security
-settings, so a session that someone else got hold of cannot swap the key. Each
-draft run records whether the instance key or the workspace key paid for it.
+whether drafting is available and nothing about keys. Each draft run records
+whether the instance key or the workspace key paid for it.
+
+Choosing the provider and storing, replacing or removing a key need a recently
+confirmed password, like the security settings, so a session that someone else
+got hold of cannot swap the key. The page asks for the password first: until
+it is confirmed, it shows no key field and no buttons, only **Confirm your
+password**, which leads to the password page and back to Settings, Drafting.
+Then the form appears and the key is stored when you submit it. Paste the key
+only after that, because a provider shows a key once. A confirmation holds for
+`AUTH_PASSWORD_TIMEOUT` seconds (three hours unless set otherwise), and the
+page says until when. If it runs out while the page is open, you are asked for
+the password again and a key you had pasted must be pasted once more: Noon Gun
+does not keep a key anywhere while it waits for a password.
 
 To create an Anthropic key, sign in to the Claude Console at
 `platform.claude.com`, add credit to the account and create an API key. To
