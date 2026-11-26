@@ -3,6 +3,7 @@
 namespace App\Domain\Channels;
 
 use App\Domain\Channels\Contracts\ChannelAdapter;
+use App\Domain\Channels\Contracts\ReadsMetrics;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
 use Closure;
@@ -46,6 +47,23 @@ class ChannelManager
     public function for(Channel $channel): ChannelAdapter
     {
         return $this->adapter($channel->platform);
+    }
+
+    /**
+     * The adapter of the channel's platform as a reader of metrics, or null
+     * when that platform gives none: its adapter does not implement
+     * ReadsMetrics, lists no metrics in its capabilities, or cannot be
+     * built. The one place that decides whether a platform reads metrics.
+     */
+    public function metricsReader(Channel|string $platform): (ChannelAdapter&ReadsMetrics)|null
+    {
+        try {
+            $adapter = $this->adapter($platform instanceof Channel ? $platform->platform : $platform);
+        } catch (ChannelAdapterNotAvailable) {
+            return null;
+        }
+
+        return $adapter instanceof ReadsMetrics && $adapter->capabilities()->readsMetrics() ? $adapter : null;
     }
 
     /**
