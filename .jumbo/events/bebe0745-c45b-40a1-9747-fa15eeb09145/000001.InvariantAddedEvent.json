@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "bebe0745-c45b-40a1-9747-fa15eeb09145",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:30.560Z",
+  "payload": {
+    "title": "PromptRenderer alone decides what is sent",
+    "description": "Everything a provider receives comes from DraftRequest::toArray() through a versioned template. Released prompt versions are frozen and pinned by hash.",
+    "rationale": "What leaves the instance must be reviewable in one place and stable per version."
+  },
+  "seq": 1
+}

@@ -1,0 +1,11 @@
+{
+  "type": "GoalSubmittedEvent",
+  "aggregateId": "dc90d88e-afc2-42da-a138-454e542b6ceb",
+  "version": 6,
+  "timestamp": "2026-11-26T19:44:53.772Z",
+  "payload": {
+    "status": "submitted",
+    "submittedAt": "2026-11-26T19:44:53.772Z"
+  },
+  "seq": 6
+}

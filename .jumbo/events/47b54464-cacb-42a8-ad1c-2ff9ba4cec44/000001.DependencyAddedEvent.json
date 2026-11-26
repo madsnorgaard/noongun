@@ -1,0 +1,15 @@
+{
+  "type": "DependencyAddedEvent",
+  "aggregateId": "47b54464-cacb-42a8-ad1c-2ff9ba4cec44",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:34.668Z",
+  "payload": {
+    "name": "Meta Graph API",
+    "ecosystem": "service",
+    "packageName": "graph.facebook.com",
+    "versionConstraint": null,
+    "endpoint": null,
+    "contract": null
+  },
+  "seq": 1
+}

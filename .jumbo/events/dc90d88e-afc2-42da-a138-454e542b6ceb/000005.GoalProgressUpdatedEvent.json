@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "dc90d88e-afc2-42da-a138-454e542b6ceb",
+  "version": 5,
+  "timestamp": "2026-11-26T19:44:53.032Z",
+  "payload": {
+    "taskDescription": "Built on fix/19-skipped-pages, 1758 tests clean, merged into feat/5-linkedin. In PR #23. Business portfolio cause confirmed by a real connect."
+  },
+  "seq": 5
+}

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import { computed, ref } from 'vue';
+import ConnectReportNote from '@/components/channels/ConnectReport.vue';
 import { Button } from '@/components/ui/button';
 import {
     Dialog,
@@ -13,7 +14,7 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { connect, destroy, index } from '@/routes/channels';
 import { edit as chooseChannels } from '@/routes/channels/selection';
-import type { Channel, ChannelPlatform } from '@/types/channels';
+import type { Channel, ChannelPlatform, ConnectReport } from '@/types/channels';
 
 defineOptions({
     layout: {
@@ -30,6 +31,7 @@ const props = defineProps<{
     channels: Channel[];
     platforms: ChannelPlatform[];
     selection_open: boolean;
+    connect_report: ConnectReport | null;
     can: { manage: boolean };
 }>();
 
@@ -363,6 +365,8 @@ function access(channel: Channel): string {
                 </div>
             </li>
         </ul>
+
+        <ConnectReportNote v-if="connect_report" :report="connect_report" />
 
         <p
             v-if="!can.manage && channels.length"

@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "93224db9-b365-48a1-936d-6c326eba8fac",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:29.106Z",
+  "payload": {
+    "name": "DraftGenerators",
+    "type": "lib",
+    "description": "Resolves provider, key and generator for a workspace: offered providers, the settled choice, key order workspace then instance then environment.",
+    "responsibility": "Choose provider and credential for a workspace",
+    "path": "app/Domain/Drafting/DraftGenerators.php",
+    "status": "active"
+  },
+  "seq": 1
+}

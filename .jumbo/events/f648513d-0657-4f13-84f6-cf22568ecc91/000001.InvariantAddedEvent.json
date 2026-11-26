@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "f648513d-0657-4f13-84f6-cf22568ecc91",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:30.241Z",
+  "payload": {
+    "title": "Links are never fetched by the server",
+    "description": "Source links and link cards are text. Noon Gun never opens an address a member or a model supplied; link titles are typed or drafted, never scraped.",
+    "rationale": "Fetching member-supplied addresses from the server is an SSRF risk."
+  },
+  "seq": 1
+}

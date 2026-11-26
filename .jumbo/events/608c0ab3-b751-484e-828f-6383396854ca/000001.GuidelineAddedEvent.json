@@ -1,0 +1,14 @@
+{
+  "type": "GuidelineAddedEvent",
+  "aggregateId": "608c0ab3-b751-484e-828f-6383396854ca",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:32.780Z",
+  "payload": {
+    "category": "testing",
+    "title": "Say what was not verified",
+    "description": "Reports and pull requests list what was only type-checked or tested with fakes: pages not seen in a browser, platforms never called for real, hand-written fixtures.",
+    "rationale": "The first real use found problems no test showed: DNS, missing Pages, the key form order.",
+    "examples": []
+  },
+  "seq": 1
+}

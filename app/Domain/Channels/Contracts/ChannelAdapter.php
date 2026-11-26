@@ -55,6 +55,13 @@ interface ChannelAdapter
      * the user confirm it (Channel::confirm()). What is not confirmed is
      * discarded.
      *
+     * An adapter that left out accounts the platform listed, for example
+     * because the user's role there does not allow publishing, returns a
+     * ConnectedChannels, which is this collection with those accounts and
+     * the reason for each. A plain Collection means nothing was left out.
+     * When no account can be connected at all, it throws NothingToConnect,
+     * which carries the same list.
+     *
      * @return Collection<int, Channel> the saved channels
      *
      * @throws ChannelException

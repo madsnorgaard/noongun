@@ -1,0 +1,14 @@
+{
+  "type": "GuidelineAddedEvent",
+  "aggregateId": "ca21f481-9a97-47ba-8050-f7c1b22ecad4",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:33.735Z",
+  "payload": {
+    "category": "security",
+    "title": "Secrets stay out of reach",
+    "description": "Never read .env, never print environment or compose config, never dump a database, never copy personal data into chat, commits or notes.",
+    "rationale": "Keys and tokens of real accounts live on the home server.",
+    "examples": []
+  },
+  "seq": 1
+}

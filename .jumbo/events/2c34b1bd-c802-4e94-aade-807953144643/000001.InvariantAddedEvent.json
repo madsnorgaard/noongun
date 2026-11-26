@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "2c34b1bd-c802-4e94-aade-807953144643",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:29.593Z",
+  "payload": {
+    "title": "Model output is untrusted",
+    "description": "Output of a provider is validated against DraftSchema, rendered as text and never as HTML, and a link is kept only when it is the source of the idea or a call-to-action address.",
+    "rationale": "A model can be steered by its input and can invent links and markup."
+  },
+  "seq": 1
+}

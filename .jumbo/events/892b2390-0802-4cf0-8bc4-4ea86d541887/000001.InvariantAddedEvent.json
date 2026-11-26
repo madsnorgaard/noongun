@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "892b2390-0802-4cf0-8bc4-4ea86d541887",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:30.873Z",
+  "payload": {
+    "title": "An unknown publish outcome is never resent automatically",
+    "description": "A publish is retried only when the request provably did not reach the platform or the platform said to retry in its own error format. Anything else needs a member to confirm the post is not there.",
+    "rationale": "A duplicate public post cannot be undone quietly."
+  },
+  "seq": 1
+}

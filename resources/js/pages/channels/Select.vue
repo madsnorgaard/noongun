@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { Head, router, useForm } from '@inertiajs/vue3';
 import { ref } from 'vue';
+import ConnectReportNote from '@/components/channels/ConnectReport.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
 import { Spinner } from '@/components/ui/spinner';
 import { index } from '@/routes/channels';
 import { destroy, edit, update } from '@/routes/channels/selection';
-import type { Channel } from '@/types/channels';
+import type { Channel, ConnectReport } from '@/types/channels';
 
 defineOptions({
     layout: {
@@ -26,6 +27,7 @@ defineOptions({
 defineProps<{
     channels: Channel[];
     renewed: Channel[];
+    connect_report: ConnectReport | null;
     minutes: number;
 }>();
 
@@ -127,6 +129,8 @@ function keepNone(): void {
             and the access is erased after
             <span class="font-mono">{{ minutes }}</span> minutes.
         </p>
+
+        <ConnectReportNote v-if="connect_report" :report="connect_report" />
 
         <section
             v-if="renewed.length"

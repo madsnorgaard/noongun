@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+  "version": 5,
+  "timestamp": "2026-11-26T19:44:21.953Z",
+  "payload": {
+    "taskDescription": "Merged in PR #15 on 2026-11-25 and deployed to the home server. Independent security review done; findings fixed in PR #17 (#16). Four Facebook Pages connected for real on 2026-11-26. Acceptance still open: the first real post is scheduled for 2026-11-28 09:30 Europe/Copenhagen."
+  },
+  "seq": 5
+}

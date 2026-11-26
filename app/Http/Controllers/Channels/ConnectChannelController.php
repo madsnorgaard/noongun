@@ -4,7 +4,10 @@ namespace App\Http\Controllers\Channels;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\Contracts\ChannelAdapter;
+use App\Domain\Channels\Contracts\ConnectedChannels;
+use App\Domain\Channels\Contracts\ExplainsMissingAccounts;
 use App\Domain\Channels\Exceptions\ChannelException;
+use App\Domain\Channels\Exceptions\NothingToConnect;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Http\Controllers\Channels\Concerns\PresentsChannels;
@@ -66,6 +69,7 @@ class ConnectChannelController extends Controller
 
         // A new connect replaces a choice that was left open by an earlier one.
         (new ConnectSelection($request->session(), $this->current))->abandon();
+        (new ConnectReport($request->session(), $this->current))->forget();
 
         $request->session()->put(self::PENDING, [
             'platform' => $platform,
@@ -113,14 +117,25 @@ class ConnectChannelController extends Controller
             return to_route('channels.index');
         }
 
+        $report = new ConnectReport($request->session(), $this->current);
+        $hint = $adapter instanceof ExplainsMissingAccounts ? $adapter->missingAccountsHint() : null;
+
         try {
             $channels = $adapter->connect($workspace, $code);
         } catch (ChannelException $exception) {
             report($exception);
             $this->toast('error', $exception->getMessage());
 
+            // Nothing could be connected, but the platform did answer: say
+            // what it listed and what it may have left out.
+            if ($exception instanceof NothingToConnect) {
+                $report->record($platform, $exception->skipped(), $hint);
+            }
+
             return to_route('channels.index');
         }
+
+        $report->record($platform, $channels instanceof ConnectedChannels ? $channels->skipped() : [], $hint);
 
         // The adapter saved what the user already has connected as active
         // (renewed) and everything else as pending, which cannot publish.

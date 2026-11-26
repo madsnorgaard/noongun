@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "d508052a-711f-4b3a-9995-b9c9b22f6d71",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:31.843Z",
+  "payload": {
+    "name": "PillarsAndIdeas",
+    "type": "db",
+    "description": "Pillars with weekly targets and the idea backlog with optional source link and pillar.",
+    "responsibility": "Hold the themes and topics drafts are written about",
+    "path": "app/Domain/Content/Models",
+    "status": "active"
+  },
+  "seq": 1
+}

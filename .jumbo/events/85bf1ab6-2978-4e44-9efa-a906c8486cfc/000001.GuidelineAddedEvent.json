@@ -1,0 +1,14 @@
+{
+  "type": "GuidelineAddedEvent",
+  "aggregateId": "85bf1ab6-2978-4e44-9efa-a906c8486cfc",
+  "version": 1,
+  "timestamp": "2026-11-26T19:46:32.463Z",
+  "payload": {
+    "category": "testing",
+    "title": "Definition of done",
+    "description": "Pest passes, Pint is clean, Larastan passes at level 7, migrations run forwards and backwards, new behaviour has a test including workspace isolation, docs updated.",
+    "rationale": "CI enforces it on every pull request.",
+    "examples": []
+  },
+  "seq": 1
+}

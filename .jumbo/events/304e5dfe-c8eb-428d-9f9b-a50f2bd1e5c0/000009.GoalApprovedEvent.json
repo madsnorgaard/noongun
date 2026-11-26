@@ -1,0 +1,11 @@
+{
+  "type": "GoalApprovedEvent",
+  "aggregateId": "304e5dfe-c8eb-428d-9f9b-a50f2bd1e5c0",
+  "version": 9,
+  "timestamp": "2026-11-26T19:44:25.315Z",
+  "payload": {
+    "status": "approved",
+    "approvedAt": "2026-11-26T19:44:25.315Z"
+  },
+  "seq": 9
+}

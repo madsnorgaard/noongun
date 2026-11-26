@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "b3284fa0-254a-4c75-8839-d67792d5c2ef",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:30.612Z",
+  "payload": {
+    "name": "DraftingLimits",
+    "type": "service",
+    "description": "Daily caps per workspace and on the instance key, posts per proposal, attempts and backoff (DraftingLimits, DraftBudget).",
+    "responsibility": "Bound what drafting may spend",
+    "path": "app/Domain/Drafting/DraftingLimits.php",
+    "status": "active"
+  },
+  "seq": 1
+}

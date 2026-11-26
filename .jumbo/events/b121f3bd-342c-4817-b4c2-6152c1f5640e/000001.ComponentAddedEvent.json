@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "b121f3bd-342c-4817-b4c2-6152c1f5640e",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:32.747Z",
+  "payload": {
+    "name": "PostEditor",
+    "type": "ui",
+    "description": "Post editor with one column per channel, copy between columns, link card fields, readiness problems and approval summary.",
+    "responsibility": "Edit and approve the texts of a post",
+    "path": "resources/js/pages/posts/Edit.vue",
+    "status": "active"
+  },
+  "seq": 1
+}

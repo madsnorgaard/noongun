@@ -53,3 +53,6 @@ npm-debug.log
 /.nova
 /.vscode
 /.zed
+
+# A local compose file, for example for container DNS (see the README)
+compose.local.yml

@@ -1,0 +1,15 @@
+{
+  "type": "ComponentAddedEvent",
+  "aggregateId": "d1b51be8-bf07-46ed-849a-5d51247693ee",
+  "version": 1,
+  "timestamp": "2026-11-26T19:45:34.005Z",
+  "payload": {
+    "name": "SecurityHeaders",
+    "type": "service",
+    "description": "Middleware setting nosniff, frame denial, frame-ancestors, referrer policy and HSTS; TrustedHosts checks the host against APP_URL.",
+    "responsibility": "Harden every web response",
+    "path": "app/Http/Middleware/SecurityHeaders.php",
+    "status": "active"
+  },
+  "seq": 1
+}

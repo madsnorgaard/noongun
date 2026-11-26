@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "72f7b987-5430-4d3a-8fae-92842d233c6b",
+  "version": 5,
+  "timestamp": "2026-11-26T19:44:56.552Z",
+  "payload": {
+    "taskDescription": "Built with StartDraftRuns extracted from ProposeWeek, 69 new tests. In PR #23. Not yet seen in a browser."
+  },
+  "seq": 5
+}

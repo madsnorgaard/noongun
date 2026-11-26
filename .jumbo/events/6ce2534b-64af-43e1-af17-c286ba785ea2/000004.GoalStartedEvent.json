@@ -1,0 +1,13 @@
+{
+  "type": "GoalStartedEvent",
+  "aggregateId": "6ce2534b-64af-43e1-af17-c286ba785ea2",
+  "version": 4,
+  "timestamp": "2026-11-26T19:44:58.489Z",
+  "payload": {
+    "status": "doing",
+    "claimedBy": "77b426e0-7326-4266-8f23-ac9bd3ebe0c6",
+    "claimedAt": "2026-11-26T19:44:58.488Z",
+    "claimExpiresAt": "2026-11-26T20:14:58.488Z"
+  },
+  "seq": 4
+}

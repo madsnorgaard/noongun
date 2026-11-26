@@ -1,0 +1,11 @@
+{
+  "type": "GoalCommittedEvent",
+  "aggregateId": "304e5dfe-c8eb-428d-9f9b-a50f2bd1e5c0",
+  "version": 4,
+  "timestamp": "2026-11-26T19:44:23.452Z",
+  "payload": {
+    "status": "refined",
+    "committedAt": "2026-11-26T19:44:23.452Z"
+  },
+  "seq": 4
+}
