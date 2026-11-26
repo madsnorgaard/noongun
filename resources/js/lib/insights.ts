@@ -101,13 +101,16 @@ export function permissionNote(
 }
 
 /**
- * Whether the reader can put the state right by connecting the channel
- * again, so that the page offers the way there.
+ * Whether connecting the channel again is the next step, so that the page
+ * offers the way there: the channel asks for it, or the platform said the
+ * post is gone and a new connection makes Noon Gun ask once more.
  */
 export function needsReconnect(variant: VariantInsights): boolean {
     return (
-        variant.channel_status === 'needs_reconnect' &&
-        (variant.stale || variant.state === 'blocked')
+        variant.gone ||
+        variant.state === 'gone' ||
+        (variant.channel_status === 'needs_reconnect' &&
+            (variant.stale || variant.state === 'blocked'))
     );
 }
 
@@ -141,6 +144,10 @@ export function variantNote(
                     : `These numbers are from ${checked}. ${channel} is disconnected, so they are not updated.`;
             }
 
+            if (variant.gone) {
+                return `These numbers are from ${checked}. ${platform} says the post is no longer there, so they are not updated. If it is still there, connect ${channel} again and Noon Gun asks once more.`;
+            }
+
             if (!reading.enabled) {
                 return `These numbers are from ${checked}. Insights are turned off on this instance, so they are not updated.`;
             }
@@ -172,6 +179,9 @@ export function variantNote(
 
         case 'off':
             return 'Not measured. Insights are turned off on this instance. To turn them on, set NOONGUN_INSIGHTS_ENABLED=true and restart the containers.';
+
+        case 'gone':
+            return `Not measured. ${platform} says the post is no longer there, so Noon Gun stopped asking. If it is still there, connect ${channel} again and Noon Gun asks once more.`;
 
         case 'blocked':
             return variant.channel_status === 'needs_reconnect'

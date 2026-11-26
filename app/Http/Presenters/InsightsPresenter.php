@@ -220,6 +220,9 @@ final class InsightsPresenter
         $publishedAt = $variant->published_at;
         $stopped = $publishedAt === null || $publishedAt->lessThanOrEqualTo($now->subHours(InsightsConfig::stopAfterHours()));
         $read = $status === ChannelStatus::Active;
+        // The platform said often enough that the post is not there any
+        // more, and it is not asked about again (see DueVariants).
+        $gone = $variant->metrics_gone_count >= InsightsConfig::goneAfter();
 
         $state = match (true) {
             $snapshot !== null => 'measured',
@@ -227,6 +230,7 @@ final class InsightsPresenter
             $stopped => 'never',
             ! InsightsConfig::enabled() => 'off',
             ! $read => 'blocked',
+            $gone => 'gone',
             default => 'pending',
         };
 
@@ -270,6 +274,8 @@ final class InsightsPresenter
             'stopped' => $stopped,
             // The numbers are not being updated, although the post is young enough.
             'stale' => $snapshot !== null && ! $stopped && ! $read,
+            // Young enough to be read, and the platform says the post is gone.
+            'gone' => ! $stopped && $read && $gone,
             // Numbers the platform has and the token of this channel may not read.
             'needs_permission' => in_array($state, ['measured', 'pending'], true)
                 ? $this->names(array_udiff($metrics['platform'], $metrics['channel'], fn (Metric $a, Metric $b): int => $a->value <=> $b->value))

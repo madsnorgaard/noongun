@@ -33,6 +33,7 @@ export type ChannelStatus =
  * - unavailable: its platform gives no numbers
  * - off: insights are turned off on this instance
  * - blocked: its channel is not connected, so it is not read
+ * - gone: the platform says the post is not there any more
  */
 export type MeasuringState =
     | 'measured'
@@ -40,7 +41,8 @@ export type MeasuringState =
     | 'never'
     | 'unavailable'
     | 'off'
-    | 'blocked';
+    | 'blocked'
+    | 'gone';
 
 export type MetricReadingRow = MetricNumbers & {
     /** The numbers held from here... */
@@ -66,6 +68,8 @@ export type VariantInsights = {
     stopped: boolean;
     /** Young enough to be read, and its channel is not connected. */
     stale: boolean;
+    /** Young enough to be read, and the platform says the post is gone. */
+    gone: boolean;
     needs_permission: MetricName[];
     /** Only on the post page. */
     history: MetricReadingRow[] | null;

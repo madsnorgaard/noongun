@@ -824,6 +824,11 @@ How to read them:
   measured on" with the time of its last reading.
 - A channel that needs to be connected again keeps its last numbers, and the
   pages say that they are not updated until it is connected.
+- A post that Facebook reported as gone `NOONGUN_INSIGHTS_GONE_AFTER` times
+  says so, keeps the numbers it had, and offers the way to Channels:
+  connecting the Page again makes Noon Gun ask once more.
+- A Page without `read_insights` shows a dash for reach and clicks, and the
+  pages say that these two need one more permission. Nothing else is missing.
 - With `NOONGUN_INSIGHTS_ENABLED=false` the pages say that insights are turned
   off and still show what was read before.
 

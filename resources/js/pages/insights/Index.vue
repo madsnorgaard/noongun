@@ -607,14 +607,16 @@ function channelNotes(channel: ChannelSummary): string[] {
                     was published within the period.
                 </li>
                 <li id="more-numbers" class="scroll-mt-24">
-                    Some numbers need one more permission. On Facebook, reach
-                    and clicks are only given to an app that has
-                    <span class="font-mono text-sm">read_insights</span>: add it
+                    Some numbers need one more permission, and it is optional. A
+                    Facebook Page connects and publishes without
+                    <span class="font-mono text-sm">read_insights</span>; reach
+                    and clicks then stay a dash. To get them, add the permission
                     to the Meta app and to
-                    <span class="font-mono text-sm">FACEBOOK_SCOPES</span>, then
-                    connect the Page again on
+                    <span class="font-mono text-sm">FACEBOOK_SCOPES</span>,
+                    restart, and connect the Page again on
                     <TextLink :href="channelsPage()">Channels</TextLink>. The
-                    README describes each step under Insights.
+                    Page keeps publishing while you do this. The README has each
+                    step under "Getting reach and clicks".
                 </li>
             </ul>
         </section>

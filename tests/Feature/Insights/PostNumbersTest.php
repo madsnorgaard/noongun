@@ -253,6 +253,27 @@ describe('a post that will not be measured', function () {
         ]);
     });
 
+    it('says that the platform reports the post as gone once it is not asked about any more', function () {
+        $almost = publishedVariant($this->workspace, $this->page, now()->subHours(5));
+        $gone = publishedVariant($this->workspace, $this->page, now()->subHours(5));
+        $goneWithNumbers = publishedVariant($this->workspace, $this->page, now()->subHours(5));
+        $goneAndOld = publishedVariant($this->workspace, $this->page, now()->subDays(30));
+        snapshotFor($goneWithNumbers, ['reactions' => 4], now()->subHours(4));
+
+        DB::table('post_variants')->where('id', $almost->id)->update(['metrics_gone_count' => 2, 'metrics_checked_at' => now()->subMinutes(30)]);
+        DB::table('post_variants')->whereIn('id', [$gone->id, $goneWithNumbers->id, $goneAndOld->id])->update(['metrics_gone_count' => 3, 'metrics_checked_at' => now()->subMinutes(30)]);
+
+        expect(($this->numbersOf)($almost->post_id)['variants'][0])->toMatchArray(['state' => 'pending', 'gone' => false])
+            ->and(($this->numbersOf)($gone->post_id)['variants'][0])->toMatchArray(['state' => 'gone', 'gone' => true, 'next_reading_at' => null])
+            ->and(($this->numbersOf)($goneWithNumbers->post_id)['variants'][0])->toMatchArray(['state' => 'measured', 'gone' => true, 'stale' => false, 'score' => 4])
+            // Too old to be read anyway: that is what the page says.
+            ->and(($this->numbersOf)($goneAndOld->post_id)['variants'][0])->toMatchArray(['state' => 'never', 'gone' => false]);
+
+        config(['noongun.insights.gone_after' => 2]);
+
+        expect(($this->numbersOf)($almost->post_id)['variants'][0]['state'])->toBe('gone');
+    });
+
     it('says that insights are turned off on this instance, and still shows what was read before', function () {
         config(['noongun.insights.enabled' => false]);
 
