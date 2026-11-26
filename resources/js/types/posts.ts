@@ -73,6 +73,8 @@ export type PostOrigin = {
     left_out: string[];
     /** How many approved posts were sent along as examples of the voice. */
     examples: number;
+    /** How many of those were chosen because they did well with readers. */
+    examples_by_performance: number;
     drafted_at: string | null;
     /** Tokens the draft used, as the provider reported them. */
     input_tokens: number | null;

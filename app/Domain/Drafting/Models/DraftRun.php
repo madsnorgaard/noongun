@@ -240,20 +240,26 @@ class DraftRun extends Model
 
     /**
      * Notes on a pending run which approved posts its request carries as
-     * examples, so that the draft can say what it was written with. Only
-     * the ids are kept; the texts stay where they are. Returns false when
-     * the run is no longer pending.
+     * examples, and which of them were chosen because they did well, so
+     * that the draft can say what it was written with. Only the ids are
+     * kept; the texts and the numbers stay where they are. Returns false
+     * when the run is no longer pending.
      *
      * @param  list<int>  $postIds
+     * @param  list<int>  $performancePostIds  those of $postIds chosen for how they did
      */
-    public function noteExamples(array $postIds): bool
+    public function noteExamples(array $postIds, array $performancePostIds = []): bool
     {
         if ($postIds === [] && ! array_key_exists('example_post_ids', $this->request)) {
             return $this->status === DraftRunStatus::Pending;
         }
 
         return $this->move([DraftRunStatus::Pending], [
-            'request' => json_encode([...$this->request, 'example_post_ids' => $postIds]),
+            'request' => json_encode([
+                ...$this->request,
+                'example_post_ids' => $postIds,
+                'performance_example_post_ids' => array_values(array_intersect($performancePostIds, $postIds)),
+            ]),
         ]);
     }
 
@@ -265,6 +271,17 @@ class DraftRun extends Model
         $ids = $this->request['example_post_ids'] ?? null;
 
         return is_array($ids) ? count($ids) : 0;
+    }
+
+    /**
+     * How many of those were chosen because they did well with readers.
+     * 0 for a run from before that was noted.
+     */
+    public function performanceExampleCount(): int
+    {
+        $ids = $this->request['performance_example_post_ids'] ?? null;
+
+        return is_array($ids) ? min(count($ids), $this->exampleCount()) : 0;
     }
 
     /**

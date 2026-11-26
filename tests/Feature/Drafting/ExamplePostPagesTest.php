@@ -58,11 +58,11 @@ describe('the pages that show a plan', function () {
         approvedText($this->workspace, $this->page, str_repeat('An approved text. ', 50), '2026-11-01 08:00:00');
 
         ($this->weekPage)()->assertInertia(fn (Assert $page) => $page
-            ->where('examples', ['per_channel' => 5])
+            ->where('examples', ['per_channel' => 5, 'top_days' => null])
             ->where('cost.expected', fn (string $expected): bool => (float) $expected > (float) $week));
 
         ($this->ideaPage)()->assertInertia(fn (Assert $page) => $page
-            ->where('examples', ['per_channel' => 5])
+            ->where('examples', ['per_channel' => 5, 'top_days' => null])
             ->where('cost.expected', fn (string $expected): bool => (float) $expected > (float) $one));
     });
 
@@ -76,7 +76,7 @@ describe('the pages that show a plan', function () {
         $this->actingAs($this->owner)->get(route('ideas.draft.create', ['idea' => $this->idea->id, 'channels' => [$this->page->id]]))
             ->assertInertia(fn (Assert $page) => $page->where('examples', null));
         $this->actingAs($this->owner)->get(route('ideas.draft.create', ['idea' => $this->idea->id, 'channels' => [$profile->id]]))
-            ->assertInertia(fn (Assert $page) => $page->where('examples', ['per_channel' => 5]));
+            ->assertInertia(fn (Assert $page) => $page->where('examples', ['per_channel' => 5, 'top_days' => null]));
 
         config(['noongun.drafting.examples.per_channel' => 0]);
 

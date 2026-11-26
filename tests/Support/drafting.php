@@ -212,7 +212,7 @@ function largestPromptBytes(DraftRequest $request, string $version): int
 
     foreach ($request->channels as $channel) {
         for ($i = 0; $i < $perChannel && $characters > 0; $i++) {
-            $examples[] = new ExamplePost($channel->platform, '', $channel->channelId, $widest);
+            $examples[] = new ExamplePost($channel->platform, '', $channel->channelId, $widest, true);
         }
     }
 

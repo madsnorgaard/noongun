@@ -11,8 +11,9 @@ use App\Domain\Drafting\ExamplePost;
 use App\Domain\Drafting\ExampleSelection;
 
 /**
- * Chooses the examples a draft request carries: the texts the current
- * workspace approved most recently, for the channels the draft is for.
+ * Chooses the examples a draft request carries: texts the current
+ * workspace approved for the channels the draft is for, some because they
+ * did well with readers and the rest because they are the most recent.
  *
  * - What counts. The text of a variant whose post carries a human approval
  *   now (Content\ApprovedTexts): on its way to a platform, on it, or failed
@@ -20,22 +21,40 @@ use App\Domain\Drafting\ExampleSelection;
  *   because a person signed off their text. A draft, a rejected post and a
  *   post that was returned to draft do not: none of them carries an
  *   approval.
- * - Which. For each target channel the last
- *   noongun.drafting.examples.per_channel texts of that channel, newest
- *   approval first. A channel with fewer is topped up with texts of other
- *   channels of the same platform, and then it stops. A text is in a
- *   request once, a post gives one channel one text, and a top-up that
- *   repeats a text already chosen word for word is left out.
+ * - Which. Each target channel gets noongun.drafting.examples.per_channel
+ *   texts of that channel. A share of them
+ *   (noongun.drafting.examples.top_share, rounded down, never all) goes
+ *   to the texts that did best in the last
+ *   noongun.drafting.examples.top_days days: an engagement score above
+ *   the average of the channel in those days, best first, at most one for
+ *   each pillar. The rest, and every place no such text was found for,
+ *   goes to the most recent texts, newest approval first. A channel with
+ *   fewer is topped up with the most recent texts of other channels of
+ *   the same platform, and then it stops. A text is in a request once, a
+ *   post gives one channel one text, and a top-up that repeats a text
+ *   already chosen word for word is left out.
+ * - Not measured is not zero. A text without numbers competes only for
+ *   the places of the most recent. When no text of a channel has numbers,
+ *   the choice is the most recent texts and nothing else.
+ * - Never from elsewhere for how it did. A score compares posts of one
+ *   channel, so a text of another channel is never taken because it did
+ *   well there.
  * - How much. All examples of a request together hold at most
  *   noongun.drafting.examples.max_characters characters. Over that, the
- *   text with the oldest approval is left out, then the next oldest. A
+ *   texts chosen for how they did are left out first, lowest score first,
+ *   and then the text with the oldest approval, then the next oldest. A
  *   text is never cut.
+ * - The same state gives the same choice in the same order: every order
+ *   ends on the id of the text.
  *
  * Everything is read through the workspace scope, so a text of another
  * workspace cannot be chosen. It creates and changes nothing.
  */
 final class SelectExamplePosts
 {
+    /** The most texts of one pillar a channel gets for how they did. */
+    public const TOP_PER_PILLAR = 1;
+
     public function __construct(private readonly ApprovedTexts $approvedTexts) {}
 
     /**
@@ -44,6 +63,8 @@ final class SelectExamplePosts
     public function handle(iterable $channels): ExampleSelection
     {
         $perChannel = DraftingConfig::examplesPerChannel();
+        $topSlots = DraftingConfig::exampleTopSlots();
+        $topDays = DraftingConfig::exampleTopDays();
         $budget = DraftingConfig::exampleCharacters();
 
         /** @var array<int, string> $targets */
@@ -63,9 +84,18 @@ final class SelectExamplePosts
         $taken = [];
         /** @var array<string, true> $texts */
         $texts = [];
+        /** @var array<int, float> $scores variant id => score, of the texts chosen for how they did */
+        $scores = [];
 
         foreach (array_keys($targets) as $channelId) {
-            foreach ($this->approvedTexts->latest([$channelId], $perChannel) as $variant) {
+            foreach ($this->approvedTexts->best($channelId, $topDays, $topSlots, self::TOP_PER_PILLAR) as $variant) {
+                $chosen[$channelId][] = $variant;
+                $taken[$variant->id] = true;
+                $texts[$variant->body] = true;
+                $scores[$variant->id] = self::score($variant);
+            }
+
+            foreach ($this->approvedTexts->latest([$channelId], $perChannel - count($chosen[$channelId]), array_keys($taken)) as $variant) {
                 $chosen[$channelId][] = $variant;
                 $taken[$variant->id] = true;
                 $texts[$variant->body] = true;
@@ -113,7 +143,7 @@ final class SelectExamplePosts
             }
         }
 
-        $kept = self::withinBudget($chosen, $budget);
+        $kept = self::withinBudget($chosen, $scores, $budget);
 
         if ($kept === []) {
             return ExampleSelection::none();
@@ -125,6 +155,7 @@ final class SelectExamplePosts
 
         $examples = [];
         $postIds = [];
+        $performancePostIds = [];
 
         foreach ($chosen as $variants) {
             foreach ($variants as $variant) {
@@ -141,23 +172,33 @@ final class SelectExamplePosts
                     // would mean nothing to the model.
                     channelId: isset($targets[$variant->channel_id]) ? $variant->channel_id : null,
                     pillar: is_string($pillar) ? $pillar : null,
+                    performedWell: isset($scores[$variant->id]),
                 );
                 $postIds[$variant->post_id] = $variant->post_id;
+
+                if (isset($scores[$variant->id])) {
+                    $performancePostIds[$variant->post_id] = $variant->post_id;
+                }
             }
         }
 
         sort($postIds);
+        sort($performancePostIds);
 
-        return new ExampleSelection($examples, $postIds);
+        return new ExampleSelection($examples, $postIds, $performancePostIds);
     }
 
     /**
-     * Leaves out the texts with the oldest approval until the rest fits.
+     * Leaves out texts until the rest fits: first those chosen for how
+     * they did, lowest score first, then those with the oldest approval.
+     * What a tight limit takes away first is the newer half of the idea,
+     * and what stays is the choice as it was before posts were measured.
      *
      * @param  array<int, list<PostVariant>>  $chosen
+     * @param  array<int, float>  $scores  variant id => score, of the texts chosen for how they did
      * @return array<int, PostVariant> keyed by variant id
      */
-    private static function withinBudget(array $chosen, int $budget): array
+    private static function withinBudget(array $chosen, array $scores, int $budget): array
     {
         $kept = [];
 
@@ -167,8 +208,16 @@ final class SelectExamplePosts
             }
         }
 
-        // Oldest approval first; of two texts of one post, the lower id.
-        uasort($kept, fn (PostVariant $a, PostVariant $b): int => [self::approvedAt($a), $a->id] <=> [self::approvedAt($b), $b->id]);
+        // Chosen for how it did before chosen for being recent, the lower
+        // score first; then the oldest approval; then the lower id.
+        $order = fn (PostVariant $variant): array => [
+            isset($scores[$variant->id]) ? 0 : 1,
+            $scores[$variant->id] ?? 0.0,
+            self::approvedAt($variant),
+            $variant->id,
+        ];
+
+        uasort($kept, fn (PostVariant $a, PostVariant $b): int => $order($a) <=> $order($b));
 
         $total = array_sum(array_map(fn (PostVariant $variant): int => mb_strlen($variant->body), $kept));
 
@@ -207,6 +256,13 @@ final class SelectExamplePosts
         $at = $variant->getAttribute('post_approved_at');
 
         return is_string($at) ? $at : '';
+    }
+
+    private static function score(PostVariant $variant): float
+    {
+        $score = $variant->getAttribute('example_score');
+
+        return is_numeric($score) ? (float) $score : 0.0;
     }
 
     private static function pillarId(PostVariant $variant): ?int

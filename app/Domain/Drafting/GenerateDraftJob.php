@@ -41,7 +41,8 @@ use Throwable;
  *
  * The examples (SelectExamplePosts) and the list of the other posts of the
  * week (ListPlannedAlongside) are also chosen here, when the job runs. The
- * run notes the ids of the posts whose texts went along as examples.
+ * run notes the ids of the posts whose texts went along as examples, and
+ * which of them were chosen because they did well.
  *
  * A call to a provider costs money, so:
  *
@@ -175,7 +176,7 @@ final class GenerateDraftJob implements ShouldQueue
                 return;
             }
 
-            if (! $run->noteExamples($examples->postIds)) {
+            if (! $run->noteExamples($examples->postIds, $examples->performancePostIds)) {
                 return;
             }
 
