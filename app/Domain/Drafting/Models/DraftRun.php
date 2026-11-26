@@ -239,6 +239,35 @@ class DraftRun extends Model
     }
 
     /**
+     * Notes on a pending run which approved posts its request carries as
+     * examples, so that the draft can say what it was written with. Only
+     * the ids are kept; the texts stay where they are. Returns false when
+     * the run is no longer pending.
+     *
+     * @param  list<int>  $postIds
+     */
+    public function noteExamples(array $postIds): bool
+    {
+        if ($postIds === [] && ! array_key_exists('example_post_ids', $this->request)) {
+            return $this->status === DraftRunStatus::Pending;
+        }
+
+        return $this->move([DraftRunStatus::Pending], [
+            'request' => json_encode([...$this->request, 'example_post_ids' => $postIds]),
+        ]);
+    }
+
+    /**
+     * How many approved posts the request of this run carried as examples.
+     */
+    public function exampleCount(): int
+    {
+        $ids = $this->request['example_post_ids'] ?? null;
+
+        return is_array($ids) ? count($ids) : 0;
+    }
+
+    /**
      * Whether the run drafts one post that was asked for on an idea, and
      * not a post of a proposed week.
      */

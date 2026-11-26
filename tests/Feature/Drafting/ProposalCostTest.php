@@ -100,11 +100,12 @@ it('follows the configured length of a usual answer, and never expects more than
 });
 
 it('gives a worst case that counts a token for every byte, every attempt and two full answers each', function () {
-    config(['noongun.drafting.limits.max_attempts' => 3]);
+    config(['noongun.drafting.limits.max_attempts' => 3, 'noongun.drafting.examples.per_channel' => 0]);
 
     $bytes = 0;
 
     foreach (planFor($this->workspace, '2026-11-30')->posts as $post) {
+        // Nothing but the longest list of posts planned alongside, which v1 does not print.
         $bytes += promptBytes($this->workspace, $post) + 1024;
     }
 

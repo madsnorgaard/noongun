@@ -4,9 +4,13 @@ namespace App\Domain\Drafting;
 
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Content\Models\Idea;
+use App\Domain\Content\Models\Pillar;
 use App\Domain\Drafting\Actions\BuildDraftRequest;
 use App\Domain\Drafting\Actions\GenerateDraft;
+use App\Domain\Drafting\Actions\ListPlannedAlongside;
 use App\Domain\Drafting\Actions\ProposeWeek;
+use App\Domain\Drafting\Actions\SelectExamplePosts;
 use App\Domain\Drafting\Exceptions\DraftGenerationFailed;
 use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
 use App\Domain\Drafting\Exceptions\DraftingException;
@@ -34,6 +38,10 @@ use Throwable;
  *
  * The job carries three numbers and nothing else. The key and the context
  * are resolved here, when it runs, and never travel through the queue.
+ *
+ * The examples (SelectExamplePosts) and the list of the other posts of the
+ * week (ListPlannedAlongside) are also chosen here, when the job runs. The
+ * run notes the ids of the posts whose texts went along as examples.
  *
  * A call to a provider costs money, so:
  *
@@ -83,15 +91,21 @@ final class GenerateDraftJob implements ShouldQueue
         $this->timeout = DraftingLimits::jobSeconds();
     }
 
-    public function handle(CurrentWorkspace $currentWorkspace, BuildDraftRequest $build, GenerateDraft $generate, DraftGenerators $generators): void
-    {
+    public function handle(
+        CurrentWorkspace $currentWorkspace,
+        BuildDraftRequest $build,
+        GenerateDraft $generate,
+        DraftGenerators $generators,
+        SelectExamplePosts $selectExamples,
+        ListPlannedAlongside $listAlongside,
+    ): void {
         $workspace = Workspace::query()->find($this->workspaceId);
 
         if ($workspace === null) {
             return;
         }
 
-        $currentWorkspace->run($workspace, function (Workspace $workspace) use ($build, $generate, $generators): void {
+        $currentWorkspace->run($workspace, function (Workspace $workspace) use ($build, $generate, $generators, $selectExamples, $listAlongside): void {
             $run = DraftRun::query()->find($this->runId);
 
             // Only a look: markRunning() inside GenerateDraft is the guard.
@@ -144,11 +158,24 @@ final class GenerateDraftJob implements ShouldQueue
                 }
             }
 
+            $examples = $selectExamples->handle($channels);
+
             try {
-                $request = $build->handle($brief, $channels, $run->pillar, $run->idea);
+                $request = $build->handle(
+                    $brief,
+                    $channels,
+                    $run->pillar,
+                    $run->idea,
+                    examples: $examples,
+                    alsoPlanned: $listAlongside->handle($workspace, self::plannedAt($run), self::notWrittenYet($run)),
+                );
             } catch (ChannelAdapterNotAvailable) {
                 $run->markFailed(self::CHANNELS_GONE);
 
+                return;
+            }
+
+            if (! $run->noteExamples($examples->postIds)) {
                 return;
             }
 
@@ -287,6 +314,32 @@ final class GenerateDraftJob implements ShouldQueue
             'message' => Str::limit(DraftingException::redact($failure->getMessage()), self::LOGGED_MESSAGE_LENGTH),
             'operator_detail' => $failure instanceof DraftingException ? $failure->operatorDetail() : null,
         ]);
+    }
+
+    /**
+     * What the other runs of the same proposal that are still open are
+     * drafting. A run that is done is told by its post, and a run that
+     * failed for good by nothing.
+     *
+     * @return list<array{pillar: Pillar|null, idea: Idea|null}>
+     */
+    private static function notWrittenYet(DraftRun $run): array
+    {
+        $proposal = $run->request['proposal'] ?? null;
+
+        if (! is_string($proposal)) {
+            return [];
+        }
+
+        $open = DraftRun::query()
+            ->inStatus(DraftRunStatus::Pending, DraftRunStatus::Running)
+            ->where('request->proposal', $proposal)
+            ->whereKeyNot($run->id)
+            ->with(['pillar', 'idea'])
+            ->orderBy('id')
+            ->get();
+
+        return array_values($open->map(fn (DraftRun $other): array => ['pillar' => $other->pillar, 'idea' => $other->idea])->all());
     }
 
     private static function plannedAt(DraftRun $run): ?CarbonImmutable

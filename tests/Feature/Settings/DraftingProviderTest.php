@@ -295,12 +295,29 @@ describe('what the page says is sent', function () {
         expect(array_keys(LlmKeyController::SENT_TO_PROVIDER))->toBe(array_keys(plainDraftRequest()->toArray()));
     });
 
-    it('is given to the page as that list', function () {
+    it('is given to the page as that list, with the most examples for a channel filled in', function () {
+        config(['noongun.drafting.examples.per_channel' => 3]);
+
+        $expected = array_values(LlmKeyController::SENT_TO_PROVIDER);
+        $expected[6] = 'the texts of the posts this workspace approved most recently as examples, at most 3 for each target channel';
+
         $this->actingAs($this->owner)->get(route('llm-key.edit'))
             ->assertInertia(fn (Assert $page) => $page
-                ->where('sent_to_provider', array_values(LlmKeyController::SENT_TO_PROVIDER))
+                ->where('sent_to_provider', $expected)
                 ->where('follows_default', true));
     });
+
+    it('does not name examples when none are sent', function (array $off) {
+        config($off);
+
+        $said = implode(' ', LlmKeyController::sentToProvider());
+
+        expect($said)->not->toContain('examples')->not->toContain(':count')
+            ->and(LlmKeyController::sentToProvider())->toHaveCount(count(LlmKeyController::SENT_TO_PROVIDER) - 1);
+    })->with([
+        'no examples for a channel' => [['noongun.drafting.examples.per_channel' => 0]],
+        'no characters for examples' => [['noongun.drafting.examples.max_characters' => 0]],
+    ]);
 
     it('is not written into the page a second time', function () {
         $page = (string) file_get_contents(resource_path('js/pages/settings/Drafting.vue'));

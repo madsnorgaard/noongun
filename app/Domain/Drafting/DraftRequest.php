@@ -9,8 +9,9 @@ use InvalidArgumentException;
  *
  * It holds plain values, never models, so that everything a provider can be
  * sent is visible here: the brief, the voice rules, the pillar, the idea or
- * a source URL, the target channels with their limits, and example posts.
- * No tokens, no user data, nothing of another workspace. Build it with
+ * a source URL, the target channels with their limits, texts the workspace
+ * approved earlier as examples, and a few words about the other posts of
+ * the same week. No tokens, no user data, nothing of another workspace. Build it with
  * Actions\BuildDraftRequest; PromptRenderer turns it into the prompt.
  */
 final readonly class DraftRequest
@@ -24,10 +25,14 @@ final readonly class DraftRequest
     /** @var list<ExamplePost> */
     public array $examples;
 
+    /** @var list<PlannedAlongside> */
+    public array $alsoPlanned;
+
     /**
      * @param  array<array-key, TargetChannel>  $channels  at least one, each channel once
      * @param  array<array-key, array{text: string, url?: string|null}>  $callsToAction
-     * @param  array<array-key, ExamplePost>  $examples  empty until M6
+     * @param  array<array-key, ExamplePost>  $examples  texts the workspace approved earlier
+     * @param  array<array-key, PlannedAlongside>  $alsoPlanned  the other posts of the same week
      */
     public function __construct(
         public string $briefTitle,
@@ -41,6 +46,7 @@ final readonly class DraftRequest
         public ?string $ideaNotes = null,
         public ?string $sourceUrl = null,
         array $examples = [],
+        array $alsoPlanned = [],
     ) {
         $channels = array_values($channels);
         $ids = array_map(fn (TargetChannel $channel): int => $channel->channelId, $channels);
@@ -55,6 +61,33 @@ final readonly class DraftRequest
             $callsToAction,
         ));
         $this->examples = array_values($examples);
+        $this->alsoPlanned = array_values($alsoPlanned);
+    }
+
+    /**
+     * The same request with other examples and another list of the posts
+     * planned alongside it. Planning\ProposalCost measures a request this
+     * way with the most of both it could carry.
+     *
+     * @param  array<array-key, ExamplePost>  $examples
+     * @param  array<array-key, PlannedAlongside>  $alsoPlanned
+     */
+    public function carrying(array $examples, array $alsoPlanned): self
+    {
+        return new self(
+            $this->briefTitle,
+            $this->briefBody,
+            $this->voiceRules,
+            $this->channels,
+            $this->callsToAction,
+            $this->pillarName,
+            $this->pillarDescription,
+            $this->ideaTitle,
+            $this->ideaNotes,
+            $this->sourceUrl,
+            $examples,
+            $alsoPlanned,
+        );
     }
 
     /**
@@ -87,7 +120,8 @@ final readonly class DraftRequest
      *     idea: array{title: string, notes: string|null}|null,
      *     source_url: string|null,
      *     channels: non-empty-list<array{channel_id: int, platform: string, max_body_length: int, link_previews: bool, media_types: list<string>, max_media_items: int, link_title_length: int|null, link_description_length: int|null, voice_rules: list<string>}>,
-     *     examples: list<array{platform: string, body: string}>
+     *     examples: list<array{platform: string, body: string, channel_id: int|null, pillar: string|null}>,
+     *     also_planned: list<array{pillar: string|null, idea: string|null, opening: string|null}>
      * }
      */
     public function toArray(): array
@@ -116,6 +150,7 @@ final readonly class DraftRequest
                 $this->channels,
             ),
             'examples' => array_map(fn (ExamplePost $example): array => $example->toArray(), $this->examples),
+            'also_planned' => array_map(fn (PlannedAlongside $post): array => $post->toArray(), $this->alsoPlanned),
         ];
     }
 }

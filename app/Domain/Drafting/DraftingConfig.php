@@ -12,6 +12,12 @@ use SensitiveParameter;
  */
 final class DraftingConfig
 {
+    /** The most approved posts one target channel can get as examples, whatever is configured. */
+    public const MAX_EXAMPLES_PER_CHANNEL = 10;
+
+    /** The most characters the examples of one request can hold, whatever is configured. */
+    public const MAX_EXAMPLE_CHARACTERS = 40000;
+
     public static function defaultProvider(): ?string
     {
         return self::string('provider');
@@ -141,6 +147,24 @@ final class DraftingConfig
         return self::string('prompt_version') ?? '';
     }
 
+    /**
+     * How many recently approved posts a draft request carries as examples
+     * for each target channel. 0 sends none.
+     */
+    public static function examplesPerChannel(): int
+    {
+        return self::bounded('examples.per_channel', 5, self::MAX_EXAMPLES_PER_CHANNEL);
+    }
+
+    /**
+     * The most characters all examples of one request hold together. 0
+     * sends none.
+     */
+    public static function exampleCharacters(): int
+    {
+        return self::bounded('examples.max_characters', 6000, self::MAX_EXAMPLE_CHARACTERS);
+    }
+
     public static function currency(): string
     {
         return strtoupper(substr(self::string('currency') ?? 'USD', 0, 3));
@@ -188,6 +212,17 @@ final class DraftingConfig
         $value = config("noongun.drafting.{$key}");
 
         return is_string($value) && trim($value) !== '' ? trim($value) : null;
+    }
+
+    /**
+     * A whole number from 0 to $max. A value that is not a number gives
+     * the default.
+     */
+    private static function bounded(string $key, int $default, int $max): int
+    {
+        $value = config("noongun.drafting.{$key}");
+
+        return min($max, max(0, is_numeric($value) ? (int) $value : $default));
     }
 
     private static function int(string $key, int $default, int $min): int

@@ -10,9 +10,12 @@ use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\DraftingContext;
 use App\Domain\Drafting\DraftRequest;
 use App\Domain\Drafting\DraftResult;
+use App\Domain\Drafting\ExamplePost;
 use App\Domain\Drafting\LlmKey;
 use App\Domain\Drafting\Models\Brief;
 use App\Domain\Drafting\Models\DraftRun;
+use App\Domain\Drafting\PlannedAlongside;
+use App\Domain\Drafting\PromptRenderer;
 use App\Domain\Drafting\TargetChannel;
 use App\Domain\Drafting\VoiceRules;
 use App\Domain\Scheduling\Models\Slot;
@@ -190,6 +193,35 @@ function plainDraftRequest(int $channels = 1, int $maxBodyLength = 500, string $
         callsToAction: $callsToAction,
         sourceUrl: $sourceUrl,
     );
+}
+
+/**
+ * The bytes of the two prompts for the request when it carries the most a
+ * request can: every example the configuration allows for each channel
+ * with the longest pillar name, the examples' texts at their limit with
+ * four bytes for each character, and the longest list of posts planned
+ * alongside. Spelled out here with its own numbers, apart from
+ * ProposalCost, which must come to the same.
+ */
+function largestPromptBytes(DraftRequest $request, string $version): int
+{
+    $perChannel = (int) config('noongun.drafting.examples.per_channel');
+    $characters = $perChannel > 0 ? (int) config('noongun.drafting.examples.max_characters') : 0;
+    $widest = str_repeat("\u{1F600}", 60);
+    $examples = [];
+
+    foreach ($request->channels as $channel) {
+        for ($i = 0; $i < $perChannel && $characters > 0; $i++) {
+            $examples[] = new ExamplePost($channel->platform, '', $channel->channelId, $widest);
+        }
+    }
+
+    $prompt = app(PromptRenderer::class)->render(
+        $request->carrying($examples, array_fill(0, 12, new PlannedAlongside($widest, $widest, $widest))),
+        $version,
+    );
+
+    return strlen($prompt->system) + strlen($prompt->user) + 4 * $characters;
 }
 
 /**
