@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\DB;
  * it settled and does nothing; a worker that was in the middle of a run
  * cannot record its result any more, so that answer is discarded.
  *
- * It takes the lock on the workspace row that ProposeWeek takes, so a
+ * It takes the lock on the workspace row that StartDraftRuns takes, so a
  * proposal that starts at the same moment either is stopped whole or not
  * at all.
  */

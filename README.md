@@ -485,6 +485,41 @@ the key of the workspace or the key of the instance. If any of these is
 different when its job runs, because a key was added or removed or the model
 was changed in between, the run fails with that reason and nothing is spent.
 
+### Drafting one post from an idea
+
+"Draft a post" on an idea (`/ideas`) drafts one post from that idea without
+proposing a week. Owners and editors see it; viewers do not. It leads to a
+page that shows, before anything is spent:
+
+- the idea, and the pillar it belongs to. An idea without a pillar gives a
+  post without one. If the idea is already used, the page says in how many
+  posts; drafting from it again is allowed.
+- the channels to write for: every connected channel that can publish, all
+  ticked to begin with. At least one must stay ticked. The result is one post
+  with a text for each ticked channel, from one call to the provider.
+- an optional planned time on the clock of the workspace. Left empty, the
+  time is decided after approval, as for a post written by hand. A time that
+  is given must be more than `NOONGUN_DRAFT_LEAD_MINUTES` away and not more
+  than a year ahead, and no ticked channel may lose its access before it.
+- the model, the expected cost and the worst case for this one post, and the
+  drafts of the last 24 hours.
+
+No slot is needed. Everything else that refuses a proposed week refuses here,
+with the same sentence and the same link: no brief, no channel that can
+publish, no API key, a provider that is not offered, the limits below, and a
+draft that is still at work.
+
+"Draft the post" opens one draft run and queues one job, and leads to the
+queue, where the progress card shows it and "Stop waiting" works as for a
+week. A second press, from a second click or a second tab, is refused. The
+draft that arrives carries the idea and its pillar, so the idea counts as
+used and the next proposed week does not take it. If its planned time is the
+slot time of a channel, a proposed week leaves that slot alone, as it does for
+any post at that time; moving the post opens the slot again.
+
+The run counts towards the limits like any other, and is tried again, given
+up and stopped by the same code.
+
 ### What a proposal may spend
 
 - One proposal drafts at most `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` posts.

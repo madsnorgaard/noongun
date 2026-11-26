@@ -90,7 +90,9 @@ or removed or the operator changed the model, the run fails with
 ### Checks, limits and the lock
 
 `ProposeWeek` checks everything before the first run is opened, and it calls
-no provider. The checks run inside one transaction that first takes
+no provider. (Since issue #20 the checks, the lock and the queueing are in
+`StartDraftRuns`, which `ProposeWeek` calls; see "Drafting one post from an
+idea".) The checks run inside one transaction that first takes
 `SELECT ... FOR UPDATE` on the workspace row:
 
 - setup: a current brief, a channel that can publish with a slot, and
@@ -225,6 +227,60 @@ The thing is a draft, the act is drafting, and the time on a draft is its
 planned time, on every page that proposing a week adds or changes. The queue
 of M3 keeps "firing time" for posts that are approved.
 
+### Drafting one post from an idea
+
+Added on 2026-11-26 (issue #20), after the first real use: the owner wanted
+one post from one idea for one Page, and the only way was to add the idea and
+propose a week.
+
+"Draft a post" on an idea opens one draft run for one post, with a text for
+each channel the person ticks. It is not a second way to draft:
+
+- **One way to start.** What `ProposeWeek` did around its plan (the actor
+  check, the lock on the workspace row, the setup checks, the limits, opening
+  the runs, queueing the jobs, closing a run that cannot be queued) moved to
+  `StartDraftRuns`. `ProposeWeek` and `DraftFromIdea` each hand it a plan and
+  nothing else. A week needs a slot on a channel that can publish; one post
+  does not, and that is the only check that differs.
+- **The run.** `request.source` is `idea`. It has `request.proposal` like any
+  run, so the progress card, the retry, the recovery and "Stop waiting" find
+  it without knowing about it. It names no week and no slot. The job, the
+  generator, the cost and the limits are untouched.
+- **The plan.** `PlanIdeaDraft` reads the channels that can publish, the
+  channels that were asked for and the time, and creates nothing. The pillar
+  is the pillar of the idea and is never read from the request. The page
+  carries the choice in its address, so the cost and the checks it shows are
+  worked out by the server for exactly what is ticked;
+  `ProposalCost::ofOnePost()` is the figure of one planned post of a week
+  with those channels.
+- **The planned time** is optional, as on a post written by hand. A time that
+  is given must be further away than `lead_minutes`, for the reason a slot
+  time that close is left out of a week, and must pass the rule for a
+  scheduled time: not more than a year ahead, and not after the access of a
+  chosen channel ends. That rule moved to `PostPreconditions::timeProblems()`
+  so that it can be asked for channels before a post exists. A post written
+  by hand can still be saved with any time; the lead time is a rule of
+  drafting, because a drafted post has to be drafted, read and approved
+  before its time.
+- **One press, one run.** `IdeaDraftPlan::fingerprint()` covers the idea, its
+  pillar, the channels, the time, how many posts the idea is used in and the
+  newest draft run for the idea. A second press finds the run of the first
+  under the lock and is refused as "still being drafted"; one from a page
+  that was opened before the first draft arrived, or failed, is refused as
+  changed.
+- **Used ideas and slots need no new rule.** The draft carries the idea and
+  the pillar through `Post::attributeTo()`, as a proposed post does, so
+  `PlanWeek` does not take the idea again and counts the post towards the
+  weekly target of its pillar. A post at the slot time of a channel already
+  keeps that time out of a plan, whoever made the post, so a draft from an
+  idea with such a time fills the slot. It is held by its time and not by
+  `request.slot_ids`: moved to another time it opens the slot again, as a
+  post written by hand does, and unlike a post of a proposed week.
+- **Words.** The reasons a failed run gives end in "propose the week again".
+  For a run from an idea `DraftRun::markFailed()` puts "draft the post again
+  from the Ideas page" there, in the one place every failure passes. The
+  progress card is headed "Drafting a post from an idea".
+
 ## Consequences
 
 - A week costs one call per post, more when channels do not share times.
@@ -269,4 +325,5 @@ of M3 keeps "firing time" for posts that are approved.
   transaction that marks a failure. It is the one way to react to a failure
   without leaving a gap, and it must not call a provider.
 - One proposal at a time per workspace also holds back a single draft asked
-  for elsewhere while a proposal is at work, should such a feature come.
+  for on an idea while a proposal is at work, and the other way round (see
+  "Drafting one post from an idea").

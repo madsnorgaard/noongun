@@ -18,8 +18,12 @@ export type ProposalRun = {
 };
 
 export type ProposalProgress = {
-    /** The Monday of the week, as a calendar date. */
+    /** A proposed week, or one post that was asked for on an idea. */
+    kind: 'week' | 'idea';
+    /** The Monday of the week, as a calendar date. Empty for one post from an idea. */
     week: string;
+    /** The idea one post was asked for on, while it exists. */
+    idea: { id: number; title: string } | null;
     requested_at: string | null;
     requested_by: string | null;
     /** Whether a draft is still waiting or being drafted. */
@@ -84,4 +88,29 @@ export type ProposalWeek = {
     end: string;
     previous: string | null;
     next: string | null;
+};
+
+/** What "Draft a post" on an idea would do, for what is chosen now. */
+export type IdeaDraftPlan = {
+    /** Sent back when the draft is started, so that it runs what was shown. */
+    fingerprint: string;
+    idea: {
+        id: number;
+        title: string;
+        notes: string | null;
+        source_url: string | null;
+        pillar: string | null;
+        /** How many posts were already drafted from the idea. */
+        used_in: number;
+    };
+    /** Every channel a post can be drafted for. */
+    channels: {
+        id: number;
+        name: string;
+        platform_label: string;
+        chosen: boolean;
+    }[];
+    /** Wall-clock time of the workspace, or empty to decide after approval. */
+    scheduled_at: string;
+    problems: { channels: string[]; scheduled_at: string[] };
 };

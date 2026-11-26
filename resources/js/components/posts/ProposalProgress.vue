@@ -13,12 +13,13 @@ import {
 import { Spinner } from '@/components/ui/spinner';
 import { formatDate, formatDateTime, useWorkspaceTimezone } from '@/lib/posts';
 import { show } from '@/routes/posts';
+import { create as draftFromIdea } from '@/routes/ideas/draft';
 import { create, stop as stopWaiting } from '@/routes/proposals';
 import type { ProposalProgress, ProposalRun } from '@/types/proposals';
 
 /**
- * The drafts of the latest "Propose a week" while they are drafted and for
- * a while after. It asks the server for the progress alone every few
+ * The drafts of the latest "Propose a week", or the one post of the latest
+ * "Draft a post" on an idea, while they are drafted and for a while after. It asks the server for the progress alone every few
  * seconds, only while a draft is waiting or being drafted, and loads the
  * lists of the queue again each time one is settled.
  */
@@ -74,6 +75,8 @@ const weekLabel = computed(() =>
         ? formatDate(props.proposal.week, { day: 'numeric', month: 'long' })
         : '',
 );
+
+const forIdea = computed(() => props.proposal.kind === 'idea');
 
 const open = computed(
     () => props.proposal.counts.pending + props.proposal.counts.running,
@@ -139,7 +142,8 @@ function dot(run: ProposalRun): string {
             <h2 id="queue-proposal" class="text-heading">
                 <template v-if="proposal.active">Drafting</template>
                 <template v-else>Drafted</template>
-                the week of {{ weekLabel }}
+                <template v-if="forIdea"> a post from an idea</template>
+                <template v-else> the week of {{ weekLabel }}</template>
             </h2>
             <p
                 class="font-mono text-sm text-muted-foreground"
@@ -197,6 +201,12 @@ function dot(run: ProposalRun): string {
                         <span v-if="run.pillar" class="text-muted-foreground">
                             - {{ run.pillar }}
                         </span>
+                    </p>
+                    <p
+                        v-if="forIdea && run.idea"
+                        class="text-sm break-words text-muted-foreground"
+                    >
+                        Idea: {{ run.idea }}
                     </p>
                     <p
                         v-if="run.status === 'failed' && run.failure_reason"
@@ -260,7 +270,26 @@ function dot(run: ProposalRun): string {
         </p>
 
         <p class="text-sm text-muted-foreground">
-            <template v-if="proposal.active">
+            <template v-if="forIdea && proposal.active">
+                The draft appears under "To approve" when it is drafted. You can
+                leave this page: the work goes on.
+            </template>
+            <template v-else-if="forIdea && proposal.counts.failed > 0">
+                No draft was created.
+                <Link
+                    v-if="canPropose && proposal.idea"
+                    :href="draftFromIdea({ idea: proposal.idea.id })"
+                    class="font-semibold text-foreground underline underline-offset-4"
+                    data-test="draft-idea-again"
+                >
+                    Draft the post again
+                </Link>
+            </template>
+            <template v-else-if="forIdea">
+                The draft waits under "To approve". Nothing is published until
+                you approve it.
+            </template>
+            <template v-else-if="proposal.active">
                 Each draft appears under "To approve" when it is drafted. You
                 can leave this page: the work goes on.
             </template>
@@ -289,14 +318,27 @@ function dot(run: ProposalRun): string {
     >
         <DialogContent>
             <DialogHeader class="space-y-3">
-                <DialogTitle>Stop waiting for these drafts?</DialogTitle>
+                <DialogTitle>
+                    {{
+                        forIdea
+                            ? 'Stop waiting for this draft?'
+                            : 'Stop waiting for these drafts?'
+                    }}
+                </DialogTitle>
                 <DialogDescription class="text-base">
-                    {{ open === 1 ? '1 draft is' : `${open} drafts are` }}
-                    marked as failed, and
-                    {{ open === 1 ? 'its time is' : 'their times are' }} open
-                    again, so you can propose the week once more. Nothing new is
-                    asked of the provider. A draft that is with the provider at
-                    this moment is discarded, and may still be charged for.
+                    <template v-if="forIdea">
+                        The draft is marked as failed, and you can draft the
+                        post again from the Ideas page.
+                    </template>
+                    <template v-else>
+                        {{ open === 1 ? '1 draft is' : `${open} drafts are` }}
+                        marked as failed, and
+                        {{ open === 1 ? 'its time is' : 'their times are' }}
+                        open again, so you can propose the week once more.
+                    </template>
+                    Nothing new is asked of the provider. A draft that is with
+                    the provider at this moment is discarded, and may still be
+                    charged for.
                 </DialogDescription>
             </DialogHeader>
 

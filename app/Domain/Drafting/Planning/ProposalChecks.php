@@ -17,6 +17,7 @@ use App\Domain\Drafting\Models\Brief;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Scheduling\Models\Slot;
 use App\Domain\Workspaces\Models\Workspace;
+use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -34,12 +35,13 @@ final class ProposalChecks
     ) {}
 
     /**
-     * What has to be set up before any week can be proposed: a brief, a
-     * channel that can publish with a slot, and a working generator.
+     * What has to be set up before anything can be drafted: a brief, a
+     * channel that can publish and a working generator. A week also needs
+     * a slot on such a channel; one post asked for by itself does not.
      *
      * @return list<ProposalRefused>
      */
-    public function missingSetup(Workspace $workspace): array
+    public function missingSetup(Workspace $workspace, bool $needsSlot = true): array
     {
         $missing = [];
 
@@ -50,15 +52,14 @@ final class ProposalChecks
             );
         }
 
-        $publishing = Channel::query()->orderBy('id')->get()
-            ->filter(fn (Channel $channel): bool => $channel->canPublish() && $this->channels->has($channel->platform));
+        $publishing = $this->publishingChannels();
 
         if ($publishing->isEmpty()) {
             $missing[] = ProposalRefused::because(
                 ProposalRefused::NO_CHANNEL,
                 (string) __('No channel is connected that can publish. Connect a channel, or reconnect the one that needs it.'),
             );
-        } elseif (! Slot::query()->whereIn('channel_id', $publishing->modelKeys())->exists()) {
+        } elseif ($needsSlot && ! Slot::query()->whereIn('channel_id', $publishing->modelKeys())->exists()) {
             $missing[] = ProposalRefused::because(
                 ProposalRefused::NO_SLOT,
                 (string) __('No slot is set for a connected channel. Add the weekdays and times you want to post at.'),
@@ -70,6 +71,19 @@ final class ProposalChecks
         }
 
         return $missing;
+    }
+
+    /**
+     * The channels of the workspace that a post can be drafted for: they
+     * can publish, and this instance has an adapter for their platform.
+     *
+     * @return Collection<int, Channel> in id order
+     */
+    public function publishingChannels(): Collection
+    {
+        return Channel::query()->orderBy('id')->get()
+            ->filter(fn (Channel $channel): bool => $channel->canPublish() && $this->channels->has($channel->platform))
+            ->values();
     }
 
     /**

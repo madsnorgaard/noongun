@@ -199,40 +199,61 @@ class PostPreconditions
      */
     public function assertSensibleTime(Post $post, DateTimeInterface $at): void
     {
-        $at = CarbonImmutable::instance($at);
+        $channels = [];
 
-        if ($at->lt(now()->subSeconds(self::PAST_GRACE_SECONDS))) {
-            throw new PostNotPublishable($post, ['scheduled_at' => [self::text('The scheduled time has passed. Choose a time in the future.')]]);
+        foreach ($post->variants()->unpublished()->with('channel')->orderBy('id')->get() as $variant) {
+            if ($variant->channel !== null) {
+                $channels[] = $variant->channel;
+            }
         }
 
-        if ($at->gt(now()->addDays(self::MAX_DAYS_AHEAD))) {
-            throw new PostNotPublishable($post, ['scheduled_at' => [self::text('The scheduled time is more than a year ahead.')]]);
-        }
+        $problems = $this->timeProblems($channels, $at);
 
-        $ending = $this->accessEndingBefore($post, $at);
-
-        if ($ending !== []) {
-            throw new PostNotPublishable($post, ['scheduled_at' => $ending]);
+        if ($problems !== []) {
+            throw new PostNotPublishable($post, ['scheduled_at' => $problems]);
         }
     }
 
     /**
-     * One sentence for each channel of the post whose access ends at or
-     * before the given time, with the date on the clock of the workspace.
-     * A channel whose access has already ended is left to channelProblem().
+     * The same rule for a post that does not exist yet: what is wrong with
+     * the time for a post on the given channels, in words for the user.
+     * Empty when the time makes sense.
      *
+     * @param  iterable<Channel>  $channels
      * @return list<string>
      */
-    private function accessEndingBefore(Post $post, CarbonImmutable $at): array
+    public function timeProblems(iterable $channels, DateTimeInterface $at): array
+    {
+        $at = CarbonImmutable::instance($at);
+
+        if ($at->lt(now()->subSeconds(self::PAST_GRACE_SECONDS))) {
+            return [self::text('The scheduled time has passed. Choose a time in the future.')];
+        }
+
+        if ($at->gt(now()->addDays(self::MAX_DAYS_AHEAD))) {
+            return [self::text('The scheduled time is more than a year ahead.')];
+        }
+
+        return $this->accessEndingBefore($channels, $at);
+    }
+
+    /**
+     * One sentence for each of the channels whose access ends at or before
+     * the given time, with the date on the clock of the workspace. A
+     * channel whose access has already ended is left to channelProblem().
+     *
+     * @param  iterable<Channel>  $channels
+     * @return list<string>
+     */
+    private function accessEndingBefore(iterable $channels, CarbonImmutable $at): array
     {
         $workspace = $this->currentWorkspace->getOrFail();
         $messages = [];
 
-        foreach ($post->variants()->unpublished()->with('channel')->orderBy('id')->get() as $variant) {
-            $channel = $variant->channel;
-            $endsAt = $channel?->token_expires_at;
+        foreach ($channels as $channel) {
+            $endsAt = $channel->token_expires_at;
 
-            if ($channel === null || $endsAt === null || $channel->tokenExpired() || $endsAt->gt($at)) {
+            if ($endsAt === null || $channel->tokenExpired() || $endsAt->gt($at)) {
                 continue;
             }
 

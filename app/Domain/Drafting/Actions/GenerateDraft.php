@@ -116,7 +116,7 @@ final class GenerateDraft
 
     /**
      * Marks the run failed and lets the caller react, as one step for
-     * everyone else: under the lock on the workspace row that ProposeWeek
+     * everyone else: under the lock on the workspace row that StartDraftRuns
      * takes, in one transaction. A run for a retry that $afterFailure opens
      * therefore exists the moment the failed run stops being open, and no
      * proposal can start in between.
