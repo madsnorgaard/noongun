@@ -484,3 +484,36 @@ Questions for the spike, also listed in `tests/Fixtures/facebook/README.md`:
 3. Does `GET /debug_token` accept `input_token` anywhere but the query string?
 4. After a Page was disconnected in Noon Gun only, does the login dialog return it
    again without the user selecting it?
+
+## 2026-11-26 - first real connect returned 3 of 5 granted Pages
+
+Observed, not from documentation. On the first connect against the real Graph API the
+owner ticked five Pages in Facebook's consent screen. `GET /me/accounts` listed three.
+Nothing in the answer said that two were left out, and Noon Gun said nothing either.
+
+**Cause: under investigation.** The working explanation is that the two Pages are held
+in a business portfolio, and that `/me/accounts` leaves such Pages out unless the app
+also has `business_management`. The 2026-11-23 entry notes that the "Manage everything
+on your Page" use case adds `business_management` by default; `FACEBOOK_SCOPES` does
+not request it. This has not been confirmed by a second connect with the permission
+added, and no documentation page was found that states it.
+
+What the adapter does since this date:
+
+- A Page that `/me/accounts` lists but that cannot be connected is no longer dropped
+  silently. It is reported with its id, its name and a reason: `tasks` lacks
+  `CREATE_CONTENT` (role), or the entry has no `access_token` (no access). No token is
+  kept for it. The connect pages show the list.
+- A Page that is not listed cannot be known. The connect pages therefore always show
+  one line about business portfolios and `business_management`, and the README section
+  "A Page is missing" lists the causes.
+
+Still to confirm:
+
+1. Does adding `business_management` to the use case and to `FACEBOOK_SCOPES` make the
+   two Pages appear in `/me/accounts`?
+2. With `business_management` in `FACEBOOK_SCOPES`, does `debug_token` list it in
+   `data.scopes` of a Page token? `connect()` refuses every Page whose token lacks a
+   configured scope, so if it does not, connecting would fail for all Pages.
+3. Does `/me/accounts` ever return an entry without `access_token`? The "no access"
+   reason exists for that case; it has not been seen in a real answer.
