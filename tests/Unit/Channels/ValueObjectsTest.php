@@ -2,6 +2,7 @@
 
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Contracts\ChannelCapabilities;
+use App\Domain\Channels\Contracts\MediaLinkRule;
 use App\Domain\Channels\Contracts\PublishResult;
 use App\Domain\Channels\Contracts\RateLimit;
 use Carbon\CarbonImmutable;
@@ -28,7 +29,64 @@ it('describes what a platform accepts', function () {
             'rate_limit' => ['max_calls' => 200, 'per_seconds' => 3600],
             'link_title_length' => null,
             'link_description_length' => null,
+            'max_media_bytes' => null,
+            'max_media_pixels' => null,
+            'alt_text_length' => null,
+            'media_link_rule' => 'in_text',
+            'media_upload_lifetime' => null,
         ]);
+});
+
+it('says what a platform takes in images', function () {
+    $capabilities = new ChannelCapabilities(
+        maxBodyLength: 100,
+        mediaTypes: ['image/jpeg', 'image/png'],
+        maxMediaItems: 4,
+        maxMediaBytes: 8_000_000,
+        maxMediaPixels: 36_000_000,
+        altTextLength: 120,
+        mediaLinkRule: MediaLinkRule::Refused,
+        mediaUploadLifetime: 3600,
+    );
+
+    expect($capabilities->acceptsMedia())->toBeTrue()
+        ->and((new ChannelCapabilities(maxBodyLength: 100))->acceptsMedia())->toBeFalse()
+        ->and((new ChannelCapabilities(maxBodyLength: 100, mediaTypes: ['image/jpeg']))->acceptsMedia())->toBeFalse()
+        ->and($capabilities->toArray())->toMatchArray([
+            'max_media_bytes' => 8_000_000,
+            'max_media_pixels' => 36_000_000,
+            'alt_text_length' => 120,
+            'media_link_rule' => 'refused',
+            'media_upload_lifetime' => 3600,
+        ]);
+});
+
+it('refuses limits for media that are not positive', function (array $arguments) {
+    expect(fn () => new ChannelCapabilities(...['maxBodyLength' => 100, ...$arguments]))->toThrow(InvalidArgumentException::class);
+})->with([
+    'bytes' => [['maxMediaBytes' => 0]],
+    'pixels' => [['maxMediaPixels' => -1]],
+    'alternative text' => [['altTextLength' => 0]],
+    'lifetime of an upload' => [['mediaUploadLifetime' => 0]],
+]);
+
+it('sends the link of a post with images as the last line of its text, where images take the place of the preview', function () {
+    $inText = new ChannelCapabilities(maxBodyLength: 100, mediaTypes: ['image/jpeg'], maxMediaItems: 2);
+    $both = new ChannelCapabilities(maxBodyLength: 100, mediaTypes: ['image/jpeg'], maxMediaItems: 2, mediaLinkRule: MediaLinkRule::Both);
+
+    expect($inText->textFor('Open from eight.', 'https://example.com/a', 1))->toBe("Open from eight.\n\nhttps://example.com/a")
+        ->and($inText->textFor("Open from eight.\n", 'https://example.com/a', 2))->toBe("Open from eight.\n\nhttps://example.com/a")
+        ->and($inText->textFor('', 'https://example.com/a', 1))->toBe('https://example.com/a')
+        // Without images the link keeps its preview and stays out of the text.
+        ->and($inText->textFor('Open from eight.', 'https://example.com/a', 0))->toBe('Open from eight.')
+        ->and($inText->textFor('Open from eight.', null, 1))->toBe('Open from eight.')
+        ->and($inText->textFor('Open from eight.', '  ', 1))->toBe('Open from eight.')
+        // A link the author already put at the end is not sent twice.
+        ->and($inText->textFor('Read https://example.com/a', 'https://example.com/a', 1))->toBe('Read https://example.com/a')
+        ->and($inText->linkGoesInText('https://example.com/a', 1))->toBeTrue()
+        ->and($inText->linkGoesInText('https://example.com/a', 0))->toBeFalse()
+        ->and($both->textFor('Open from eight.', 'https://example.com/a', 1))->toBe('Open from eight.')
+        ->and($both->linkGoesInText('https://example.com/a', 1))->toBeFalse();
 });
 
 it('defaults to text only, with no rate limit known', function () {
