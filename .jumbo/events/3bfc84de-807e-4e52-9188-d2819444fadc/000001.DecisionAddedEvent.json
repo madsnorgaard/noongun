@@ -1,0 +1,18 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "3bfc84de-807e-4e52-9188-d2819444fadc",
+  "version": 1,
+  "timestamp": "2026-11-26T21:35:24.558Z",
+  "payload": {
+    "title": "ADR 0017: Images on posts",
+    "context": "#25: a post could only carry text and a link. Extends ADR 0003 (media storage).",
+    "rationale": "A media row is the file; an attachment joins it to a variant with position and alt text, so one upload serves several channels and alt text is approved content. Every upload is validated by content and re-encoded to JPEG or PNG, which removes EXIF and location. Media is never on the public disk and never gets a URL; it is served through a workspace-scoped route and handed to platforms as a stream. Images are uploaded to the platform before the publish attempt is marked, with the platform id kept on the attachment, so a retry sends only what is missing and a crash leaves no unknown outcome. Attachments lock with the variant and are part of the approval fingerprint. With images, the link goes out as the last line of the text. Missing alt text is advice, not a block.",
+    "alternatives": [
+      "Media belongs to one variant",
+      "Public URLs for platforms to fetch",
+      "Block a post that has both images and a link"
+    ],
+    "consequences": "The Docker image needs GD and a media volume that belongs in the backup. GIF and video are refused. Uploads are processed in the web request. Workspace deletion leaves files for M8 to remove."
+  },
+  "seq": 1
+}

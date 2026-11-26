@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "a8bef1d2-969e-4ee6-8922-dff9cbd7d31f",
+  "version": 6,
+  "timestamp": "2026-11-26T21:35:24.150Z",
+  "payload": {
+    "taskDescription": "Foundation merged on feat/25-media: media table and attachments with alt text and order, upload with content validation and re-encoding (EXIF and location removed), private serving with thumbnails, quota and throttle, capabilities and the UploadsMedia contract, upload-before-mark publish protocol, approval fingerprint, hourly clean-up, ADR 0017. GD added to the Docker base stage. 2546 tests. Next: Facebook, LinkedIn and the editor in parallel."
+  },
+  "seq": 6
+}
