@@ -40,20 +40,40 @@ The script:
 4. With `SPIKE_THUMBNAIL` set, uploads that image through the Images API.
 5. Publishes a link post with a title and description (and the thumbnail, if
    one was uploaded). Prints the URN and permalink.
-6. With `SPIKE_IMAGE` set, uploads that image and at once publishes a post
-   that shows it, with an alternative text and, as the last line of the
-   text, a link whose underscores are escaped. For each upload it prints the
-   URN, the host of the upload address, when that address expires, the status
-   and duration of the `PUT`, and what `GET /rest/images/{urn}` answers.
+6. With `SPIKE_IMAGE` set:
+   - uploads that image three times, to see which headers the `PUT` needs:
+     with the token only (as documented), without the token, and with the
+     token and `Content-Type: application/octet-stream` (as the application
+     sends it);
+   - asks `GET /rest/images/{urn}` whether this token may read the status
+     of an image;
+   - at once publishes a post that shows the image, with an alternative
+     text and, as the last line of the text, a link whose underscores are
+     escaped the way the application escapes them. A refusal in LinkedIn's
+     error format is written down and the post is tried again after 10, 20
+     and 30 seconds;
+   - tries a post with an image whose bytes were never sent, and one with
+     an image URN that does not exist, and writes down what LinkedIn
+     answers. These are the two answers the adapter guesses at.
 7. With `SPIKE_IMAGE_2` set as well, uploads it and publishes a post with
    both images. The first image is used a second time for it.
-8. Waits for Enter, then deletes every post. It also deletes what it created
-   when it is interrupted or fails half way. An uploaded image cannot be
-   deleted: the Images API has no call for it.
+8. Asks a few questions about what the posts look like (is the link in the
+   image post a link, is the alternative text there, and so on), then
+   deletes every post. It also deletes what it created when it is
+   interrupted or fails half way. An uploaded image cannot be deleted: the
+   Images API has no call for it.
+9. Prints a summary of everything it found, without the token, the member
+   id, any upload address or any URN. Paste it under "Spike results" in
+   `docs/platform-notes/linkedin.md`.
+
+One run with `SPIKE_IMAGE` and `SPIKE_IMAGE_2` set makes about 20 calls of
+the 150 a member has in a day.
 
 ## What to write down
 
-Fill in "Spike results" in `docs/platform-notes/linkedin.md`:
+Paste the summary the script prints under "Spike results" in
+`docs/platform-notes/linkedin.md`. It covers the points on images below.
+The others are filled in by hand:
 
 - Whether `/rest/posts` accepts a token from an app with only the two
   self-serve products, and `urn:li:person:{sub}` as the author.
@@ -75,8 +95,9 @@ Fill in "Spike results" in `docs/platform-notes/linkedin.md`:
   underscores intact.
 - Whether the post with two images shows both, in order, and whether an
   image could be used on a second post.
-- With a large file: the size from which the upload or the post fails
-  (`LINKEDIN_MAX_IMAGE_BYTES` is 5 MB by assumption).
+- With a large file as `SPIKE_IMAGE` (10 MB or more): whether the upload or
+  the post fails, and with which status. The application sets no limit in
+  bytes of its own and relies on LinkedIn to refuse.
 - The status of the deletes.
 
 The connect flow (redirect address, consent, `expires_in`, `refresh_token`,
