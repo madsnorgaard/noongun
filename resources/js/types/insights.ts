@@ -29,7 +29,10 @@ export type ChannelStatus =
 /**
  * - measured: it has numbers
  * - pending: a reading is still to come
- * - never: it grew too old without a reading
+ * - waiting_once: older than the cadence reaches and never read; it waits
+ *   for the one reading that old posts get
+ * - no_numbers: it was asked about and the platform gave nothing
+ * - too_old: it went out too long ago to be read at all
  * - unavailable: its platform gives no numbers
  * - off: insights are turned off on this instance
  * - blocked: its channel is not connected, so it is not read
@@ -38,11 +41,24 @@ export type ChannelStatus =
 export type MeasuringState =
     | 'measured'
     | 'pending'
-    | 'never'
+    | 'waiting_once'
+    | 'no_numbers'
+    | 'too_old'
     | 'unavailable'
     | 'off'
     | 'blocked'
     | 'gone';
+
+/**
+ * Why reading is paused for a channel: the platform asked for a wait, it
+ * did not accept the token for reading, a reading did not get through, or
+ * only the fact of a pause is known.
+ */
+export type Pause = {
+    kind: 'rate_limit' | 'token' | 'other' | 'unknown';
+    /** When reading starts again, when that is known. */
+    until: string | null;
+};
 
 export type MetricReadingRow = MetricNumbers & {
     /** The numbers held from here... */
@@ -59,6 +75,7 @@ export type VariantInsights = {
     channel_status: ChannelStatus;
     state: MeasuringState;
     numbers: Record<MetricName, MetricCell> | null;
+    /** Reactions, comments and shares by their weights. Clicks do not count. */
     score: number | null;
     checked_at: string | null;
     next_reading_at: string | null;
@@ -70,6 +87,8 @@ export type VariantInsights = {
     stale: boolean;
     /** Young enough to be read, and the platform says the post is gone. */
     gone: boolean;
+    /** Set when a reading is expected and reading is paused. */
+    pause: Pause | null;
     needs_permission: MetricName[];
     /** Only on the post page. */
     history: MetricReadingRow[] | null;
@@ -78,6 +97,7 @@ export type VariantInsights = {
 export type PostInsights = {
     variants: VariantInsights[];
     total: {
+        /** Reach is null for several channels: it cannot be added up. */
         numbers: MetricNumbers;
         score: number | null;
         measured: number;
@@ -86,25 +106,39 @@ export type PostInsights = {
     } | null;
 };
 
+export type ScoreWeights = Record<'reactions' | 'comments' | 'shares', number>;
+
 export type Reading = {
     enabled: boolean;
     /** How often a post is read, as a sentence. */
     cadence: string;
     /** The age after which a post is not read any more, for example "21 days". */
     stop_after: string;
+    /** How far back a post that was never read is still read once. */
+    once_within: string;
+    /** How old a post has to be before it is compared, for example "2 days". */
+    min_age: string;
+    /** How many posts have to compete before one is called the best. */
+    min_measured: number;
+    weights: ScoreWeights;
+    /** Whether the viewer can connect channels and is told how to set things up. */
+    can_set_up: boolean;
 };
 
 export type SummaryNumber = {
+    /** Always null for reach: it cannot be added up over posts. */
     total: number | null;
-    /** Over the posts that have the number, not over all measured posts. */
+    /** Over the channel posts that have the number. */
     average: number | null;
-    posts: number;
+    with: number;
 };
 
+/** The unit is a channel post: one post on one channel. */
 export type Summary = {
     posts: number;
-    measured_posts: number;
-    scored_posts: number;
+    channel_posts: number;
+    measured: number;
+    scored: number;
     numbers: Record<MetricName, SummaryNumber>;
     score: number | null;
     average_score: number | null;
@@ -114,6 +148,8 @@ export type PillarSummary = Summary & {
     /** Null for the posts without a pillar. */
     id: number | null;
     name: string | null;
+    /** False while too few of its posts are measured to compare it. */
+    enough: boolean;
 };
 
 export type ChannelSummary = Summary & {
@@ -124,14 +160,14 @@ export type ChannelSummary = Summary & {
     gives_numbers: boolean;
     metrics: MetricName[];
     needs_permission: MetricName[];
-    paused: boolean;
+    pause: Pause | null;
 };
 
 export type TopPost = {
     post_id: number;
     excerpt: string;
     pillar: string | null;
-    channels: { name: string; platform_label: string }[];
+    channels: { id: number; name: string; platform_label: string }[];
     published_at: string | null;
     numbers: MetricNumbers;
     score: number | null;
@@ -141,12 +177,14 @@ export type TopPost = {
 
 export type PeriodTotals = {
     posts: number;
-    measured_posts: number;
+    channel_posts: number;
+    measured: number;
+    /** Reach is always null here. */
     numbers: MetricNumbers;
+    /** How many measured channel posts each total is made of. */
+    with: Record<MetricName, number>;
     score: number | null;
 };
-
-export type ScoreWeights = Record<Exclude<MetricName, 'reach'>, number>;
 
 export type InsightsStatus =
     | 'ok'
@@ -156,5 +194,6 @@ export type InsightsStatus =
 
 export type DashboardInsights = PeriodTotals & {
     days: number;
+    /** Null while too few posts compete to call one the best. */
     best: TopPost | null;
 };

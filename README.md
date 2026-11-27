@@ -736,7 +736,7 @@ for one post.
 | Reach | The post insight `post_total_media_view_unique`: how many people saw the post. | `read_insights` |
 
 Only totals are asked for, never who reacted or commented. The posts of a
-channel are read together, at least 25 posts in one request, and Meta counts
+channel are read together, at most 25 posts in one run, and Meta counts
 each post as one call against the rate limit of the Page (two with reach and
 clicks).
 
@@ -822,42 +822,69 @@ two numbers. It is never a reason for "connect again".
 ### Where the numbers are shown
 
 Everyone in the workspace who can see posts can see their numbers, viewers
-included. Nothing on these pages changes anything.
+included. Nothing on these pages changes anything. Only an owner is told how
+to change the set-up (a setting, a permission, connecting again); everyone
+else is told whom to ask.
 
 - **Insights** (`/insights`) covers the last 7, 28 or 90 days, counted in days
-  of the workspace timezone, today included. The period is in the address
-  (`/insights?period=7`), so a view can be linked. It shows what the period
-  added up to, a table for each pillar sorted by average score, the ten posts
-  with the highest score, and a table for each channel that also says why a
-  channel has no numbers.
+  of the workspace timezone, today included. It shows what the period added up
+  to, a table of averages for each pillar, the posts with the highest score,
+  and a table for each channel that also says why a channel has no numbers.
+  The pillars and the top posts can be narrowed to one channel. Period and
+  channel are in the address (`/insights?period=7&channel=3`), so a view can
+  be linked.
 - **A published post** (`/posts/{id}`) shows its numbers for each channel, a
   total when it is on several, when they were last checked, and the readings
   over time.
 - **History** in the queue shows the total of each published post on one line.
-- **The dashboard** shows the totals of the last 7 days and the best post, once
-  a post of that week is measured.
+- **The dashboard** shows the totals of the last 7 days once a post of that
+  week is measured, and the best post once enough posts compete.
 
 How to read them:
 
 - A dash is a number the platform did not give. It is left out of totals and
-  averages. An average is taken over the posts that have the number, and the
-  page says "from 3 of 5" when that is fewer than the measured posts.
-- The score is reactions x 1 + comments x 2 + shares x 3 + clicks x 1, with
-  the weights from `NOONGUN_INSIGHTS_WEIGHT_*`. The page prints the formula
-  with the weights in use. Reach is not part of it.
+  averages. A column that would hold only dashes is not shown, and the page
+  says which numbers are missing.
+- **The score** on these pages is reactions x 1 + comments x 2 + shares x 3,
+  with the weights from `NOONGUN_INSIGHTS_WEIGHT_*`. These are the numbers
+  every measured channel gives, and the same score drafting ranks its
+  examples by. Clicks are shown and not counted: a Page with `read_insights`
+  would otherwise outrank one without it for the same post.
+- **Reach is never added up.** It counts people, and the same person sees
+  several posts and follows several Pages. Reach is shown for one post on one
+  channel, or as the average for one post.
+- **An average is for one post on one channel.** A post that went to three
+  Pages counts three times, so a pillar does not look better because it went
+  to more channels. An average is taken over the posts that have the number,
+  and the page says "from 3 of 5" when that is fewer than the measured ones.
+  Pages of different sizes are still mixed under "All channels": choose one
+  channel to compare pillars like with like.
+- **Young posts are left out of comparisons.** A post competes in the pillar
+  averages, in the top posts and for "best post" once it is
+  `NOONGUN_INSIGHTS_MIN_AGE_HOURS` old (48 by default), because it is still
+  collecting reactions before that.
+- **No claim from a handful of posts.** Below
+  `NOONGUN_INSIGHTS_MIN_MEASURED_POSTS` (5 by default) the list is headed
+  "Measured posts" instead of "Top posts", a pillar is marked "Too few to
+  compare" and listed after the others, and the dashboard names no best post.
 - A post that was just published says when its first reading is expected: by
   the next run of `noongun:poll-metrics`, about ten minutes after it went out.
   If it says that a reading is due and nothing changes within the hour, check
   that the `scheduler` and `horizon` containers are running.
+- When reading is paused for a channel, the post and the channel table say so
+  instead of promising a time.
 - A post older than the last step of `NOONGUN_INSIGHTS_CADENCE` says "Last
-  measured on" with the time of its last reading.
+  measured on" with the time of its last reading. One that was never read
+  says that it waits for the one reading older posts get, that the platform
+  gave no numbers when it was asked, or that it went out too long ago to be
+  read at all.
 - A channel that needs to be connected again keeps its last numbers, and the
   pages say that they are not updated until it is connected.
 - A post that Facebook reported as gone `NOONGUN_INSIGHTS_GONE_AFTER` times
-  says so, keeps the numbers it had, and offers the way to Channels:
-  connecting the Page again makes Noon Gun ask once more.
-- A Page without `read_insights` shows a dash for reach and clicks, and the
-  pages say that these two need one more permission. Nothing else is missing.
+  says so and keeps the numbers it had. Connecting the Page again makes Noon
+  Gun ask once more.
+- A Page without `read_insights` has no clicks and no reach, and the pages say
+  once that these two need one more permission, which is optional.
 - With `NOONGUN_INSIGHTS_ENABLED=false` the pages say that insights are turned
   off and still show what was read before.
 

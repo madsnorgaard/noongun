@@ -260,15 +260,38 @@ final class Performance
     }
 
     /**
-     * Like byPillar(), with the counts an honest average needs: how many
-     * posts have each number. Ordered by pillar name, the entry without a
-     * pillar last.
+     * The weights of the comparable score (EngagementScore::comparable()),
+     * keyed by metric name in the order of the formula, for a page that
+     * prints the formula.
+     *
+     * @return array<string, float>
+     */
+    public static function comparableWeights(): array
+    {
+        return array_combine(
+            [Metric::Reactions->value, Metric::Comments->value, Metric::Shares->value],
+            EngagementScore::comparableBindings(),
+        );
+    }
+
+    /**
+     * One entry for each pillar that has a post with a variant published
+     * from $from up to, not including, $until, with the current numbers of
+     * those variants. Posts without a pillar are one entry without an id.
+     * Ordered by pillar name, the entry without a pillar last.
+     *
+     * The unit is a channel post: one variant on one channel. With
+     * $channelId only the variants on that channel count, which is the
+     * only way to compare pillars fairly when channels differ in size.
+     * With $settledBefore only variants published at or before that
+     * instant are counted as measured: a post that went out an hour ago is
+     * still collecting reactions and would pull an average down.
      *
      * @return list<PerformanceSummary>
      */
-    public function pillarSummaries(DateTimeInterface $from, DateTimeInterface $until): array
+    public function pillarSummaries(DateTimeInterface $from, DateTimeInterface $until, ?int $channelId = null, ?DateTimeInterface $settledBefore = null): array
     {
-        return $this->summaries($from, $until, byChannel: false);
+        return $this->summaries($from, $until, byChannel: false, channelId: $channelId, settledBefore: $settledBefore);
     }
 
     /**
@@ -281,25 +304,30 @@ final class Performance
      */
     public function channelSummaries(DateTimeInterface $from, DateTimeInterface $until): array
     {
-        return $this->summaries($from, $until, byChannel: true);
+        return $this->summaries($from, $until, byChannel: true, channelId: null, settledBefore: null);
     }
 
     /**
      * The posts with a variant published from $from up to, not including,
-     * $until that did best, counting those variants: highest engagement
-     * score first, then the one published last, then the newest post. Only
-     * posts with a score are listed, a score of 0 included.
+     * $until that did best, counting those variants: highest comparable
+     * score (EngagementScore::comparable()) first, then the one published last, then the newest post. Only
+     * posts with a score are listed, a score of 0 included. The score of
+     * each entry is the comparable score.
+     *
+     * With $channelId only the variants on that channel count. With
+     * $settledBefore only variants published at or before that instant
+     * compete.
      *
      * @return list<PostPerformance>
      */
-    public function topPosts(DateTimeInterface $from, DateTimeInterface $until, int $limit): array
+    public function topPosts(DateTimeInterface $from, DateTimeInterface $until, int $limit, ?int $channelId = null, ?DateTimeInterface $settledBefore = null): array
     {
         if ($limit < 1) {
             return [];
         }
 
-        $weights = EngagementScore::bindings();
-        $score = 'sum('.EngagementScore::SQL.')';
+        $weights = EngagementScore::comparableBindings();
+        $score = 'sum('.EngagementScore::COMPARABLE_SQL.')';
 
         $rows = MetricSnapshot::query()
             ->current()
@@ -310,6 +338,8 @@ final class Performance
             ->whereNotNull('post_variants.external_id')
             ->where('post_variants.published_at', '>=', CarbonImmutable::instance($from)->utc())
             ->where('post_variants.published_at', '<', CarbonImmutable::instance($until)->utc())
+            ->when($channelId !== null, fn ($query) => $query->where('post_variants.channel_id', $channelId))
+            ->when($settledBefore !== null, fn ($query) => $query->where('post_variants.published_at', '<=', CarbonImmutable::instance($settledBefore)->utc()))
             ->groupBy('post_variants.post_id')
             ->havingRaw($score.' is not null', $weights)
             ->orderByRaw($score.' desc', $weights)
@@ -329,7 +359,7 @@ final class Performance
                 postId: (int) $row->post_id,
                 totals: $totals,
                 measuredVariants: (int) $row->measured_variants,
-                score: $totals->score(),
+                score: EngagementScore::comparable($totals),
                 checkedAt: is_string($row->checked_at) ? CarbonImmutable::parse($row->checked_at, 'UTC') : null,
             );
         }
@@ -340,26 +370,33 @@ final class Performance
     /**
      * @return list<PerformanceSummary>
      */
-    private function summaries(DateTimeInterface $from, DateTimeInterface $until, bool $byChannel): array
+    private function summaries(DateTimeInterface $from, DateTimeInterface $until, bool $byChannel, ?int $channelId, ?DateTimeInterface $settledBefore): array
     {
-        $posts = 'count(distinct post_variants.post_id)';
-        $counts = $posts.' as posts, '
-            .$posts.' filter (where metric_snapshots.id is not null) as measured_posts, '
-            .$posts.' filter (where coalesce(metric_snapshots.reactions, metric_snapshots.comments, metric_snapshots.shares, metric_snapshots.clicks) is not null) as scored_posts';
+        $settled = $settledBefore !== null ? CarbonImmutable::instance($settledBefore)->utc() : null;
+
+        $counts = 'count(distinct post_variants.post_id) as posts, count(*) as channel_posts, count(metric_snapshots.id) as measured, '
+            .'count(*) filter (where coalesce(metric_snapshots.reactions, metric_snapshots.comments, metric_snapshots.shares) is not null) as scored';
 
         foreach (Metric::cases() as $metric) {
-            $counts .= ", {$posts} filter (where metric_snapshots.{$metric->value} is not null) as posts_with_{$metric->value}";
+            $counts .= ", count(metric_snapshots.{$metric->value}) as with_{$metric->value}";
         }
 
         $query = PostVariant::query()
-            ->leftJoin('metric_snapshots', function (JoinClause $join): void {
+            // Numbers are only joined for variants that are old enough to
+            // be compared, so every count and sum below leaves the rest out.
+            ->leftJoin('metric_snapshots', function (JoinClause $join) use ($settled): void {
                 $join->on('metric_snapshots.post_variant_id', '=', 'post_variants.id')
                     ->on('metric_snapshots.workspace_id', '=', 'post_variants.workspace_id')
                     ->where('metric_snapshots.is_latest', true);
+
+                if ($settled !== null) {
+                    $join->where('post_variants.published_at', '<=', $settled);
+                }
             })
             ->whereNotNull('post_variants.external_id')
             ->where('post_variants.published_at', '>=', CarbonImmutable::instance($from)->utc())
-            ->where('post_variants.published_at', '<', CarbonImmutable::instance($until)->utc());
+            ->where('post_variants.published_at', '<', CarbonImmutable::instance($until)->utc())
+            ->when($channelId !== null, fn ($variants) => $variants->where('post_variants.channel_id', $channelId));
 
         if ($byChannel) {
             $query->groupBy('post_variants.channel_id')
@@ -384,21 +421,22 @@ final class Performance
 
         foreach ($query->toBase()->get() as $row) {
             $totals = MetricTotals::fromRow($row);
-            $postsWith = [];
+            $with = [];
 
             foreach (Metric::cases() as $metric) {
-                $postsWith[$metric->value] = (int) $row->{'posts_with_'.$metric->value};
+                $with[$metric->value] = (int) $row->{'with_'.$metric->value};
             }
 
             $summaries[] = new PerformanceSummary(
                 id: is_numeric($row->id) ? (int) $row->id : null,
                 name: is_string($row->name) ? $row->name : null,
                 posts: (int) $row->posts,
-                measuredPosts: (int) $row->measured_posts,
-                scoredPosts: (int) $row->scored_posts,
+                channelPosts: (int) $row->channel_posts,
+                measured: (int) $row->measured,
+                scored: (int) $row->scored,
                 totals: $totals,
-                postsWith: $postsWith,
-                score: $totals->score(),
+                with: $with,
+                score: EngagementScore::comparable($totals),
             );
         }
 

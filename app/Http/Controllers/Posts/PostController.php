@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Posts;
 
+use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Actions\DeletePost;
 use App\Domain\Content\Actions\SaveDraft;
 use App\Domain\Content\Exceptions\PostNotDeletable;
@@ -69,7 +70,7 @@ class PostController extends Controller
             // How the texts that are on a platform did, with the readings
             // over time. Null for a post that was never published.
             'insights' => $this->insights->forPosts([$post], withHistory: true)[$post->id] ?? null,
-            'reading' => $this->insights->reading(),
+            'reading' => $this->insights->reading($request->user()?->can('create', Channel::class) ?? false),
         ]);
     }
 
