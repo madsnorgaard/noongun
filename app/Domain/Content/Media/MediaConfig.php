@@ -2,6 +2,7 @@
 
 namespace App\Domain\Content\Media;
 
+use App\Support\Mode;
 use Illuminate\Contracts\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Storage;
 use LogicException;
@@ -100,13 +101,50 @@ final class MediaConfig
     }
 
     /**
-     * Bytes all images of one workspace may take together, or null for no limit.
+     * The most pixels an opaque image from a lossless format may have to be
+     * written as PNG and as JPEG, so that the smaller file can be kept.
+     */
+    public static function losslessChoicePixels(): int
+    {
+        $megapixels = config('noongun.media.lossless_choice_megapixels');
+
+        return (int) (max(0.0, is_numeric($megapixels) ? (float) $megapixels : 9.0) * 1_000_000);
+    }
+
+    /**
+     * How many images the whole instance decodes at once.
+     */
+    public static function concurrentUploads(): int
+    {
+        return self::int('concurrent_uploads', 2, 1);
+    }
+
+    public static function slotWaitSeconds(): int
+    {
+        return self::int('slot_wait_seconds', 5, 0);
+    }
+
+    public static function slotLeaseSeconds(): int
+    {
+        return self::int('slot_lease_seconds', 120, 10);
+    }
+
+    /**
+     * Bytes all images of one workspace may take together, or null for no
+     * limit. A setting decides. Without one, an instance its owner runs for
+     * themselves has no limit: the disk is theirs, and a limit they did not
+     * set would stop their uploads one day for no reason they chose. A
+     * hosted instance has a limit until a plan says otherwise.
      */
     public static function quotaBytes(): ?int
     {
-        $quota = self::int('quota_bytes', 0, 0);
+        $quota = config('noongun.media.quota_bytes');
 
-        return $quota > 0 ? $quota : null;
+        if (! is_numeric($quota)) {
+            $quota = Mode::isSelfHosted() ? 0 : config('noongun.media.saas_quota_bytes');
+        }
+
+        return is_numeric($quota) && (int) $quota > 0 ? (int) $quota : null;
     }
 
     public static function uploadsPerMinute(): int
@@ -122,6 +160,16 @@ final class MediaConfig
     public static function unusedGraceSeconds(): int
     {
         return self::int('unused_grace_hours', 24, 1) * 3600;
+    }
+
+    /**
+     * How old a file that no row points to must be before it is removed.
+     * Never under an hour: a file is on the disk for a moment before its
+     * row is written.
+     */
+    public static function orphanFileSeconds(): int
+    {
+        return self::int('orphan_file_hours', 48, 1) * 3600;
     }
 
     /**

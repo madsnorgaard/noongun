@@ -215,16 +215,32 @@ return [
     | "max_megapixels" and "max_side" are checked from the header of the
     | file, before the image is decoded: decoding takes four bytes of memory
     | for every pixel. "memory_limit" is the PHP memory limit while one image
-    | is processed and must cover max_megapixels x 4 MB plus a margin.
+    | is processed and must cover max_megapixels x 4 MB plus a margin of
+    | about 150 MB.
     | An image with a longer side than "stored_side" is scaled down to it.
     | "thumbnail_side" is the longest side of the small copy the lists show.
+    | "jpeg_quality" is the quality a JPEG is stored with at most: a JPEG
+    | that was sent at a lower quality and is not scaled down is stored at
+    | about the quality it came with, so that it does not grow.
+    | An image without transparency that was sent in a lossless format and
+    | has at most "lossless_choice_megapixels" is encoded as PNG and as JPEG,
+    | and the smaller file is kept: a screenshot stays a sharp PNG, a
+    | photograph becomes a JPEG. Above that it becomes a JPEG.
+    |
+    | Decoding is what costs memory, so only a few images are processed at
+    | once: "concurrent_uploads" on the whole instance, and one per user. A
+    | request waits up to "slot_wait_seconds" for its turn and is then
+    | answered with 429. A turn that is never given back, because the
+    | process died, ends by itself after "slot_lease_seconds".
     |
     | "quota_bytes" is the most all stored images of one workspace may take
-    | together; 0 means no limit. "uploads_per_minute" is per user.
-    | "max_per_variant" is the most images one text may carry, whatever its
-    | platform would take.
+    | together; 0 means no limit. Left unset, a self-hosted instance has no
+    | limit and a saas instance has "saas_quota_bytes". "uploads_per_minute"
+    | is per user. "max_per_variant" is the most images one text may carry,
+    | whatever its platform would take.
     | An image that no post uses is deleted "unused_grace_hours" after the
-    | clean-up first saw it unused.
+    | clean-up first saw it unused. A file on the media disk that no row
+    | points to is deleted when it is older than "orphan_file_hours".
     */
 
     'media' => [
@@ -236,10 +252,16 @@ return [
         'stored_side' => (int) env('NOONGUN_MEDIA_STORED_SIDE', 4096),
         'thumbnail_side' => (int) env('NOONGUN_MEDIA_THUMBNAIL_SIDE', 480),
         'jpeg_quality' => (int) env('NOONGUN_MEDIA_JPEG_QUALITY', 90),
-        'quota_bytes' => (int) env('NOONGUN_MEDIA_QUOTA_BYTES', 2 * 1024 * 1024 * 1024),
+        'lossless_choice_megapixels' => (float) env('NOONGUN_MEDIA_LOSSLESS_CHOICE_MEGAPIXELS', 9),
+        'concurrent_uploads' => (int) env('NOONGUN_MEDIA_CONCURRENT_UPLOADS', 2),
+        'slot_wait_seconds' => (int) env('NOONGUN_MEDIA_SLOT_WAIT_SECONDS', 5),
+        'slot_lease_seconds' => (int) env('NOONGUN_MEDIA_SLOT_LEASE_SECONDS', 120),
+        'quota_bytes' => env('NOONGUN_MEDIA_QUOTA_BYTES'),
+        'saas_quota_bytes' => 2 * 1024 * 1024 * 1024,
         'uploads_per_minute' => (int) env('NOONGUN_MEDIA_UPLOADS_PER_MINUTE', 30),
         'max_per_variant' => (int) env('NOONGUN_MEDIA_MAX_PER_VARIANT', 10),
         'unused_grace_hours' => (int) env('NOONGUN_MEDIA_UNUSED_GRACE_HOURS', 24),
+        'orphan_file_hours' => (int) env('NOONGUN_MEDIA_ORPHAN_FILE_HOURS', 48),
     ],
 
     /*

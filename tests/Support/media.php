@@ -363,3 +363,108 @@ function imagesOf(PostVariant $variant): array
         ->map(fn (object $row): array => [(int) $row->media_id, $row->alt_text])
         ->all();
 }
+
+/**
+ * A JPEG of a soft gradient with some grain, saved at the given quality:
+ * what a photograph looks like to an encoder.
+ */
+function jpegAtQuality(int $quality, int $width = 320, int $height = 240): string
+{
+    ob_start();
+    imagejpeg(photoLikeImage($width, $height), null, $quality);
+
+    return (string) ob_get_clean();
+}
+
+/**
+ * A photograph saved in a lossless format: a gradient with grain in every
+ * pixel, which a JPEG stores in a fraction of what a PNG needs. Opaque.
+ *
+ * @param  'png'|'webp'  $format
+ * @param  bool  $alphaChannel  whether the file has an alpha channel, with every pixel opaque, as an export from an editor often has
+ */
+function photoLikeBytes(string $format = 'png', int $width = 320, int $height = 240, bool $alphaChannel = false): string
+{
+    $image = photoLikeImage($width, $height);
+
+    imagealphablending($image, false);
+    imagesavealpha($image, $alphaChannel);
+
+    ob_start();
+    $format === 'png' ? imagepng($image) : imagewebp($image, null, IMG_WEBP_LOSSLESS);
+
+    return (string) ob_get_clean();
+}
+
+function photoLikeImage(int $width, int $height): GdImage
+{
+    $image = imagecreatetruecolor($width, $height);
+    mt_srand(25);
+
+    for ($y = 0; $y < $height; $y++) {
+        for ($x = 0; $x < $width; $x++) {
+            $grain = mt_rand(-12, 12);
+            $red = max(0, min(255, intdiv(255 * $x, $width) + $grain));
+            $green = max(0, min(255, intdiv(255 * $y, $height) + $grain));
+            $blue = max(0, min(255, 128 + $grain));
+
+            imagesetpixel($image, $x, $y, ($red << 16) | ($green << 8) | $blue);
+        }
+    }
+
+    mt_srand();
+
+    return $image;
+}
+
+/**
+ * A screenshot saved in a lossless format: flat areas, hard edges and rows
+ * of thin dark strokes where text would be. A PNG of this is small and
+ * exact; a JPEG is larger and smeared. Opaque.
+ *
+ * @param  'png'|'webp'  $format
+ */
+function screenshotLikeBytes(string $format = 'png', int $width = 640, int $height = 400): string
+{
+    $image = imagecreatetruecolor($width, $height);
+
+    imagefilledrectangle($image, 0, 0, $width - 1, $height - 1, 0xF7F7F5);
+    imagefilledrectangle($image, 0, 0, $width - 1, 39, 0x24292F);
+    imagefilledrectangle($image, 0, 40, 159, $height - 1, 0xEAEEF2);
+
+    for ($row = 0; $row < intdiv($height - 80, 18); $row++) {
+        for ($x = 180; $x < $width - 40 - ($row * 37) % 200; $x += 7) {
+            imagefilledrectangle($image, $x, 64 + $row * 18, $x + 3 + ($x + $row) % 3, 64 + $row * 18 + 9, 0x1F2328);
+        }
+    }
+
+    ob_start();
+    $format === 'png' ? imagepng($image) : imagewebp($image, null, IMG_WEBP_LOSSLESS);
+
+    return (string) ob_get_clean();
+}
+
+/**
+ * A PNG that says it is an animation: a still PNG with the chunk that
+ * announces frames (acTL) after its header, as an animated PNG has it.
+ */
+function animatedPngBytes(): string
+{
+    $png = pngBytes(transparent: false);
+    $chunk = 'acTL'.pack('NN', 2, 0);
+
+    // The signature is 8 bytes and the header chunk 25.
+    return substr($png, 0, 33).pack('N', 8).$chunk.pack('N', crc32($chunk)).substr($png, 33);
+}
+
+/**
+ * The start of an animated WebP: the extended header with the animation
+ * flag set, and nothing that could be decoded.
+ */
+function animatedWebpBytes(int $width = 40, int $height = 20): string
+{
+    $header = "\x02\0\0\0".substr(pack('V', $width - 1), 0, 3).substr(pack('V', $height - 1), 0, 3);
+    $body = 'WEBP'.'VP8X'.pack('V', 10).$header.'ANIM'.pack('V', 6)."\0\0\0\0\0\0";
+
+    return 'RIFF'.pack('V', strlen($body)).$body;
+}

@@ -12,62 +12,21 @@ namespace App\Domain\Content\Media;
  */
 final class JpegOrientation
 {
-    /** EXIF sits in the first segments of a file. Nothing further in is read. */
-    private const READ_BYTES = 262144;
-
-    private const MAX_SEGMENTS = 64;
-
     /**
      * The orientation, 1 to 8 as EXIF numbers them, or 1 when there is none
      * or it cannot be read.
      */
     public static function of(string $path): int
     {
-        $handle = @fopen($path, 'rb');
-
-        if ($handle === false) {
-            return 1;
-        }
-
-        $data = (string) fread($handle, self::READ_BYTES);
-        fclose($handle);
-
-        return self::fromBytes($data);
+        return self::fromBytes(JpegSegments::head($path));
     }
 
     public static function fromBytes(string $data): int
     {
-        $length = strlen($data);
-
-        if ($length < 4 || substr($data, 0, 2) !== "\xFF\xD8") {
-            return 1;
-        }
-
-        $offset = 2;
-
-        for ($segment = 0; $segment < self::MAX_SEGMENTS && $offset + 4 <= $length; $segment++) {
-            if ($data[$offset] !== "\xFF") {
-                return 1;
+        foreach (JpegSegments::leading($data) as [$marker, $payload]) {
+            if ($marker === 0xE1 && substr($payload, 0, 6) === "Exif\0\0") {
+                return self::fromTiff(substr($payload, 6));
             }
-
-            $marker = ord($data[$offset + 1]);
-
-            // The image data starts: no metadata after this.
-            if ($marker === 0xDA || $marker === 0xD9) {
-                return 1;
-            }
-
-            $size = self::uint16($data, $offset + 2, false);
-
-            if ($size === null || $size < 2) {
-                return 1;
-            }
-
-            if ($marker === 0xE1 && substr($data, $offset + 4, 6) === "Exif\0\0") {
-                return self::fromTiff(substr($data, $offset + 10, $size - 8));
-            }
-
-            $offset += 2 + $size;
         }
 
         return 1;
