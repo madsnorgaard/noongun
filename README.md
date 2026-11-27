@@ -188,6 +188,16 @@ A text can carry images. An owner or editor uploads one image at a time; it
 then belongs to the workspace and can be put on any text, also on several
 texts of one post without a second upload.
 
+In the editor each channel has its own images under its text. Add them with
+"Add images", by dropping files on the column, or by pasting an image into
+the text. Each image gets a description for that channel, can be moved
+earlier or later and can be taken off. "Also add to" and "Add to all
+channels" put the same file on other channels without a second upload, and
+"Copy from another channel" copies the text, the images or both. A file is
+stored the moment it is uploaded, but it is on the post only once the draft
+is saved. A channel whose platform takes no images says so and offers no
+upload.
+
 What happens to an upload:
 
 - JPEG, PNG and WebP are accepted. What a file is, is read from its content,

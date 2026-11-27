@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PostImages from '@/components/posts/PostImages.vue';
 import { formatDateTime, useWorkspaceTimezone, webAddress } from '@/lib/posts';
 import type { Post } from '@/types/posts';
 
@@ -12,6 +13,8 @@ defineProps<{
     clamp?: boolean;
     /** One column per channel where there is room, to compare the texts. */
     sideBySide?: boolean;
+    /** Show each image with its description as text, where the post is read. */
+    describeImages?: boolean;
 }>();
 
 const timezone = useWorkspaceTimezone();
@@ -62,6 +65,12 @@ const timezone = useWorkspaceTimezone();
                     {{ variant.body }}
                 </p>
                 <p v-else class="text-muted-foreground">No text yet.</p>
+
+                <PostImages
+                    :images="variant.media"
+                    :channel-name="variant.channel_name"
+                    :compact="!describeImages"
+                />
 
                 <a
                     v-if="webAddress(variant.link)"

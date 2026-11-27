@@ -2,38 +2,77 @@
 import { computed, ref, watch } from 'vue';
 import InputError from '@/components/InputError.vue';
 import NativeSelect from '@/components/NativeSelect.vue';
+import VariantImages from '@/components/posts/VariantImages.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { linkGoesInText, textAsSent } from '@/lib/media';
 import { textLength } from '@/lib/posts';
-import type { ChannelOption } from '@/types/posts';
+import type {
+    ChannelOption,
+    CopyKind,
+    MediaInput,
+    MediaItem,
+    UploadRules,
+} from '@/types/posts';
 
 /**
  * What a draft says on one channel, as one column of the editor: the text
- * with its count against the limit of that channel, and the link, with the
- * card for it where the platform reads nothing from the linked page. The
- * page that holds the columns copies a text in and takes a column off, so
- * that it can ask first; this component only asks for it.
+ * with its count against the limit of that channel, its images, and the
+ * link, with the card for it where the platform reads nothing from the
+ * linked page. The page that holds the columns copies a text or images in
+ * and takes a column off, so that it can ask first; this component only
+ * asks for it.
  */
 const props = withDefaults(
     defineProps<{
         channel: ChannelOption;
-        /** The texts the post has for its other channels. */
-        others: { channel_id: number; name: string; body: string }[];
+        /** What the post has for its other channels. */
+        others: {
+            channel_id: number;
+            name: string;
+            body: string;
+            media: MediaInput[];
+            max_items: number;
+        }[];
         errors: {
             body?: string;
             channel?: string;
             link?: string;
             linkTitle?: string;
             linkDescription?: string;
+            media?: string[];
         };
+        uploads: UploadRules;
+        /** Every image the page knows, by id. */
+        library: Record<number, MediaItem>;
+        /** The images this text has as it is saved. */
+        savedMediaIds?: number[];
+        /**
+         * The saved link and what the platform gets for it, with its
+         * campaign parameters. Used for the count while the link is as saved.
+         */
+        savedLink?: { typed: string; sent: string } | null;
+        /** What the server said about the saved images, see VariantImages. */
+        imageProblems?: Record<string, string>;
         /** False for a text the server keeps on the post whatever is sent. */
         removable?: boolean;
     }>(),
-    { removable: true },
+    {
+        removable: true,
+        savedMediaIds: () => [],
+        savedLink: null,
+        imageProblems: () => ({}),
+    },
 );
 
-const emit = defineEmits<{ remove: []; copy: [channelId: number] }>();
+const emit = defineEmits<{
+    remove: [];
+    copy: [channelId: number, what: CopyKind];
+    uploaded: [image: MediaItem];
+    share: [mediaId: number, channelIds: number[]];
+    uploading: [count: number];
+}>();
 
 const body = defineModel<string>('body', { required: true });
 const link = defineModel<string>('link', { required: true });
@@ -41,19 +80,51 @@ const linkTitle = defineModel<string>('linkTitle', { default: '' });
 const linkDescription = defineModel<string>('linkDescription', {
     default: '',
 });
+const media = defineModel<MediaInput[]>('media', { required: true });
+
+const rules = computed(() => props.channel.media);
+
+// Next to images most platforms show no card for a link. What happens to
+// the link then is a rule of the platform.
+const linkInText = computed(() =>
+    linkGoesInText(link.value, media.value.length, rules.value.link_rule),
+);
+const linkRefused = computed(
+    () =>
+        rules.value.link_rule === 'refused' &&
+        rules.value.max_items > 0 &&
+        media.value.length > 0 &&
+        link.value.trim() !== '',
+);
 
 // A platform that reads nothing from the linked page shows the link as the
-// card typed here.
+// card typed here. There is no card when the link goes out in the text.
 const needsLinkCard = computed(
-    () => props.channel.link_title_length !== null && link.value.trim() !== '',
+    () =>
+        props.channel.link_title_length !== null &&
+        link.value.trim() !== '' &&
+        !linkInText.value,
+);
+
+// The text as the platform gets it: with the link as its last line where
+// the images take the place of the card.
+const sent = computed(() =>
+    textAsSent(
+        body.value,
+        props.savedLink !== null && props.savedLink.typed === link.value
+            ? props.savedLink.sent
+            : link.value,
+        media.value.length,
+        rules.value.link_rule,
+    ),
 );
 
 function overBy(text: string, limit: number | null): number {
     return limit === null ? 0 : Math.max(0, textLength(text) - limit);
 }
 
-const length = computed(() => textLength(body.value));
-const over = computed(() => overBy(body.value, props.channel.max_body_length));
+const length = computed(() => textLength(sent.value));
+const over = computed(() => overBy(sent.value, props.channel.max_body_length));
 
 const titleLength = computed(() => textLength(linkTitle.value.trim()));
 const titleOver = computed(() =>
@@ -94,20 +165,141 @@ const announcement = computed(() => {
     return parts.join(' ');
 });
 
-const sources = computed(() =>
-    props.others.filter((other) => other.body.trim() !== ''),
+function sameImages(a: MediaInput[], b: MediaInput[]): boolean {
+    return (
+        a.length === b.length &&
+        a.every(
+            (item, index) =>
+                item.id === b[index].id && item.alt_text === b[index].alt_text,
+        )
+    );
+}
+
+type CopyChoice = {
+    value: string;
+    from: number;
+    what: CopyKind;
+    /** What is copied and from where: "text and images from Alpha". */
+    label: string;
+    /** Nothing would change. */
+    same: boolean;
+};
+
+// What can be copied in from the other channels: a text, the images, or
+// both. Each choice says which.
+const copyChoices = computed(() =>
+    props.others.flatMap((other) => {
+        const text = other.body.trim() !== '';
+        const pictures = other.media.length > 0 && rules.value.max_items > 0;
+        const sameText = other.body === body.value;
+        const samePictures = sameImages(other.media, media.value);
+        const choices: CopyChoice[] = [];
+        const add = (what: CopyKind, label: string, same: boolean) =>
+            choices.push({
+                value: `${other.channel_id}:${what}`,
+                from: other.channel_id,
+                what,
+                label: `${label} from ${other.name}`,
+                same,
+            });
+
+        if (text) {
+            add('text', 'text', sameText);
+        }
+
+        if (pictures) {
+            add('images', 'images', samePictures);
+        }
+
+        if (text && pictures) {
+            add('both', 'text and images', sameText && samePictures);
+        }
+
+        return choices;
+    }),
 );
 
-// With several other channels the source is picked from a list, which
-// goes back to its prompt once it was picked.
+function capitalised(text: string): string {
+    return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+// With more than one thing to copy the choice is made from a list, which
+// goes back to its prompt once it was made.
 const picked = ref('');
 
-watch(picked, (channelId) => {
-    if (channelId !== '') {
-        emit('copy', Number(channelId));
-        picked.value = '';
+watch(picked, (value) => {
+    const choice = copyChoices.value.find(
+        (candidate) => candidate.value === value,
+    );
+
+    if (choice) {
+        emit('copy', choice.from, choice.what);
     }
+
+    picked.value = '';
 });
+
+// Files dropped on the column or pasted into the text go to its images.
+const images = ref<InstanceType<typeof VariantImages> | null>(null);
+const dragDepth = ref(0);
+
+function carriesFiles(event: DragEvent): boolean {
+    return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+function onDragEnter(event: DragEvent): void {
+    if (carriesFiles(event)) {
+        event.preventDefault();
+        dragDepth.value++;
+    }
+}
+
+function onDragOver(event: DragEvent): void {
+    // Without this the browser would open a dropped file and leave the page.
+    if (carriesFiles(event)) {
+        event.preventDefault();
+
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect =
+                rules.value.max_items > 0 ? 'copy' : 'none';
+        }
+    }
+}
+
+function onDragLeave(event: DragEvent): void {
+    if (carriesFiles(event)) {
+        dragDepth.value = Math.max(0, dragDepth.value - 1);
+    }
+}
+
+function onDrop(event: DragEvent): void {
+    if (!carriesFiles(event)) {
+        return;
+    }
+
+    event.preventDefault();
+    dragDepth.value = 0;
+    images.value?.addFiles(Array.from(event.dataTransfer?.files ?? []));
+}
+
+function onPaste(event: ClipboardEvent): void {
+    const files = Array.from(event.clipboardData?.files ?? []).filter((file) =>
+        file.type.startsWith('image/'),
+    );
+
+    // Text that comes with a picture of itself, as from a word processor,
+    // is pasted as text.
+    if (
+        files.length === 0 ||
+        rules.value.max_items === 0 ||
+        (event.clipboardData?.getData('text/plain') ?? '') !== ''
+    ) {
+        return;
+    }
+
+    event.preventDefault();
+    images.value?.addFiles(files);
+}
 
 function describedBy(...ids: (string | false)[]): string | undefined {
     const present = ids.filter((id): id is string => id !== false);
@@ -119,7 +311,14 @@ function describedBy(...ids: (string | false)[]): string | undefined {
 <template>
     <section
         class="grid content-start gap-4 rounded-2xl bg-card p-5.5 shadow-xs"
+        :class="
+            dragDepth > 0 && rules.max_items > 0 ? 'ring-[3px] ring-ring' : ''
+        "
         :aria-labelledby="`column-${channel.id}`"
+        @dragenter="onDragEnter"
+        @dragover="onDragOver"
+        @dragleave="onDragLeave"
+        @drop="onDrop"
     >
         <header
             class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3"
@@ -137,30 +336,31 @@ function describedBy(...ids: (string | false)[]): string | undefined {
             </div>
 
             <Button
-                v-if="sources.length === 1"
+                v-if="copyChoices.length === 1"
                 type="button"
                 size="sm"
                 variant="outline"
-                :disabled="sources[0].body === body"
-                :aria-label="`Copy the text for ${sources[0].name} into the text for ${channel.display_name}`"
+                :disabled="copyChoices[0].same"
+                :aria-label="`Copy the ${copyChoices[0].label} into the column for ${channel.display_name}`"
                 :data-test="`copy-into-${channel.id}`"
-                @click="emit('copy', sources[0].channel_id)"
+                @click="emit('copy', copyChoices[0].from, copyChoices[0].what)"
             >
-                Copy text from {{ sources[0].name }}
+                Copy {{ copyChoices[0].label }}
             </Button>
-            <div v-else-if="sources.length > 1" class="w-full sm:w-64">
+            <div v-else-if="copyChoices.length > 1" class="w-full sm:w-72">
                 <NativeSelect
                     v-model="picked"
-                    :aria-label="`Copy the text of another channel into the text for ${channel.display_name}`"
+                    :aria-label="`Copy the text or the images of another channel into the column for ${channel.display_name}`"
                     :data-test="`copy-into-${channel.id}`"
                 >
-                    <option value="">Copy text from...</option>
+                    <option value="">Copy from another channel...</option>
                     <option
-                        v-for="source in sources"
-                        :key="source.channel_id"
-                        :value="String(source.channel_id)"
+                        v-for="choice in copyChoices"
+                        :key="choice.value"
+                        :value="choice.value"
+                        :disabled="choice.same"
                     >
-                        {{ source.name }}
+                        {{ capitalised(choice.label) }}
                     </option>
                 </NativeSelect>
             </div>
@@ -217,6 +417,7 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                         over > 0 && `too-long-${channel.id}`,
                     )
                 "
+                @paste="onPaste"
             ></textarea>
             <div
                 class="flex flex-wrap items-start justify-between gap-x-4 gap-y-1"
@@ -228,8 +429,12 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                         class="text-sm text-destructive"
                         :data-test="`too-long-${channel.id}`"
                     >
-                        Too long for {{ channel.platform_label }}. The post
-                        cannot be approved until this text fits.
+                        {{
+                            linkInText
+                                ? `Too long for ${channel.platform_label} with the link as its last line.`
+                                : `Too long for ${channel.platform_label}.`
+                        }}
+                        The post cannot be approved until this text fits.
                     </p>
                     <InputError :message="errors.body" />
                     <InputError :message="errors.channel" />
@@ -252,11 +457,30 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                             {{ channel.max_body_length - length }} characters
                             left:
                         </span>
+                        <template v-if="linkInText">with the link, </template>
                         {{ length }} / {{ channel.max_body_length }}
                     </template>
                 </span>
             </div>
         </div>
+
+        <VariantImages
+            ref="images"
+            v-model:media="media"
+            :channel="channel"
+            :uploads="uploads"
+            :library="library"
+            :saved-ids="savedMediaIds"
+            :others="others"
+            :problems="imageProblems"
+            :errors="errors.media ?? []"
+            @uploaded="(image: MediaItem) => emit('uploaded', image)"
+            @share="
+                (mediaId: number, channelIds: number[]) =>
+                    emit('share', mediaId, channelIds)
+            "
+            @uploading="(count: number) => emit('uploading', count)"
+        />
 
         <div class="grid gap-1.5">
             <Label :for="`link-${channel.id}`">
@@ -276,6 +500,32 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                 class="text-sm text-muted-foreground"
             >
                 {{ channel.platform_label }} shows no preview card for a link.
+            </p>
+            <!-- Advice, not a problem: it carries the Check tag and says
+                 what will happen. -->
+            <p
+                v-if="linkInText"
+                class="rounded-md bg-warning-surface px-3 py-2 text-sm"
+                role="status"
+                :data-test="`link-in-text-${channel.id}`"
+            >
+                <span
+                    class="mr-1.5 rounded-sm bg-warning-fill px-2 py-0.5 text-xs font-bold text-white"
+                >
+                    Check
+                </span>
+                With images, {{ channel.platform_label }} shows no link card.
+                The link goes out as the last line of the text.
+            </p>
+            <p
+                v-else-if="linkRefused"
+                class="text-sm text-destructive"
+                role="status"
+                :data-test="`link-refused-${channel.id}`"
+            >
+                {{ channel.platform_label }} takes a post with images or a post
+                with a link, not both. Take the link or the images off before
+                the post can be approved.
             </p>
             <InputError :message="errors.link" />
         </div>
