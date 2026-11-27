@@ -214,14 +214,22 @@ sent. A post with images still needs a text.
 What happens to an upload:
 
 - JPEG, PNG and WebP are accepted. What a file is, is read from its content,
-  not from its name. SVG, GIF, HEIC and everything else are refused.
+  not from its name. SVG, GIF, HEIC and everything else are refused, and so
+  is an animated PNG or WebP, because only its first frame would be kept.
 - The image is decoded and written again, and only that new file is kept. It
   holds pixels and nothing else: the place a photo was taken, the camera and
   every other piece of metadata are gone, and so is anything hidden in the
   file. A photo is turned upright first.
-- It is stored as a JPEG or a PNG, the types both platforms take. A WebP
-  becomes a PNG when it has transparency and a JPEG when it has none.
+- It is stored as a JPEG or a PNG, the types both platforms take, and which
+  of the two is decided from the picture, not from the file it came as. An
+  image with transparency stays a PNG. A screenshot or a drawing stays a
+  PNG as long as that is the smaller file, so its text stays sharp. A
+  photograph becomes a JPEG, also when it was saved as PNG.
 - An image with a longer side above 4096 pixels is scaled down to that.
+- A JPEG is stored at quality 90 at most, and at the quality it came with
+  when that is lower, so a picture that was already made small for the web
+  does not grow.
+- The same picture uploaded twice in a workspace is stored once.
 
 Images are private. They are shown to the members of their workspace through
 the app, at `/media/{id}`, and there is no address that reaches a file
@@ -320,8 +328,9 @@ The limits, all of them settings (see "Environment and secrets"):
 |---|---|
 | Size of one file | 20 MB |
 | Size of one image | 50 megapixels, 16000 pixels on a side |
-| Images of one workspace together | 2 GB |
+| Images of one workspace together | No limit on a self-hosted instance |
 | Uploads by one person | 30 a minute |
+| Images processed at once | 2 on the instance, 1 for each person |
 | Images on one text | 10, or fewer where the platform takes fewer |
 
 See `docs/adr/0017-images-on-posts.md` for the reasons, and "Images, the
@@ -909,29 +918,76 @@ The app keeps its data in three Docker volumes:
 
 `noongun_redis` holds queues, sessions and the cache.
 
+**The first start after the update that brings images.** The `media` volume
+is new and is mounted inside the folder of the `storage` volume. Docker
+creates it on the first `docker compose up`, empty and owned by the user the
+containers run as; nothing has to be moved, because no image existed before.
+Rebuild on that update, because processing images needs the GD extension of
+PHP, which the image now installs: `docker compose up -d --build --wait`. An
+instance without it refuses every upload and says why. To see that the
+volume is in place and can be written:
+
+```sh
+docker compose exec app sh -c 'touch storage/app/media/.probe && rm storage/app/media/.probe && echo writable'
+```
+
 A backup is the database, the media volume and `.env`, taken together. A
 database without the media volume shows posts whose images are missing, and
 the media volume without the database is a folder of files with random names.
 To copy the images out while the stack runs:
 
 ```sh
-mkdir -p backup && docker compose run --rm --no-deps --entrypoint "" -v "$PWD/backup:/backup" app \
-  tar -czf /backup/media-$(date +%F).tar.gz -C /app/storage/app media
+mkdir -p backup
+docker compose run --rm --no-deps -T --entrypoint "" app \
+  tar -czf - -C /app/storage/app media > backup/media-$(date +%F).tar.gz
 ```
 
 and to put them back into an empty volume:
 
 ```sh
-docker compose run --rm --no-deps --entrypoint "" -v "$PWD/backup:/backup" app \
-  tar -xzf /backup/media-2026-11-26.tar.gz -C /app/storage/app
+docker compose run --rm --no-deps -T --entrypoint "" app \
+  tar -xzf - -C /app/storage/app < backup/media-2026-11-26.tar.gz
 ```
 
-Files are only ever added and removed, never changed, so a copy taken while
-the app runs is consistent with a database dump taken just before it.
+The archive comes out of the container as a stream and is written by your
+own user, so this works whatever `NOONGUN_UID` and `NOONGUN_GID` are. Files
+are only ever added and removed, never changed, so a copy taken while the
+app runs is consistent with a database dump taken just before it.
 
-Processing images needs the GD extension of PHP, which the image installs.
-After an update that adds it, rebuild: `docker compose up -d --build --wait`.
-An instance without it refuses every upload and says why.
+**How much disk images take.** A stored photograph of 4096 pixels is about
+2.5 to 3.5 MB, with its small copy. Three photos a day are roughly 3 to 4 GB
+a year, and nothing that is on a post is ever removed. A self-hosted
+instance has no quota: the disk is yours to watch. Two settings help:
+
+- `NOONGUN_MEDIA_STORED_SIDE=2048` stores images at half the side, which is
+  roughly a quarter of the bytes. It applies
+  to uploads from then on.
+- `NOONGUN_MEDIA_QUOTA_BYTES` sets a limit per workspace. An upload over it
+  is refused with a sentence that names this setting.
+
+**How much memory images take.** Decoding an image takes four bytes for
+every pixel, whatever the size of the file, and the image library needs
+more on top that PHP does not count. Measured for one image, as resident
+memory of the process: 282 MB for a 45 megapixel JPEG, 314 MB for 50
+megapixels, and 641 MB for a lossless WebP of 49 megapixels. So that a
+handful of small files cannot take all the memory of the machine, only two
+images are processed at once on the whole instance
+(`NOONGUN_MEDIA_CONCURRENT_UPLOADS`) and one for each person. The web app
+therefore needs up to about 1.3 GB for images on top of its ordinary use. On
+a small machine set `NOONGUN_MEDIA_CONCURRENT_UPLOADS=1`. An upload that
+finds no free place waits five seconds and is then asked to come back; the
+editor does that by itself.
+
+No memory limit is set on the `app` container. If you want one, give it in a
+compose file of your own that `COMPOSE_FILE` names after `docker-compose.yml`
+(`services: app: mem_limit: 3g`). Publishing runs in the `horizon`
+container and is not touched by a limit on `app`. A limit that is too low
+restarts the web app in the middle of an upload.
+
+Once a week `noongun:sweep-orphaned-media-files` removes files on the media
+disk that no image points to and that are older than two days: what an
+upload leaves when it is killed between writing its file and its row. Run
+it with `--dry-run` to see what it would remove.
 
 **Raising the size of an upload.** Three settings bound it, and the smallest
 one applies:
@@ -945,8 +1001,15 @@ one applies:
 Up to 30 MB only the first needs changing. Above that, raise all three and
 keep the second and third a little above the first, because a request is
 larger than the file in it. A reverse proxy in front of the app may have a
-limit of its own. Larger images also need more memory: `NOONGUN_MEDIA_MAX_MEGAPIXELS`
-times four megabytes, plus a margin, must fit in `NOONGUN_MEDIA_MEMORY_LIMIT`.
+limit of its own.
+
+**Larger images.** The default of 50 megapixels takes a 45 megapixel camera
+file as it is. For a 61 megapixel body set `NOONGUN_MEDIA_MAX_MEGAPIXELS=62`.
+`NOONGUN_MEDIA_MEMORY_LIMIT` must hold the megapixels times four megabytes
+plus a margin of about 150 MB: the measured margin is 100 to 115 MB for a
+JPEG (282 MB of PHP memory for 45 megapixels, 314 MB for 50). By that rule
+62 megapixels need about 400 MB and fit the default of 512 MB; that figure
+is worked out and not measured.
 
 **Another disk.** `NOONGUN_MEDIA_DISK` names a disk in
 `config/filesystems.php`. The default is the local disk `media`. An
@@ -1057,14 +1120,19 @@ it there.
 | `NOONGUN_MAX_REQUEST_SIZE` | `32MiB` | Largest request the web server passes on to the app. Read by `docker-compose.yml`. Keep it in step with `upload_max_filesize` and `post_max_size` in `docker/app/php.ini`. |
 | `NOONGUN_MEDIA_MAX_MEGAPIXELS` | `50` | Most pixels of one uploaded image, in millions. Checked from the header of the file before it is decoded. |
 | `NOONGUN_MEDIA_MAX_SIDE` | `16000` | Longest side of an uploaded image, in pixels. |
-| `NOONGUN_MEDIA_MEMORY_LIMIT` | `512M` | PHP memory limit while one image is processed. Decoding takes four bytes for every pixel. |
+| `NOONGUN_MEDIA_MEMORY_LIMIT` | `512M` | PHP memory limit while one image is processed: the megapixels times 4 MB, plus about 150 MB. |
 | `NOONGUN_MEDIA_STORED_SIDE` | `4096` | An image with a longer side than this is scaled down to it before it is stored. |
 | `NOONGUN_MEDIA_THUMBNAIL_SIDE` | `480` | Longest side of the small copy the lists show. |
-| `NOONGUN_MEDIA_JPEG_QUALITY` | `90` | Quality of stored JPEG files, 50 to 100. |
-| `NOONGUN_MEDIA_QUOTA_BYTES` | `2147483648` | Most bytes all stored images of one workspace may take together. `0`: no limit. |
+| `NOONGUN_MEDIA_JPEG_QUALITY` | `90` | Highest quality of stored JPEG files, 50 to 100. A JPEG that came at a lower quality and is not scaled down keeps about that quality, never under 60. |
+| `NOONGUN_MEDIA_LOSSLESS_CHOICE_MEGAPIXELS` | `9` | Up to this size an opaque image from a lossless format is written as PNG and as JPEG and the smaller file is kept. Above it, it becomes a JPEG. |
+| `NOONGUN_MEDIA_CONCURRENT_UPLOADS` | `2` | How many images the whole instance processes at once. Each can take 300 to 650 MB for a moment. One person always has one at a time. |
+| `NOONGUN_MEDIA_SLOT_WAIT_SECONDS` | `5` | How long an upload waits for its turn before it is answered with 429 and `Retry-After`. |
+| `NOONGUN_MEDIA_SLOT_LEASE_SECONDS` | `120` | After this long a turn that was never given back, because its process died, is free again. |
+| `NOONGUN_MEDIA_QUOTA_BYTES` | unset | Most bytes all stored images of one workspace may take together. Unset: no limit on a self-hosted instance, 2 GB in `saas` mode. `0`: no limit. |
 | `NOONGUN_MEDIA_UPLOADS_PER_MINUTE` | `30` | Most uploads one person may make in a minute. |
 | `NOONGUN_MEDIA_MAX_PER_VARIANT` | `10` | Most images on one text, whatever its platform would take. |
 | `NOONGUN_MEDIA_UNUSED_GRACE_HOURS` | `24` | How long an image that is on no post is kept after the clean-up first saw it unused. |
+| `NOONGUN_MEDIA_ORPHAN_FILE_HOURS` | `48` | How old a file on the media disk that no image points to must be before the weekly sweep removes it. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
 | `OPENAI_API_KEY` | empty | The instance key for drafting with OpenAI, used by every workspace that drafts with OpenAI and has no OpenAI key of its own. |
 | `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider a workspace drafts with until its owner chooses another. Must be listed under `drafting.providers` in `config/noongun.php`. |

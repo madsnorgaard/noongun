@@ -26,22 +26,31 @@ Three facts shape the decisions.
 
 ### An upload is decoded and written again
 
-`StoreMedia` takes one file. `ImageProcessor` decides what it is from its
-content, never from its name or from the type the browser gave:
+`StoreMedia` takes one file. What it is, is decided from its content, never
+from its name or from the type the browser gave:
 
-1. The header is read (`getimagesize`). It gives the type and the size in
-   pixels without decoding anything. Only JPEG, PNG and WebP go on. SVG,
-   GIF, HEIC and everything else are refused.
+1. `ImageInspector` reads the header (`getimagesize` and a few bytes of our
+   own). It gives the type and the size in pixels without decoding anything.
+   Only JPEG, PNG and WebP go on. SVG, GIF, HEIC, an animated PNG, an
+   animated WebP and everything else are refused.
 2. The size in pixels is held against `noongun.media.max_megapixels` and
    `max_side`. Decoding takes four bytes of memory for each pixel, so a file
    of a few hundred bytes that claims 30000 x 30000 pixels is refused here.
-3. The image is decoded with GD, scaled down when its longer side is above
-   `stored_side`, turned upright, and encoded again. Only the result is
-   stored. The file that was sent is never kept.
+3. `ImageProcessor` decodes the image, scales it down when its longer side
+   is above `stored_side`, turns it upright, and encodes it again. Only the
+   result is stored. The file that was sent is never kept.
 
 Encoding again is what makes the stored file trustworthy. It holds pixels
 and nothing else: no EXIF and so no GPS position, no comments, no colour
-profile, no second file behind the image data.
+profile, no second file behind the image data. GD writes a comment of its
+own into every JPEG, naming itself and the quality. That is taken out of the
+file again, so a stored file does not say how it was made either.
+
+`ImageProcessor` is an interface, and `GdImageProcessor` is the one class
+that touches the image library. The inspector, the limits and the two small
+JPEG readers are plain PHP and stay in front of whatever engine decodes. An
+open question for the owner is libvips, for output that keeps colours right
+(see Consequences); changing the engine is a second class and one line.
 
 The orientation of a JPEG is the one EXIF value that is used, because
 without it a photo from a phone would lie on its side. It is read by a small
@@ -51,13 +60,42 @@ block, and it is applied to the pixels before the block is dropped. PHP's
 metadata block for one number.
 
 **A stored image is a JPEG or a PNG.** Those are the types both platforms
-take. A PNG stays a PNG, with its transparency. A WebP becomes a PNG when
-its header says it has transparency and a JPEG when it has none. JPEG
-quality is 90 by default.
+take. Which of the two is decided from the pixels, not from the type the
+file came as:
 
-**GIF is refused, not flattened.** GD reads the first frame of an animation.
-Storing that would turn somebody's animation into a still picture without a
-word. A still GIF is rare and is saved as PNG in a moment.
+- An image in which any pixel is not opaque is a PNG. The header only says
+  whether the format could carry transparency; whether it does is found by
+  looking at the decoded pixels.
+- An opaque image that came in a lossless format (PNG, lossless WebP) and
+  has at most `lossless_choice_megapixels` (9) is written as PNG and as
+  JPEG, and the smaller file is kept. A screenshot or a drawing stays a
+  sharp, exact PNG. A photograph that was saved as PNG becomes a JPEG: a
+  12 megapixel PNG photo of 7.7 MB was stored as 3.0 MB, where it used to
+  be stored larger than it came and above what either platform takes.
+- Everything else is a JPEG.
+
+**A JPEG does not grow.** The configured quality (90) is the most. A JPEG
+that is not scaled down is written at the quality it came with when that is
+lower, never below 60. The quality is estimated from the quantisation table
+in the file (`JpegQuality`), which for the common encoders is right to a
+point. The estimate can only lower the quality, so a wrong one costs a
+little sharpness on one file. An image that is scaled down is a new image
+and gets the configured quality.
+
+**An animation is refused, not flattened.** GD reads the first frame of a
+GIF, an animated PNG or an animated WebP. Storing that would turn
+somebody's animation into a still picture without a word. GIF is refused as
+a type; an animated PNG is known by its `acTL` chunk and an animated WebP
+by a flag in its header, both before anything is decoded.
+
+**The same picture is stored once in a workspace.** Encoding is the same
+every time, so the same picture sent twice gives the same stored bytes. An
+upload whose result the workspace already holds is given that image back:
+no second file, nothing more on the quota, and the note of the clean-up on
+that image is cleared. This is only ever asked within the workspace. Every
+member can already see every image of their workspace, so it tells nobody
+anything new; across workspaces it would tell one customer that another has
+the picture.
 
 Every upload also gets a small JPEG copy (`thumbnail_side`, 480 pixels) next
 to it, for the lists.
@@ -74,8 +112,9 @@ All in `config/noongun.php` under `media`, each with an environment variable:
 |---|---|---|
 | Bytes of one file | 20 MB | on the file, before anything else |
 | Pixels of one image | 50 megapixels, 16000 on a side | from the header, before decoding |
-| Storage of one workspace | 2 GB, 0 for none | before decoding, and again under a lock on the workspace when the row is written |
+| Storage of one workspace | none when self-hosted, 2 GB in saas mode, unless set | before decoding, and again under a lock on the workspace when the row is written |
 | Uploads of one user | 30 a minute | by the `media-uploads` rate limiter |
+| Images decoded at once | 2 on the instance, 1 for each user | by `ProcessingSlots`, around the decoding |
 | Images on one text | 10 | when a draft is saved |
 
 Owners and editors upload. Viewers never do. PHP's memory limit is raised to
@@ -112,8 +151,17 @@ The response is a stream with the `Content-Type` from our own record,
 `X-Content-Type-Options: nosniff`, `Content-Disposition: inline` with a name
 made here, `Content-Security-Policy: default-src 'none'; sandbox`,
 `Cross-Origin-Resource-Policy: same-origin`, an `ETag` from the hash of the
-stored file and `Cache-Control: private, max-age=86400`. A request with a
-matching `If-None-Match` gets 304, after the same checks.
+stored file and `Cache-Control: private, no-cache`. The browser keeps its
+copy and asks every time whether it may show it. A request with a matching
+`If-None-Match` gets 304 without the file, after the same checks, so an
+image stops opening the moment its viewer signs out or leaves the
+workspace. A copy that could be shown for a day without asking would not.
+
+An image is not a page. The two routes are loaded outside the `web` group
+and read the session without writing it (`ReadSessionOnly`): a request for
+an image is not recorded as the page to go back to, does not write the
+session and sends no cookie. Otherwise every thumbnail on a page would
+write the session, and "back" after a failed form could lead to a picture.
 
 Platforms get the bytes by upload from our server. They are never given an
 address to fetch from.
@@ -172,7 +220,10 @@ platform does with a variant that has both:
 
 For `in_text` the text the platform gets is `PostVariant::textFor()`. The
 readiness check measures that text against the limit, the adapters send
-exactly that text, and the page says that the link moves. Blocking the
+exactly that text, and the page says that the link moves. A reader gets the
+link once: a text that already ends with its link, as typed or as sent, is
+not given a second one, and a typed link at the end is replaced by the link
+that is sent, with its campaign parameters. Blocking the
 combination was the alternative. It was not chosen as the default because a
 drafted post carries its link apart from its text, and adding a picture to
 such a draft would stop with an error that the author has to work around by
@@ -232,7 +283,9 @@ Removing an image from a draft, or deleting a draft, removes attachments and
 no file. `noongun:prune-unused-media` runs every hour. It notes when it first
 sees an image on no variant, forgets the note when the image is in use again,
 and deletes the row and then the files once the note is older than
-`unused_grace_hours` (24). So an upload abandoned in the editor goes after a
+`unused_grace_hours` (24). Attaching an image clears the note at once, so an
+image that was put on a post and taken off again between two runs has its
+full day from then. So an upload abandoned in the editor goes after a
 day, and an image somebody is about to attach is not pulled away.
 
 An image on any variant is never removed, whatever the state of the post. A
@@ -293,15 +346,41 @@ suggestion and is not attached to anything.
   wide colour space (Display P3 from a recent phone) is stored without its
   profile and looks slightly less saturated. Converting to sRGB needs
   ImageMagick and is left until somebody misses it.
-- A PNG stays a PNG. A large photo saved as PNG is stored large.
 - HEIC is refused. A browser on a phone converts to JPEG when the file field
   asks for JPEG, PNG and WebP, which the editor should do.
 - Sequential ids are in the addresses of images, as they are for posts. An id
   of another workspace gives 404, as an id that was never given out does.
-- One upload decodes one image in the web process, with up to 512 MB of
-  memory. The rate limit keeps that to a few at a time for one user; a busy
-  hosted instance will want this on a queue.
-- The quota counts the stored images, not their small copies.
+- One upload decodes one image in the web process. The rate limit does not
+  bound that: it counts requests in a minute, not how many run together.
+  What bounds it is `ProcessingSlots`: two images at once on the instance
+  and one for each user, held as cache locks with a lease of two minutes,
+  so a place is given back also when the process is killed. A request waits
+  up to five seconds for its turn and is then answered 429 with
+  `Retry-After` and `reason: busy`; the limit per minute answers 429 with
+  `reason: throttled`. Measured peaks of resident memory for one image:
+  282 MB for a 45 megapixel JPEG, 314 MB for 50, and 641 MB for a lossless
+  WebP of 49 megapixels, where the codec holds buffers that PHP's memory
+  limit does not count. So the web container needs room for about 1.3 GB on
+  top of what it uses anyway, with the defaults.
+- No memory limit is set on the `app` container. Publishing runs in
+  `horizon`, a container of its own, so a limit on `app` could not take
+  publishing down; but a limit that is wrong for the machine kills the web
+  app in ordinary use, and with the places above the need is bounded. The
+  README says how to set one.
+- A busy hosted instance will still want decoding on a queue.
+- The quota counts the stored images, not their small copies. A self-hosted
+  instance has none unless it sets one: the disk belongs to the person who
+  runs it, and a photographer posting three photos a day would have met a
+  default of 2 GB within months.
+- Looking for transparency reads every pixel of an image that could have
+  some, in PHP: about a fifth of a second for 11 megapixels.
+- Files are written before their row. A process killed in between, a failed
+  delete and a deleted workspace leave files that no row points to.
+  `noongun:sweep-orphaned-media-files` runs once a week, lists the media
+  disks through the Storage API and removes files that have the form of a
+  stored image, that no row names, and that are older than
+  `orphan_file_hours` (48). It works the same on a bucket; there it costs
+  one listing of the media files.
 - An image removed from the last post that used it can be attached again for
   a day, but the editor has no list of earlier uploads to pick it from.
 - There is no "delete this image now". Unused images go after the grace
