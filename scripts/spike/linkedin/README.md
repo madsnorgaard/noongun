@@ -1,4 +1,4 @@
-# LinkedIn spike (M5)
+# LinkedIn spike (M5, and images)
 
 A throwaway script that calls the real LinkedIn API. It proves that a
 self-serve app (Share on LinkedIn plus Sign In with LinkedIn using OpenID
@@ -40,8 +40,16 @@ The script:
 4. With `SPIKE_THUMBNAIL` set, uploads that image through the Images API.
 5. Publishes a link post with a title and description (and the thumbnail, if
    one was uploaded). Prints the URN and permalink.
-6. Waits for Enter, then deletes both posts. It also deletes what it created
-   when it is interrupted or fails half way.
+6. With `SPIKE_IMAGE` set, uploads that image and at once publishes a post
+   that shows it, with an alternative text and, as the last line of the
+   text, a link whose underscores are escaped. For each upload it prints the
+   URN, the host of the upload address, when that address expires, the status
+   and duration of the `PUT`, and what `GET /rest/images/{urn}` answers.
+7. With `SPIKE_IMAGE_2` set as well, uploads it and publishes a post with
+   both images. The first image is used a second time for it.
+8. Waits for Enter, then deletes every post. It also deletes what it created
+   when it is interrupted or fails half way. An uploaded image cannot be
+   deleted: the Images API has no call for it.
 
 ## What to write down
 
@@ -55,8 +63,21 @@ Fill in "Spike results" in `docs/platform-notes/linkedin.md`:
 - How the link post looks with and without a thumbnail.
 - What `scope` holds in the introspection answer (are `openid` and `profile`
   listed next to `w_member_social`?), and its separator.
-- The HTTP status of the image upload with `PUT`.
-- The status of the two deletes.
+- The HTTP status of the image upload with `PUT`, the host of the upload
+  address and how long the address is valid.
+- Whether `GET /rest/images/{urn}` is allowed with this token, and the status
+  it reports right after the upload.
+- Whether the post with an image is accepted straight after the upload. If
+  it is refused: the HTTP status, `code` and `message`, word for word. The
+  adapter guesses at these words to tell "not ready yet" from a refusal.
+- Whether the image shows at once in the post, and its alternative text.
+- Whether the link at the end of the image post is a link, with its
+  underscores intact.
+- Whether the post with two images shows both, in order, and whether an
+  image could be used on a second post.
+- With a large file: the size from which the upload or the post fails
+  (`LINKEDIN_MAX_IMAGE_BYTES` is 5 MB by assumption).
+- The status of the deletes.
 
 The connect flow (redirect address, consent, `expires_in`, `refresh_token`,
 the `scope` of the token answer) is tested through the app itself: set
