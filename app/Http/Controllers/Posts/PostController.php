@@ -31,8 +31,6 @@ class PostController extends Controller
     /** The time of day a new post is planned for when it is started from a day in the calendar. */
     private const DEFAULT_TIME = '09:00';
 
-    private const IMAGE_GONE = 'The changes were not saved: an image on the post no longer exists. It was removed because no post used it. Take it off and upload it again.';
-
     public function __construct(private readonly PostPresenter $presenter) {}
 
     public function create(Request $request): Response
@@ -51,8 +49,8 @@ class PostController extends Controller
     {
         try {
             $post = $save->handle($this->actor($request), null, $request->plannedAt(), $request->variantInputs());
-        } catch (AttachedMediaMissing) {
-            throw ValidationException::withMessages(['variants' => [(string) __(self::IMAGE_GONE)]]);
+        } catch (AttachedMediaMissing $missing) {
+            throw ValidationException::withMessages($request->missingImageErrors($missing->ids));
         }
 
         $this->toast('success', __('The draft is saved.'));
@@ -86,8 +84,8 @@ class PostController extends Controller
             $this->toast('success', __('The draft is saved.'));
         } catch (PostNotEditable) {
             $this->toast('error', __('The changes were not saved: the post is no longer a draft. Return it to draft to edit it.'));
-        } catch (AttachedMediaMissing) {
-            throw ValidationException::withMessages(['variants' => [(string) __(self::IMAGE_GONE)]]);
+        } catch (AttachedMediaMissing $missing) {
+            throw ValidationException::withMessages($request->missingImageErrors($missing->ids));
         }
 
         return to_route('posts.show', $post->id);

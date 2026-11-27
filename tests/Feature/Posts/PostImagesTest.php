@@ -11,6 +11,7 @@ use App\Domain\Content\PostPreconditions;
 use App\Domain\Content\PostState;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
+use App\Http\Requests\Posts\SavePostRequest;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Inertia\Testing\AssertableInertia as Assert;
@@ -202,6 +203,41 @@ describe('saving a draft with images', function () {
         $this->actingAs(userWithRole($this->workspace, Role::Viewer))
             ->post(route('posts.store'), imagePayload([$this->alpha->id => [['id' => $this->harbour->id]]]))
             ->assertForbidden();
+    });
+
+    it('points at the image that was removed between the check and the save, as the check itself would', function () {
+        // The clean-up takes the second image away after the request was
+        // checked and before the draft is written.
+        PostVariant::created(fn () => DB::table('media')->where('id', $this->gull->id)->delete());
+
+        $payload = imagePayload([
+            $this->alpha->id => [['id' => $this->harbour->id]],
+            $this->bravo->id => [['id' => $this->harbour->id], ['id' => $this->gull->id]],
+        ]);
+
+        $this->actingAs($this->owner)->post(route('posts.store'), $payload)
+            ->assertSessionHasErrors(['variants.1.media.1.id' => 'This image does not exist in this workspace. It may have been removed because no post used it. Upload it again.'])
+            ->assertSessionDoesntHaveErrors(['variants', 'variants.0.media.0.id', 'variants.1.media.0.id']);
+
+        expect(Post::query()->withoutGlobalScopes()->count())->toBe(0);
+    });
+
+    it('points at it on an existing draft as well, and names no image when it cannot tell which', function () {
+        $this->actingAs($this->owner)->post(route('posts.store'), imagePayload([$this->alpha->id => [['id' => $this->harbour->id]]]));
+
+        $post = onlyPost();
+        $payload = imagePayload([$this->alpha->id => [['id' => $this->harbour->id], ['id' => $this->gull->id]]]);
+
+        PostVariant::saving(fn () => DB::table('media')->where('id', $this->gull->id)->delete());
+
+        $this->put(route('posts.update', $post->id), $payload)
+            ->assertSessionHasErrors(['variants.0.media.1.id' => 'This image does not exist in this workspace. It may have been removed because no post used it. Upload it again.'])
+            ->assertSessionDoesntHaveErrors(['variants']);
+
+        expect(imagesOf(variantsOf($post)[0]))->toBe([[$this->harbour->id, null]])
+            ->and(SavePostRequest::create('/', 'PUT', $payload)->missingImageErrors([424242]))->toBe([
+                'variants' => ['This image does not exist in this workspace. It may have been removed because no post used it. Upload it again.'],
+            ]);
     });
 
     it('says so when an image was removed between the check and the save', function () {

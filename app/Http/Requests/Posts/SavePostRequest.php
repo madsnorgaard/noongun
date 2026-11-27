@@ -33,6 +33,32 @@ class SavePostRequest extends FormRequest
 
     private const MAX_LINK_DESCRIPTION_LENGTH = 5000;
 
+    /** For an image that is not in the workspace, whenever that is found out. */
+    public const IMAGE_MISSING = 'This image does not exist in this workspace. It may have been removed because no post used it. Upload it again.';
+
+    /**
+     * The errors for images that were there when the request was checked
+     * and gone when the draft was written, keyed as the check itself keys
+     * a missing image, so that the page points at the same place either way.
+     *
+     * @param  list<int>  $ids
+     * @return array<string, list<string>>
+     */
+    public function missingImageErrors(array $ids): array
+    {
+        $errors = [];
+
+        foreach ((array) $this->input('variants', []) as $position => $variant) {
+            foreach ((array) (is_array($variant) ? $variant['media'] ?? [] : []) as $index => $image) {
+                if (is_array($image) && is_numeric($image['id'] ?? null) && in_array((int) $image['id'], $ids, true)) {
+                    $errors["variants.{$position}.media.{$index}.id"] = [(string) __(self::IMAGE_MISSING)];
+                }
+            }
+        }
+
+        return $errors !== [] ? $errors : ['variants' => [(string) __(self::IMAGE_MISSING)]];
+    }
+
     public function authorize(): bool
     {
         return $this->user()?->can('create', Post::class) ?? false;
@@ -80,7 +106,7 @@ class SavePostRequest extends FormRequest
             'variants.*.channel_id.exists' => __('This channel does not exist in this workspace.'),
             'variants.*.link.url' => __('The link must be a full address that starts with http:// or https://.'),
             'variants.*.media.max' => __('A text can carry :max images at most.'),
-            'variants.*.media.*.id.exists' => __('This image does not exist in this workspace. It may have been removed because no post used it. Upload it again.'),
+            'variants.*.media.*.id.exists' => __(self::IMAGE_MISSING),
             'scheduled_at.date_format' => __('The planned time is not a valid date and time.'),
         ];
     }

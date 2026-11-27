@@ -10,11 +10,17 @@ use LogicException;
  */
 class AttachedMediaMissing extends LogicException
 {
+    /** @var list<int> the ids that were named and not found */
+    public array $ids = [];
+
     /**
      * @param  list<int>  $ids
      */
     public static function for(array $ids): self
     {
-        return new self('These images do not exist in the current workspace: '.implode(', ', $ids).'.');
+        $missing = new self('These images do not exist in the current workspace: '.implode(', ', $ids).'.');
+        $missing->ids = $ids;
+
+        return $missing;
     }
 }
