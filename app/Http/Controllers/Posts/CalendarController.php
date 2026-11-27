@@ -102,7 +102,8 @@ class CalendarController extends Controller
     private function entry(Post $post): array
     {
         $variants = $post->variants->sortBy('id')->values();
-        $image = $variants->first()?->images()->first()?->media;
+        $attachment = $variants->first()?->images()->first();
+        $image = $attachment?->media;
 
         return [
             'id' => $post->id,
@@ -113,6 +114,9 @@ class CalendarController extends Controller
             // The small copy of the first image of the first text, and how
             // many images that text has.
             'thumb_url' => $image !== null ? MediaPresenter::present($image)['thumb_url'] : null,
+            // What that image shows, in the words typed for it, for a
+            // reader who does not see the small copy.
+            'thumb_alt' => $image !== null ? $attachment->alt_text : null,
             'image_count' => $variants->first()?->attachments->count() ?? 0,
         ];
     }

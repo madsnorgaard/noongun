@@ -7,6 +7,51 @@ export type PostState =
     | 'failed'
     | 'rejected';
 
+/** A stored image. The addresses are private and relative to this instance. */
+export type MediaItem = {
+    id: number;
+    url: string;
+    /** A small copy, for lists. */
+    thumb_url: string;
+    mime: string;
+    byte_size: number;
+    width: number;
+    height: number;
+};
+
+/** An image on a text, with the description typed for that channel. */
+export type AttachedMedia = MediaItem & { alt_text: string | null };
+
+/** An image on a text as the editor sends it. */
+export type MediaInput = { id: number; alt_text: string };
+
+/** What "Copy from" brings over from the column of another channel. */
+export type CopyKind = 'text' | 'images' | 'both';
+
+/** What a platform takes in images. `max_items` is 0 when it takes none. */
+export type MediaRules = {
+    max_items: number;
+    types: string[];
+    max_bytes: number | null;
+    max_pixels: number | null;
+    /** Null when the platform takes no description for an image. */
+    alt_text_length: number | null;
+    /** What becomes of the link of a text that has images. */
+    link_rule: 'in_text' | 'both' | 'refused';
+};
+
+/** Where an upload goes and what this instance takes. */
+export type UploadRules = {
+    url: string;
+    field: string;
+    accept: string[];
+    max_bytes: number;
+    max_megapixels: number;
+    max_side: number;
+    max_per_variant: number;
+    alt_text_length: number;
+};
+
 export type PostVariant = {
     id: number;
     channel_id: number;
@@ -18,6 +63,11 @@ export type PostVariant = {
     /** The card for the link on a platform that builds none itself. */
     link_title: string | null;
     link_description: string | null;
+    /** The link with its campaign parameters, as the platform gets it. */
+    link_as_sent: string | null;
+    /** The images in the order they are shown. */
+    media: AttachedMedia[];
+    media_rules: MediaRules;
     published: boolean;
     /** A platform was called for it and nothing says how that ended. */
     outcome_unknown: boolean;
@@ -51,6 +101,8 @@ export type Post = {
     variants: PostVariant[];
     /** Why the post cannot go out as it stands, keyed by field. */
     problems: Record<string, string[]>;
+    /** Worth a look, keyed like the problems. Never holds an approval back. */
+    advice: Record<string, string[]>;
     /** Where a drafted post came from. Null for one written by hand. */
     origin: PostOrigin | null;
     can: PostAbilities;
@@ -94,6 +146,7 @@ export type ChannelOption = {
     /** Set when the platform shows a link only as the card the author types. */
     link_title_length: number | null;
     link_description_length: number | null;
+    media: MediaRules;
 };
 
 export type CalendarEntry = {
@@ -102,6 +155,12 @@ export type CalendarEntry = {
     time: string;
     channels: string[];
     excerpt: string;
+    /** The small copy of the first image of the first text. */
+    thumb_url: string | null;
+    /** The description typed for that image, or null without one. */
+    thumb_alt: string | null;
+    /** How many images the first text has. */
+    image_count: number;
 };
 
 export type CalendarDay = {
