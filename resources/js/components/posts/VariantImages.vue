@@ -73,7 +73,13 @@ const hasUnsaved = computed(() =>
 
 const limits = computed(() => {
     const types = typeList(props.uploads.accept);
-    const size = megabytes(props.uploads.max_bytes);
+    // The smaller of what this instance stores and what the platform takes.
+    const size = megabytes(
+        Math.min(
+            props.uploads.max_bytes,
+            rules.value.max_bytes ?? props.uploads.max_bytes,
+        ),
+    );
 
     return rules.value.max_items === 1
         ? `1 image, ${types}, up to ${size} MB.`
