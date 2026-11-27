@@ -1,13 +1,14 @@
 <script setup lang="ts">
+import { computed } from 'vue';
 import PostImages from '@/components/posts/PostImages.vue';
 import { formatDateTime, useWorkspaceTimezone, webAddress } from '@/lib/posts';
-import type { Post } from '@/types/posts';
+import type { AttachedMedia, Post } from '@/types/posts';
 
 /**
  * The texts of a post as they will read on each channel, with what became
  * of each one. Read-only.
  */
-defineProps<{
+const props = defineProps<{
     post: Post;
     /** Shorten each text to two lines, for rows that are not being reviewed. */
     clamp?: boolean;
@@ -18,6 +19,36 @@ defineProps<{
 }>();
 
 const timezone = useWorkspaceTimezone();
+
+// In a list the same images on several channels are shown once, with the
+// channels they go to, and not once for every channel.
+const imageSets = computed(() => {
+    const sets = new Map<
+        string,
+        { images: AttachedMedia[]; channels: string[]; missing: number }
+    >();
+
+    props.post.variants.forEach((variant) => {
+        if (variant.media.length === 0) {
+            return;
+        }
+
+        const key = variant.media.map((image) => image.id).join(',');
+        const set = sets.get(key) ?? {
+            images: variant.media,
+            channels: [],
+            missing: 0,
+        };
+
+        set.channels.push(variant.channel_name);
+        set.missing += variant.media.filter(
+            (image) => (image.alt_text ?? '').trim() === '',
+        ).length;
+        sets.set(key, set);
+    });
+
+    return Array.from(sets, ([key, set]) => ({ key, ...set }));
+});
 </script>
 
 <template>
@@ -67,9 +98,9 @@ const timezone = useWorkspaceTimezone();
                 <p v-else class="text-muted-foreground">No text yet.</p>
 
                 <PostImages
+                    v-if="describeImages"
                     :images="variant.media"
                     :channel-name="variant.channel_name"
-                    :compact="!describeImages"
                 />
 
                 <a
@@ -139,6 +170,23 @@ const timezone = useWorkspaceTimezone();
                     An earlier attempt did not get through. {{ variant.error }}
                 </p>
             </div>
+        </div>
+
+        <div
+            v-if="!describeImages && imageSets.length"
+            class="grid gap-3"
+            :class="sideBySide ? 'col-span-full' : 'py-4 last:pb-0'"
+            data-test="post-image-sets"
+        >
+            <PostImages
+                v-for="set in imageSets"
+                :key="set.key"
+                :images="set.images"
+                :channel-name="set.channels[0]"
+                :channel-names="set.channels"
+                :missing-descriptions="set.missing"
+                compact
+            />
         </div>
     </div>
 </template>

@@ -193,10 +193,23 @@ In the editor each channel has its own images under its text. Add them with
 the text. Each image gets a description for that channel, can be moved
 earlier or later and can be taken off. "Also add to" and "Add to all
 channels" put the same file on other channels without a second upload, and
-"Copy from another channel" copies the text, the images or both. A file is
-stored the moment it is uploaded, but it is on the post only once the draft
-is saved. A channel whose platform takes no images says so and offers no
-upload.
+"Copy from another channel" copies the text, the images or both. A channel
+whose platform takes no images says so and offers no upload.
+
+An image on several channels normally needs one description. What is typed
+for it in one column is typed in every other column where its description is
+still empty or still the same. A column whose description was changed on its
+own keeps its own, and "Use this description on all channels" brings them
+back in step. The order of the images is kept per channel; "Use this order on
+all channels" makes the others follow.
+
+A file is stored the moment it is uploaded, but it is on the post only once
+the draft is saved. An upload that is on no saved post is removed after a
+day. One file is uploaded at a time for the whole page, and the same file is
+not sent twice from one page. The limit for an upload is the limit of this
+instance; what a platform takes is held against the stored image, which is
+resized and encoded again and is usually much smaller than the file that was
+sent. A post with images still needs a text.
 
 What happens to an upload:
 

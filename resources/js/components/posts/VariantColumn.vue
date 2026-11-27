@@ -6,7 +6,7 @@ import VariantImages from '@/components/posts/VariantImages.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { linkGoesInText, textAsSent } from '@/lib/media';
+import { linkGoesInText, textAsSent, withCampaign } from '@/lib/media';
 import { textLength } from '@/lib/posts';
 import type {
     ChannelOption,
@@ -53,8 +53,14 @@ const props = withDefaults(
          * campaign parameters. Used for the count while the link is as saved.
          */
         savedLink?: { typed: string; sent: string } | null;
+        /** The campaign parameters the server puts on the link of this text. */
+        campaign?: string | null;
         /** What the server said about the saved images, see VariantImages. */
         imageProblems?: Record<string, string>;
+        /** Images the last save said no longer exist. */
+        goneMediaIds?: number[];
+        /** A description for an image that came with the draft. */
+        suggestedAltText?: string | null;
         /** False for a text the server keeps on the post whatever is sent. */
         removable?: boolean;
     }>(),
@@ -62,7 +68,10 @@ const props = withDefaults(
         removable: true,
         savedMediaIds: () => [],
         savedLink: null,
+        campaign: null,
         imageProblems: () => ({}),
+        goneMediaIds: () => [],
+        suggestedAltText: null,
     },
 );
 
@@ -72,6 +81,9 @@ const emit = defineEmits<{
     uploaded: [image: MediaItem];
     share: [mediaId: number, channelIds: number[]];
     uploading: [count: number];
+    describe: [mediaId: number, text: string];
+    describeAll: [mediaId: number];
+    orderAll: [];
 }>();
 
 const body = defineModel<string>('body', { required: true });
@@ -108,15 +120,39 @@ const needsLinkCard = computed(
 
 // The text as the platform gets it: with the link as its last line where
 // the images take the place of the card.
+// The link as the platform gets it: what the server said for the saved
+// link, and for one that is being typed the same campaign parameters put
+// on it here.
+const sentLink = computed(() =>
+    props.savedLink !== null && props.savedLink.typed === link.value
+        ? props.savedLink.sent
+        : withCampaign(link.value, props.campaign),
+);
+
 const sent = computed(() =>
     textAsSent(
         body.value,
-        props.savedLink !== null && props.savedLink.typed === link.value
-            ? props.savedLink.sent
-            : link.value,
+        sentLink.value,
         media.value.length,
         rules.value.link_rule,
     ),
+);
+
+// The text already ends with the link that is typed in the link field.
+const endsWithLink = computed(
+    () =>
+        linkInText.value &&
+        link.value.trim() !== '' &&
+        body.value.trimEnd().endsWith(link.value.trim()),
+);
+// The link is then added once more when what is sent is not what is typed.
+const linkTwice = computed(
+    () => endsWithLink.value && sent.value !== body.value,
+);
+
+// A picture without a text is not built yet.
+const needsText = computed(
+    () => media.value.length > 0 && body.value.trim() === '',
 );
 
 function overBy(text: string, limit: number | null): number {
@@ -436,6 +472,15 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                         }}
                         The post cannot be approved until this text fits.
                     </p>
+                    <p
+                        v-if="needsText"
+                        class="text-sm text-destructive"
+                        :data-test="`needs-text-${channel.id}`"
+                    >
+                        {{ channel.platform_label }} posts need a text for now,
+                        even with images. The post cannot be approved until this
+                        one has a text.
+                    </p>
                     <InputError :message="errors.body" />
                     <InputError :message="errors.channel" />
                 </div>
@@ -457,7 +502,9 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                             {{ channel.max_body_length - length }} characters
                             left:
                         </span>
-                        <template v-if="linkInText">with the link, </template>
+                        <template v-if="sent !== body"
+                            >with the link,
+                        </template>
                         {{ length }} / {{ channel.max_body_length }}
                     </template>
                 </span>
@@ -474,6 +521,14 @@ function describedBy(...ids: (string | false)[]): string | undefined {
             :others="others"
             :problems="imageProblems"
             :errors="errors.media ?? []"
+            :gone-ids="goneMediaIds"
+            :suggested-alt-text="suggestedAltText"
+            @describe="
+                (mediaId: number, text: string) =>
+                    emit('describe', mediaId, text)
+            "
+            @describe-all="(mediaId: number) => emit('describeAll', mediaId)"
+            @order-all="emit('orderAll')"
             @uploaded="(image: MediaItem) => emit('uploaded', image)"
             @share="
                 (mediaId: number, channelIds: number[]) =>
@@ -514,8 +569,20 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                 >
                     Check
                 </span>
-                With images, {{ channel.platform_label }} shows no link card.
-                The link goes out as the last line of the text.
+                <template v-if="linkTwice">
+                    The text already ends with this link. With images the link
+                    is added once more as the last line, with its campaign
+                    parameters. Take the link out of the text.
+                </template>
+                <template v-else-if="endsWithLink">
+                    With images, {{ channel.platform_label }} shows no link
+                    card. The text already ends with the link, so it is not
+                    added again.
+                </template>
+                <template v-else>
+                    With images, {{ channel.platform_label }} shows no link
+                    card. The link goes out as the last line of the text.
+                </template>
             </p>
             <p
                 v-else-if="linkRefused"
