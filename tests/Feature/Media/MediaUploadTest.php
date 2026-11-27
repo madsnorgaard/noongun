@@ -81,7 +81,7 @@ describe('what is stored', function () {
         'a PNG' => [fn () => pngBytes(), 'drawing.png', 'image/png', 'png'],
         'a WebP without transparency, as a JPEG' => [fn () => webpBytes(), 'photo.webp', 'image/jpeg', 'jpg'],
         'a WebP with transparency, as a PNG' => [fn () => webpBytes(transparent: true), 'logo.webp', 'image/png', 'png'],
-    ]);
+    ])->with('image engines');
 
     it('keeps the transparency of a PNG and of a WebP', function (Closure $bytes) {
         $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf($bytes())])->assertCreated();
@@ -95,7 +95,7 @@ describe('what is stored', function () {
     })->with([
         'PNG' => [fn () => pngBytes()],
         'WebP' => [fn () => webpBytes(transparent: true)],
-    ]);
+    ])->with('image engines');
 
     it('decides what a file is from its content, not from its name or the type the browser gave', function () {
         $this->actingAs($this->editor)
@@ -104,7 +104,7 @@ describe('what is stored', function () {
             ->assertJsonPath('mime', 'image/png');
 
         expect(onlyMedia()->path)->toEndWith('.png');
-    });
+    })->with('image engines');
 
     it('keeps nothing of the name the file was sent with', function () {
         $this->actingAs($this->editor)
@@ -116,7 +116,7 @@ describe('what is stored', function () {
         expect(json_encode($media->getAttributes()))->not->toContain('secret-client-name')
             ->and(implode(' ', $this->disk->allFiles()))->not->toContain('secret-client-name')
             ->and($media->fileName())->toBe("image-{$media->id}.jpg");
-    });
+    })->with('image engines');
 
     it('drops EXIF, with the place the photo was taken', function () {
         $sent = jpegBytes(withLocation: true);
@@ -130,7 +130,7 @@ describe('what is stored', function () {
                 ->not->toContain(exifMarker())
                 ->not->toContain("\xFF\xE1");
         }
-    });
+    })->with('image engines');
 
     it('drops a payload that hides in a real image', function () {
         $sent = polyglotJpegBytes();
@@ -142,7 +142,7 @@ describe('what is stored', function () {
 
         expect(storedBytes(onlyMedia()))->not->toContain(payloadMarker())->not->toContain('<?php')
             ->and(storedBytes(onlyMedia(), thumbnail: true))->not->toContain(payloadMarker());
-    });
+    })->with('image engines');
 
     it('turns a photo upright before the note about its orientation is dropped', function (int $orientation, int $width, int $height, array $red, array $blue) {
         // Sent 40 wide and 20 high, red on the left and blue on the right.
@@ -170,7 +170,7 @@ describe('what is stored', function () {
         'on its side, camera turned right' => [8, 20, 40, [10, 35], [10, 5]],
         'transposed' => [5, 20, 40, [10, 5], [10, 35]],
         'transversed' => [7, 20, 40, [10, 35], [10, 5]],
-    ]);
+    ])->with('image engines');
 
     it('reads the orientation of a file and of nothing else', function () {
         expect(JpegOrientation::fromBytes(jpegBytes(orientation: 6)))->toBe(6)
@@ -195,7 +195,7 @@ describe('what is stored', function () {
         $thumb = getimagesizefromstring(storedBytes(onlyMedia(), thumbnail: true));
 
         expect([$thumb[0] ?? null, $thumb[1] ?? null])->toBe([32, 16]);
-    });
+    })->with('image engines');
 
     it('does not enlarge a small image', function () {
         $this->actingAs($this->editor)
@@ -203,7 +203,7 @@ describe('what is stored', function () {
             ->assertCreated()
             ->assertJsonPath('width', 12)
             ->assertJsonPath('height', 8);
-    });
+    })->with('image engines');
 });
 
 describe('what is refused', function () {

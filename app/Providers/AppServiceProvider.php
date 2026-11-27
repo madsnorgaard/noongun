@@ -3,12 +3,15 @@
 namespace App\Providers;
 
 use App\Domain\Channels\ChannelManager;
+use App\Domain\Content\Media\ImageProcessor;
 use App\Domain\Content\Media\MediaConfig;
+use App\Domain\Content\Media\VipsCommand;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\Generators\ProviderReplies;
 use App\Domain\Drafting\PromptRenderer;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Support\Health\CheckBackingServices;
+use App\Support\Health\CheckImageEngine;
 use App\Support\PasswordConfirmation;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -37,6 +40,10 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ChannelManager::class);
         $this->app->scoped(DraftGenerators::class);
         $this->app->singleton(ProviderReplies::class);
+        $this->app->singleton(VipsCommand::class);
+
+        // The engine that processes uploaded images is a setting.
+        $this->app->bind(ImageProcessor::class, fn (Application $app): ImageProcessor => $app->make(MediaConfig::engine()->processor()));
 
         // Built the way the framework builds RequirePassword, from the same
         // setting, so that a page says what the middleware will decide.
@@ -55,6 +62,7 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
 
         Event::listen(DiagnosingHealth::class, CheckBackingServices::class);
+        Event::listen(DiagnosingHealth::class, CheckImageEngine::class);
 
         View::addNamespace(PromptRenderer::NAMESPACE, resource_path('prompts'));
 

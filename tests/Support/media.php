@@ -1,5 +1,6 @@
 <?php
 
+use App\Domain\Content\Media\ImageEngine;
 use App\Domain\Content\Media\MediaConfig;
 use App\Domain\Content\Models\Media;
 use App\Domain\Content\Models\MediaAttachment;
@@ -24,6 +25,21 @@ use Illuminate\Support\Facades\Storage;
  *     attachImage($variant, $media, 'A harbour at dusk.'); // on a variant, in any state
  *     $upload = uploadOf(jpegBytes(), 'holiday.jpg');     // for POST /media
  */
+
+/**
+ * Makes the test run with this image engine, or skips it when the
+ * container does not have the engine. See the dataset "image engines".
+ */
+function useImageEngine(ImageEngine $engine): ImageEngine
+{
+    if (! $engine->available()) {
+        test()->markTestSkipped("The image engine [{$engine->value}] is not in this container.");
+    }
+
+    config(['noongun.media.engine' => $engine->value]);
+
+    return $engine;
+}
 
 /**
  * Replaces the media disk with an empty one for this test and returns it.
