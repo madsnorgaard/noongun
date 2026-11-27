@@ -260,10 +260,12 @@ exists.
 
 #### Images on LinkedIn
 
-A LinkedIn text takes up to 20 images, as JPEG or PNG, each of at most 5 MB
-and fewer than 36,152,320 pixels, with a description of up to 4086
-characters. The 5 MB is a careful assumption: LinkedIn documents no size, see
-`LINKEDIN_MAX_IMAGE_BYTES`.
+A LinkedIn text takes up to 20 images, as JPEG or PNG, each of fewer than
+36,152,320 pixels, with a description of up to 4086 characters. LinkedIn
+documents no size in bytes, so Noon Gun holds no image back for its size:
+when LinkedIn finds a file too large, the post fails with a message that
+names the image and says to put a smaller copy on. Set
+`LINKEDIN_MAX_IMAGE_BYTES` to refuse large images before approval instead.
 
 - A LinkedIn post shows images or a link card, never both. With images the
   link goes out as the last line of the text, and the title and description
@@ -276,6 +278,11 @@ characters. The 5 MB is a careful assumption: LinkedIn documents no size, see
   the address the file goes to. Noon Gun sends the file and the access token
   there only when it is a plain HTTPS address on a host in
   `LINKEDIN_UPLOAD_HOSTS`, and fails the post otherwise.
+- LinkedIn allows 150 calls a day for one member. A text post is one call.
+  An image costs two more, so a post with four images is nine calls and a
+  post with twenty is 41. Noon Gun does not count the calls. When LinkedIn
+  turns one away, the post waits and is tried again like after any rate
+  limit, and what was already sent is not sent again.
 - Noon Gun cannot ask LinkedIn whether it has finished with an image: the
   permission a personal profile gives does not allow it. The post is created
   straight after the upload. When LinkedIn refuses it and says an image is
@@ -1011,9 +1018,9 @@ it there.
 | `LINKEDIN_API_VERSION` | `202611` | Value of the `Linkedin-Version` header on every LinkedIn API call, `YYYYMM`. LinkedIn refuses a version about a year after it came out. |
 | `LINKEDIN_SCOPES` | `openid,profile,w_member_social` | Permissions requested when a profile is connected, comma separated. |
 | `LINKEDIN_API_URL`, `LINKEDIN_WEB_URL` | `https://api.linkedin.com`, `https://www.linkedin.com` | Base addresses of the API and of the sign-in. Must be HTTPS. Change only for testing. |
-| `LINKEDIN_UPLOAD_HOSTS` | `linkedin.com` | Hosts an image may be uploaded to, comma separated. Each name allows itself and every name below it. LinkedIn names the upload address in a response; the image and the access token are sent only to an HTTPS address on one of these hosts. Add a host only when the log shows that LinkedIn uses it. |
+| `LINKEDIN_UPLOAD_HOSTS` | `linkedin.com` | Hosts an image may be uploaded to, comma separated. Each name allows itself and every name below it, and must have at least two parts (`linkedin.com`, never `com`). LinkedIn names the upload address in a response; the image and the access token are sent only to an HTTPS address on one of these hosts. A list that is empty or holds anything else allows nothing, and uploads fail with a message that names this setting. Add a host only when the log shows that LinkedIn uses it. |
 | `LINKEDIN_MAX_IMAGES` | `20` | Most images on one LinkedIn text. `NOONGUN_MEDIA_MAX_PER_VARIANT` applies as well. |
-| `LINKEDIN_MAX_IMAGE_BYTES` | `5242880` | Largest image a LinkedIn text may carry, in bytes. LinkedIn documents no size; 5 MB is a careful assumption. |
+| `LINKEDIN_MAX_IMAGE_BYTES` | empty | Largest image a LinkedIn text may carry, in bytes. Empty: no limit, because LinkedIn documents none; an image LinkedIn finds too large then fails when it is uploaded. Set it to hold such images back before approval. |
 | `LINKEDIN_MAX_IMAGE_PIXELS` | `36152319` | Most pixels of one image on a LinkedIn text. LinkedIn takes "less than 36,152,320". |
 | `LINKEDIN_ALT_TEXT_LENGTH` | `4086` | Longest description of an image on a LinkedIn text, in characters. |
 | `LINKEDIN_IMAGE_LIFETIME` | `86400` | Seconds an image that was sent to LinkedIn is used for a later attempt before it is sent again. LinkedIn does not say how long it keeps an image that is on no post. |

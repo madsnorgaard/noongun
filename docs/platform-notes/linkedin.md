@@ -611,9 +611,8 @@ Sources, all under learn.microsoft.com/en-us/linkedin:
 ### Not documented
 
 - **A size in bytes for an image.** No page gives one. Third parties report
-  5 MB. The adapter takes 5 MB (`LINKEDIN_MAX_IMAGE_BYTES`), which is an
-  assumption on the careful side, because a file LinkedIn cannot process is
-  not reported back (see below).
+  5 MB. The adapter first took that as a limit and no longer does, see
+  2026-11-27 below.
 - **How long processing takes.** The Assets page says of uploads in general
   "it might take a few minutes for the upload to complete", which reads as
   being about video.
@@ -637,7 +636,7 @@ Sources, all under learn.microsoft.com/en-us/linkedin:
 ### What the adapter does
 
 - **Capabilities.** JPEG and PNG (what is stored; GIF is not), 20 images,
-  5 MB, 36,152,319 pixels, alternative text of 4086 characters, link rule
+  no limit in bytes (since 2026-11-27), 36,152,319 pixels, alternative text of 4086 characters, link rule
   `in_text`, uploads used for a day. All from the `linkedin` block of
   `config/noongun.php`.
 - **`uploadMedia()`** initialises, checks the address, and sends the file as
@@ -677,6 +676,51 @@ Sources, all under learn.microsoft.com/en-us/linkedin:
 - **Failures.** Uploads: every temporary failure is retryable, nothing is
   ever "outcome unknown". The creating call: unchanged from ADR 0015.
 
+## 2026-11-27 - after the review of the images work (#25)
+
+The page on the commentary format was read again
+(marketing/community-management/shares/little-text-format, updated
+2025-10-16, version `li-lms-2026-11`). No other page was read again.
+
+- **A web address in the text.** The page does not mention addresses, links
+  or URLs at all. Its grammar knows text, mentions, hashtags and the hashtag
+  template, and nothing else. What it does say is general: "All reserved
+  characters need to be escaped with a backslash, even if those characters
+  are not used in one of the supported elements or templates." So the
+  address at the end of an image post stays escaped like the rest of the
+  text: `utm_source` is sent as `utm\_source`, and a `(`, `~` or `#` in an
+  address gets a backslash as well. By the grammar LinkedIn must read
+  `\_` as an underscore before it looks for an address, but no sentence
+  says that it does, and nobody has seen it. This is now the first question
+  of the spike: it posts an image with such an address and asks whether the
+  address is a link and opens with its parameters intact. If it is not,
+  the fix is in `LittleText`: an address recognised by a strict pattern is
+  left as it is.
+- **The upload address.** It must now have a path: a query straight after
+  the host or the port is refused, so that where the host ends does not rest
+  on how one parser reads `https://host?@other/`. A host name with an empty
+  part is refused. The list `LINKEDIN_UPLOAD_HOSTS` must hold host names of
+  at least two parts; a list that is empty or holds anything else allows
+  nothing, and uploads fail before any call with a message for the person
+  who runs the instance.
+- **No limit in bytes of our own.** `LINKEDIN_MAX_IMAGE_BYTES` is empty by
+  default. LinkedIn documents about 36 megapixels and no bytes, and stored
+  images of 6 to 10 MB are ordinary for detailed 4:3 and square pictures at
+  4096 pixels. An upload that LinkedIn answers with `413` fails for good,
+  naming the image and its size. That LinkedIn answers `413` at the upload,
+  and not later while processing, is assumed. See ADR 0015.
+- **The daily limit.** 150 calls a day for one member, and a post with n
+  images is 2n + 1 calls. The adapter declares the limit in calls, which is
+  still right. Nothing in the application counts calls or paces publishing
+  by it, for any platform, so a day of large image posts can reach the
+  limit. What happens then is safe: the throttled call is retryable, the
+  post waits, and images that were sent are not sent again. It is not
+  foreseen, and a post that waits past its attempts fails. Counting belongs
+  to the publishing job.
+- **The spike** now answers the open points of images in one run and prints
+  a summary without the token, ids or addresses, to paste below. See
+  `scripts/spike/linkedin/README.md`.
+
 ## Spike results
 
 To be filled in after running `scripts/spike/linkedin/publish-and-delete.sh`
@@ -699,12 +743,14 @@ and one real connect through the Channels page. Until then the fixtures under
 - Whether an address with an escaped character in it is still a link in the text:
 - Length limit of `commentary`, and whether backslashes count:
 - Link post without a thumbnail: how the card looks:
-- Image upload: host of the upload address, validity of the address, status of the `PUT`:
-- Headers the `PUT` accepted (`Content-Type: application/octet-stream`, `Content-Length`):
-- `GET /rest/images/{urn}` with a `w_member_social` token (status code, and `status` if any):
-- Post with one image straight after the upload: accepted, or refused with which status, `code` and `message`:
-- Whether the image shows at once, and where the alternative text ends up:
-- Link as the last line of an image post: is it a link, are its underscores intact:
-- Post with two images: accepted, order kept, an image used on a second post:
-- Largest image in bytes that was accepted:
 - Link post with a thumbnail: how the card looks:
+- Largest image in bytes that was accepted, and what a larger one was answered with:
+
+Images: paste the summary the script prints here. It holds the host and
+validity of the upload address, the status of the `PUT` with and without the
+token and with `Content-Type`, what `GET /rest/images/{urn}` answers, whether
+a post is accepted straight after the upload, what LinkedIn answers for an
+image that is waiting for its upload and for one that does not exist, and
+the answers to: is the image shown at once, is the address at the end of an
+image post a link, are its underscores intact, is the alternative text
+there, are two images shown in order.

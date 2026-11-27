@@ -88,11 +88,39 @@ the next attempt starts with a new address.
 **The upload address is not believed.** It comes out of a response, and the
 documentation asks for the member's token on it. It is used only when it is
 `https`, on a host in `LINKEDIN_UPLOAD_HOSTS` (default `linkedin.com`, each
-name with everything below it), with port 443 or none, and without a user
-name, an IP address, a fragment, a backslash or white space
-(`UploadAddress`). Otherwise the upload fails for good with nothing sent.
-Redirects are not followed. The address is signed and is never logged; its
-host is.
+name with everything below it), with port 443 or none, followed by a path,
+and without a user name, an IP address, an empty part in the host name, a
+fragment, a backslash or white space (`UploadAddress`). A query straight
+after the host (`https://www.linkedin.com?@other.example/`) is refused too:
+where the host ends must not depend on which parser reads the address.
+Otherwise the upload fails for good with nothing sent. Redirects are not
+followed. The address is signed and is never logged; its host is.
+
+The list of hosts fails closed. A name of one part (`com`) would allow every
+host below it, so a list that is empty or holds anything that is not a host
+name of at least two parts allows nothing: every upload fails before any
+call, with a message that names `LINKEDIN_UPLOAD_HOSTS`.
+
+**No limit in bytes of our own (changed 2026-11-27).** LinkedIn documents a
+limit in pixels and none in bytes. The first version assumed 5 MB. Measured
+with made-up images, ordinary 3:2 photos at 4096 pixels stay below that, but
+grainy or very detailed 4:3 and square ones reach 6 to 10 MB, and they would
+have been held back at approval on the strength of a guess. So
+`maxMediaBytes` is null unless `LINKEDIN_MAX_IMAGE_BYTES` is set, and
+LinkedIn is the judge. An upload answered with `413` fails for good with a
+message that names the image, gives its size and says to put a smaller copy
+on; `400`, `415` and `422` name the image too. What is not covered: a file
+that LinkedIn takes and then cannot process, which is the gap described
+under "Nothing waits" below.
+
+**The daily limit counts images.** Share on LinkedIn allows 150 calls for
+one member in a day. A post with n images is 2n + 1 calls. The declared
+`RateLimit` (150 calls in 86400 seconds) is in calls, so it is still true,
+but nothing in the application reads it: there is no counting and no pacing
+of publishing, for any platform. A throttled call, on any of the three
+endpoints, is retryable and loses nothing that was sent. Counting calls
+before a post is approved or sent belongs to the publishing job, not to an
+adapter that keeps no state, and is not built.
 
 **Nothing waits for an image to be ready.** The Images API has a status
 (`WAITING_UPLOAD`, `PROCESSING`, `AVAILABLE`, `PROCESSING_FAILED`), but a
