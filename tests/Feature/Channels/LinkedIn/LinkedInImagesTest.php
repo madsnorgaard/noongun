@@ -126,7 +126,7 @@ describe('capabilities', function () {
 
         configureLinkedIn(['max_image_bytes' => '8000000']);
 
-        expect(json_encode($problems()))->toContain('LinkedIn takes 7.6 MB at most');
+        expect(json_encode($problems()))->toContain('Noon Gun sends 8 MB at most to LinkedIn for one image');
     });
 });
 
