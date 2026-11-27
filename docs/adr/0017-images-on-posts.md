@@ -252,6 +252,11 @@ added: neither platform documents one that refuses an image.
 Both adapters still declare that they take no media. Until they do, a post
 with images cannot be approved for their channels.
 
+The LinkedIn adapter now declares what it takes: JPEG and PNG, 20 images,
+5 MB (an assumption, LinkedIn documents no size), 36,152,319 pixels, an
+alternative text of 4086 characters, `in_text` for the link, and uploads
+that are used for a day. ADR 0015 has the reasons and what is assumed.
+
 ### Drafting is unchanged
 
 A drafted post has no image until a member adds one, so the sentence in the

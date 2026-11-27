@@ -270,9 +270,11 @@ characters. The 5 MB is a careful assumption: LinkedIn documents no size, see
   permission a personal profile gives does not allow it. The post is created
   straight after the upload. When LinkedIn refuses it and says an image is
   not ready, the post waits and is tried again, as after a rate limit.
-- When a post with images fails and LinkedIn refused the images themselves,
-  return it to draft, take the images off and put them on again. They are
-  then sent afresh.
+- An image that was sent to LinkedIn is used for later attempts for a day
+  (`LINKEDIN_IMAGE_LIFETIME`). When LinkedIn says it no longer has an image
+  that was sent earlier, the images are sent again and the post is tried
+  again. When LinkedIn refuses images that were only just sent, the post
+  fails: return it to draft, take the images off and put them on again.
 
 None of this has been run against LinkedIn yet. `docs/platform-notes/linkedin.md`
 says what is documented and what is assumed.

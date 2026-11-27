@@ -629,6 +629,54 @@ describe('publish with images', function () {
         'words in a page that is not from LinkedIn' => [fn () => Http::response('<html>The image is still processing</html>', 422), true],
     ]);
 
+    it('asks for the images to be sent again when LinkedIn no longer has one that was sent earlier', function (Closure $response) {
+        fakeLinkedIn(['posts' => $response]);
+        $variant = ($this->variant)();
+        ($this->uploaded)($variant, 1);
+        ($this->uploaded)($variant, 2);
+
+        $this->travel(2)->hours();
+
+        $exception = ($this->failure)(fn () => ($this->publish)($variant));
+
+        expect($exception->invalidatesUploads())->toBeTrue()
+            ->and($exception->retryable)->toBeTrue()
+            ->and($exception->context())->not->toHaveKey('outcome_unknown')
+            ->and($exception->getMessage())->toBe('LinkedIn no longer has an image that was sent for this post. Nothing was posted. The images are sent again.');
+    })->with([
+        'the image is not known' => [fn () => linkedInResponse('error_image_invalid', 400)],
+        'the image is not found' => [fn () => Http::response(['status' => 404, 'code' => 'NOT_FOUND', 'message' => 'Could not find entity urn:li:image:C4E10AQTestImage1'], 404)],
+        'processing failed' => [fn () => linkedInResponse('error_image_processing_failed', 422)],
+    ]);
+
+    it('does not send images again for a failure that is not a certain refusal about them', function (Closure $response) {
+        fakeLinkedIn(['posts' => $response]);
+        $variant = ($this->variant)();
+        ($this->uploaded)($variant, 1);
+
+        $this->travel(2)->hours();
+
+        expect(($this->failure)(fn () => ($this->publish)($variant))->invalidatesUploads())->toBeFalse();
+    })->with([
+        'a refusal that is about the text' => [fn () => linkedInResponse('error_field_too_long', 400)],
+        'a server error that says the image is invalid' => [fn () => Http::response(['status' => 500, 'message' => 'This Image ID is invalid'], 500)],
+        'the token' => [fn () => linkedInResponse('error_image_forbidden', 403)],
+        'throttled' => [fn () => linkedInResponse('error_rate_limit', 429)],
+    ]);
+
+    it('does not blame images that were sent a moment ago', function () {
+        fakeLinkedIn(['posts' => linkedInResponse('error_image_invalid', 400)]);
+        $variant = ($this->variant)();
+        ($this->uploaded)($variant, 1);
+
+        $this->travel(5)->minutes();
+
+        $exception = ($this->failure)(fn () => ($this->publish)($variant));
+
+        expect($exception->invalidatesUploads())->toBeFalse()
+            ->and($exception->retryable)->toBeFalse();
+    });
+
     it('says what to do with the images when LinkedIn refuses the post', function () {
         fakeLinkedIn(['posts' => linkedInResponse('error_image_invalid', 400)]);
         $variant = ($this->variant)();

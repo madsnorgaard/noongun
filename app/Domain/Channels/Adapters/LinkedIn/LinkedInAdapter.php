@@ -47,6 +47,8 @@ use SensitiveParameter;
  * freely. A token with only `w_member_social` may not read an image back,
  * so nothing here asks whether LinkedIn has finished with one: the post is
  * created, and a refusal that says an image is not ready yet is retryable.
+ * A refusal that says an image sent earlier is gone makes the job send the
+ * images again (PublishFailed::uploadsNoLongerValid()).
  */
 final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMedia
 {
@@ -106,11 +108,25 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMe
      * No page documents that answer, so this is a guess at its words: the
      * refusal must speak of an image and of waiting, and not of failing.
      */
-    private const SPEAKS_OF_IMAGE = '/urn:li:(?:image|digitalmediaAsset)|\b(?:image|media|asset)s?\b/i';
+    private const SPEAKS_OF_IMAGE = '/urn:li:(?:image|digitalmediaAsset)|IMAGE_ID|MEDIA_ASSET|\b(?:image|media|asset)s?\b/i';
 
     private const SPEAKS_OF_WAITING = '/processing|waiting[ _]upload|not (?:yet )?(?:ready|available)|still being processed/i';
 
     private const SPEAKS_OF_FAILING = '/fail/i';
+
+    /**
+     * How a refusal reads when LinkedIn no longer has an image, or never
+     * made it usable. `INVALID_IMAGE_ID` and `NOT_FOUND` are documented for
+     * the Images API; that the Posts API answers with them is assumed.
+     */
+    private const SPEAKS_OF_GONE = '/invalid|not[ _]found|does not exist|no longer|expired|fail/i';
+
+    /**
+     * Seconds after which an upload is no longer "made a moment ago". A
+     * refusal of images that were only just sent is about the files, and
+     * sending the same files again would be refused again.
+     */
+    private const IMAGE_SETTLED_AFTER = 600;
 
     /** What a member id and the id part of a URN may consist of. */
     private const ID = '[A-Za-z0-9_-]{1,100}';
@@ -380,16 +396,7 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMe
                 refused: $images->isEmpty() ? null : 'LinkedIn did not accept this. Return the post to draft, check the text and the images, and try again. If it is refused again, take the images off and put them on again, so that they are sent to LinkedIn afresh. The reason LinkedIn gave is in the log of this instance.',
             );
         } catch (PublishFailed $refusal) {
-            throw $images->isNotEmpty() && $this->saysImageNotReady($refusal)
-                ? PublishFailed::retryable(
-                    self::PLATFORM,
-                    'LinkedIn is still preparing an image of this post. Nothing was posted.',
-                    context: [
-                        ...Arr::only($refusal->context(), ['endpoint', 'http_status', 'code', 'service_error_code', 'platform_message']),
-                        'image_not_ready' => true,
-                    ],
-                )
-                : $refusal;
+            throw $images->isEmpty() ? $refusal : $this->readForImages($refusal, $images);
         }
 
         $urn = $response['id'];
@@ -662,28 +669,59 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMe
     }
 
     /**
-     * True when LinkedIn refused a post, and so certainly made none,
-     * because an image in it is still being prepared. Only a refusal in
-     * LinkedIn's own error format counts: an answer that leaves the outcome
-     * unknown, or one about the token, is never read this way.
+     * What the failure of a post with images means for the images. Only a
+     * refusal in LinkedIn's own error format is read: LinkedIn certainly
+     * made no post then. An answer that leaves the outcome unknown, or one
+     * about the token, is passed on as it is, whatever it says.
+     *
+     * - An image is still being prepared: wait and create the post again.
+     * - LinkedIn no longer has an image that was sent some time ago: the
+     *   job forgets the uploads and sends the images again.
+     * - Anything else, and a complaint about images that were only just
+     *   sent: the refusal stands.
+     *
+     * @param  Collection<int, MediaAttachment>  $images
      */
-    private function saysImageNotReady(PublishFailed $refusal): bool
+    private function readForImages(PublishFailed $refusal, Collection $images): PublishFailed
     {
         $context = $refusal->context();
 
         if ($refusal->retryable || $refusal->requiresReconnect || ($context['outcome_unknown'] ?? false) === true) {
-            return false;
+            return $refusal;
         }
 
         if (! in_array($context['http_status'] ?? null, [400, 404, 422], true)) {
-            return false;
+            return $refusal;
         }
 
         $said = implode(' ', array_filter([$context['code'] ?? null, $context['platform_message'] ?? null], is_string(...)));
 
-        return preg_match(self::SPEAKS_OF_IMAGE, $said) === 1
-            && preg_match(self::SPEAKS_OF_WAITING, $said) === 1
-            && preg_match(self::SPEAKS_OF_FAILING, $said) !== 1;
+        if (preg_match(self::SPEAKS_OF_IMAGE, $said) !== 1) {
+            return $refusal;
+        }
+
+        $context = Arr::only($context, ['endpoint', 'http_status', 'code', 'service_error_code', 'platform_message']);
+
+        if (preg_match(self::SPEAKS_OF_WAITING, $said) === 1 && preg_match(self::SPEAKS_OF_FAILING, $said) !== 1) {
+            return PublishFailed::retryable(
+                self::PLATFORM,
+                'LinkedIn is still preparing an image of this post. Nothing was posted.',
+                context: [...$context, 'image_not_ready' => true],
+            );
+        }
+
+        $settled = now()->subSeconds(self::IMAGE_SETTLED_AFTER);
+        $sentEarlier = $images->contains(fn (MediaAttachment $attachment): bool => $attachment->uploaded_at?->lt($settled) ?? false);
+
+        if ($sentEarlier && preg_match(self::SPEAKS_OF_GONE, $said) === 1) {
+            return PublishFailed::uploadsNoLongerValid(
+                self::PLATFORM,
+                'LinkedIn no longer has an image that was sent for this post. Nothing was posted. The images are sent again.',
+                $context,
+            );
+        }
+
+        return $refusal;
     }
 
     /**

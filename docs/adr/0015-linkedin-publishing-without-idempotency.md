@@ -111,12 +111,18 @@ the post is created straight after the upload. Two things follow.
   until the status can be read (M9, or the legacy read the documentation
   hints at, which the spike will try).
 
-**A stale upload cannot be thrown away by the adapter.** When the creating
-call is refused because of an image, the URN stays on the attachment until
-`LINKEDIN_IMAGE_LIFETIME` (a day, an assumption) has passed, so "Send again"
-sends the same URN. The message tells the member to take the images off and
-put them on again. A way for an adapter to say "forget these uploads" in its
-failure would remove that step.
+**An upload that LinkedIn no longer has is made again.** An uploaded image
+is used for later attempts for `LINKEDIN_IMAGE_LIFETIME` (a day, an
+assumption: LinkedIn does not say how long it keeps one). When the creating
+call is refused in LinkedIn's error format with words that say an image is
+not known, not found or failed, and an image of the post was sent more than
+ten minutes ago, the adapter answers with
+`PublishFailed::uploadsNoLongerValid()`: the job forgets the uploads and its
+next attempt sends the images again. The same refusal for images that were
+only just sent is about the files themselves, and stands: the member is told
+to return the post to draft and to take the images off and put them on
+again. The words are guessed at here too; `INVALID_IMAGE_ID` and `NOT_FOUND`
+are documented for the Images API only.
 
 ### The thumbnail of the link card (decided 2026-11-26)
 

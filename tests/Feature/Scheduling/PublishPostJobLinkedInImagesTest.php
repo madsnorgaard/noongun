@@ -200,6 +200,33 @@ it('waits and tries again when LinkedIn says an image is not ready, without call
         ->and(Http::recorded(fn (Request $request) => $request->method() === 'PUT'))->toHaveCount(2);
 });
 
+it('sends the images again when LinkedIn no longer has the ones that were sent earlier', function () {
+    Queue::fake();
+    $posts = 0;
+    fakeLinkedIn(['posts' => function () use (&$posts) {
+        return ++$posts === 1 ? linkedInResponse('error_image_invalid', 400) : linkedInCreated();
+    }]);
+
+    // Sent two hours ago, by an attempt that did not get to the post.
+    DB::table('post_variant_media')
+        ->where('post_variant_id', variantsOf($this->post)[0]->id)
+        ->update(['external_id' => 'urn:li:image:C4E10AQGone', 'uploaded_at' => now()->subHours(2)]);
+
+    runPublishJob(($this->claim)());
+
+    expect(linkedInCalls())->toBe(['POST '.LINKEDIN_TEST_API.'/rest/posts'])
+        ->and(freshPost($this->post)->state)->toBe(PostState::Publishing)
+        ->and(variantsOf($this->post)[0]->hasUnknownOutcome())->toBeFalse()
+        ->and(($this->uploads)())->toBe([null, null]);
+
+    runPublishJob(Queue::pushed(PublishPostJob::class)->sole());
+
+    expect(freshPost($this->post)->state)->toBe(PostState::Published)
+        ->and(($this->uploads)())->toBe([linkedInImageUrn(1), linkedInImageUrn(2)])
+        ->and($posts)->toBe(2)
+        ->and(Http::recorded()->last()[0]['content']['multiImage']['images'][0]['id'])->toBe(linkedInImageUrn(1));
+});
+
 it('never calls the Posts API again after an answer that leaves the outcome of a post with images unknown', function (Closure $response) {
     Queue::fake();
     $posts = 0;

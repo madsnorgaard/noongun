@@ -656,6 +656,12 @@ Sources, all under learn.microsoft.com/en-us/linkedin:
   LinkedIn's error format (`400`, `404`, `422`) that speaks of an image and
   of processing, waiting for the upload or not being available, and not of
   failing, is retryable as "not ready yet". Those words are a guess.
+- **An image LinkedIn no longer has.** A refusal of the same kind that
+  speaks of an image as invalid, not found or failed, for a post with an
+  image that was sent more than ten minutes ago, makes the job forget the
+  uploads and send the images again
+  (`PublishFailed::uploadsNoLongerValid()`). For images that were only just
+  sent the refusal stands. Those words are a guess as well.
 - **A post that is accepted and then not shown** because LinkedIn could not
   process an image is not noticed. See ADR 0015.
 - **`publish()`** sends `content.media` for one image and

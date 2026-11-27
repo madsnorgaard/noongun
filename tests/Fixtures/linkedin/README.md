@@ -45,9 +45,9 @@ Each point is an assumption that the adapter or its tests rely on.
 | (no file) | What the upload address answers when it fails. Not documented at all. The adapter reads the status only: `401` reconnect, `400`, `413`, `415`, `422` permanent, everything else retryable. Assumed. |
 | (no file) | A post with one image is `content.media` with `id` and `altText`; a post with several is `content.multiImage.images[]` with `id` and `altText`, 2 to 20 images. Documented. That a post is accepted straight after the upload, before LinkedIn has processed the image, is assumed. |
 | `error_image_forbidden.json` | HTTP 403 with `message` and `status` and no `code`, "Accessing this image resource is forbidden". Documented for the Images API. |
-| `error_image_invalid.json` | HTTP 400 `INVALID_IMAGE_ID`. Documented in the error table of the Images API; that the Posts API answers a post with an unknown image this way is assumed. |
+| `error_image_invalid.json` | HTTP 400 `INVALID_IMAGE_ID`. Documented in the error table of the Images API; that the Posts API answers a post with an unknown image this way is assumed. For an image that was sent more than ten minutes ago the adapter reads it as "LinkedIn no longer has the image", and the images are sent again. |
 | `error_image_not_ready.json` | **Invented.** No page documents what the Posts API answers when an image of the post is still being processed, or whether it refuses such a post at all. The adapter treats a `400`, `404` or `422` in LinkedIn's error format that speaks of an image and of processing, waiting or not being available, and not of failing, as "not ready yet" and retryable. The spike must record the real answer. |
-| `error_image_processing_failed.json` | Invented, to prove that a refusal that speaks of a failure is not read as "not ready yet". `PROCESSING_FAILED` is a documented status of an image. |
+| `error_image_processing_failed.json` | Invented, to prove that a refusal that speaks of a failure is not read as "not ready yet". It is read as "send the image again" when the image was sent some time ago, and as a refusal when it was only just sent. `PROCESSING_FAILED` is a documented status of an image. |
 
 Not in a file, but assumed by the tests:
 
