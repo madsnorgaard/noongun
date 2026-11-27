@@ -160,14 +160,45 @@ export function pauseNote(
             return `${platform} asked Noon Gun to wait${until ? ` until ${until}` : ''}. Reading starts again by itself.`;
         case 'token':
             return canSetUp
-                ? `${platform} did not accept the access of ${channel} for reading numbers. Connect ${channel} again and reading starts at once. Publishing is not affected.`
-                : `${platform} did not accept the access of ${channel} for reading numbers. Ask an owner of this workspace to connect ${channel} again. Publishing is not affected.`;
+                ? `${platform} did not accept the access of ${channel} for reading numbers. Noon Gun tries again${until ? ` after ${until}` : ''}. Connecting ${channel} again starts reading at once. Publishing is not affected.`
+                : `${platform} did not accept the access of ${channel} for reading numbers. Noon Gun tries again${until ? ` after ${until}` : ''}. An owner of this workspace can connect ${channel} again to start reading at once. Publishing is not affected.`;
         case 'other':
             return `The last reading of ${channel} did not get through. Noon Gun tries again${until ? ` after ${until}` : ''}, by itself.`;
         default:
             return `Reading is paused for ${channel} after a reading that did not get through. It starts again by itself, within a day at the latest.`;
     }
 }
+
+/**
+ * Said of numbers the platform stopped giving: what is shown is the last
+ * one it gave. "Facebook has not given clicks and reach since Thu 26 Nov
+ * 2026, 12:00. The numbers shown are the last ones it gave."
+ */
+export function keptNote(
+    kept: Partial<Record<MetricName, string | null>>,
+    platform: string,
+    timezone: string,
+): string | null {
+    const metrics = metricNames.filter((metric) => kept[metric]);
+
+    if (metrics.length === 0) {
+        return null;
+    }
+
+    const since = metrics.map((metric) => kept[metric] as string).sort()[0];
+    const names = sentenceList(
+        metrics.map((metric) => metricLabels[metric].toLowerCase()),
+    );
+
+    return `${platform} has not given ${names} since ${formatDateTime(since, timezone)}. ${
+        metrics.length === 1
+            ? 'The number shown is the last one it gave.'
+            : 'The numbers shown are the last ones it gave.'
+    }`;
+}
+
+/** Said next to a number that is kept from an earlier reading. */
+export const keptLabel = 'kept';
 
 /**
  * Whether connecting the channel again is the next step, so that the page
@@ -269,7 +300,7 @@ export function variantNote(
             return `Not measured. ${platform} gave no numbers for this post when it was asked. Open the post on ${platform} to see how it did.`;
 
         case 'too_old':
-            return `Not measured. This post went out more than ${reading.once_within} ago, and posts that old are not read. Open the post on ${platform} to see how it did.`;
+            return `Not measured. This post went out more than ${reading.once_within ?? reading.stop_after} ago and was never read, and posts that old are not read. Open the post on ${platform} to see how it did.`;
 
         case 'unavailable':
             return `${platform} does not give Noon Gun numbers for posts yet.`;

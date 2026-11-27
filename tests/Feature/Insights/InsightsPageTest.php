@@ -316,7 +316,8 @@ describe('the channels', function () {
         snapshotFor(publishedVariant($this->workspace, $gone, now()->subDays(3)), ['reactions' => 2]);
 
         ChannelPolling::pause($stale->id, 600);
-        ChannelPolling::pause($idle->id, 600);
+        ChannelPolling::pause($idle->id, 600, ChannelPolling::PAUSE_RATE_LIMIT);
+        ChannelPolling::pauseUntilConnectedAgain($this->page->id, 3600);
 
         $channels = collect(($this->insights)()['channels'])->keyBy('name');
 
@@ -328,7 +329,8 @@ describe('the channels', function () {
                 'gives_numbers' => true,
                 'metrics' => ['reactions', 'comments', 'shares'],
                 'needs_permission' => ['clicks', 'reach'],
-                'pause' => null,
+                // Facebook did not accept its token for reading.
+                'pause' => ['kind' => 'token', 'until' => '2026-11-26T11:00:00+00:00'],
                 'posts' => 2,
                 'channel_posts' => 2,
                 'measured' => 1,
@@ -353,8 +355,8 @@ describe('the channels', function () {
             ->and($channels['Old Page'])->toMatchArray(['status' => 'needs_reconnect', 'pause' => null, 'posts' => 0])
             ->and($channels['Gone with posts'])->toMatchArray(['status' => 'disconnected', 'posts' => 1, 'measured' => 1])
             ->and($channels['Zebra idle'])->toMatchArray(['id' => $idle->id, 'posts' => 0, 'measured' => 0, 'score' => null])
-            // Only the fact of a pause is known, and the page claims no more.
-            ->and($channels['Zebra idle']['pause'])->toBe(['kind' => 'unknown', 'until' => null]);
+            // Facebook asked for a wait, and the page says until when.
+            ->and($channels['Zebra idle']['pause'])->toBe(['kind' => 'rate_limit', 'until' => '2026-11-26T10:10:00+00:00']);
     });
 
     it('says nothing of a pause while insights are turned off', function () {

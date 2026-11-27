@@ -836,8 +836,11 @@ const permission = computed(() => {
                         <span class="font-mono text-sm">FACEBOOK_SCOPES</span>,
                         restart, and connect the Page again on
                         <TextLink :href="channelsPage()">Channels</TextLink>.
-                        The Page keeps publishing while you do this. The README
-                        has each step under "Getting reach and clicks".
+                        The Page keeps publishing while you do this. Noon Gun
+                        also checks once a day what each channel may read, so a
+                        permission that was given or taken away on Facebook
+                        shows here without connecting again. The README has each
+                        step under "Getting reach and clicks".
                     </template>
                     <template v-else>
                         Without it a channel still publishes, and clicks and

@@ -17,6 +17,11 @@ export type MissingReason = 'platform' | 'permission' | 'not_given';
 
 export type MetricCell = {
     value: number | null;
+    /**
+     * Set when the platform stopped giving the number: this is the last one
+     * it gave, before that time.
+     */
+    kept_since: string | null;
     missing: MissingReason | null;
 };
 
@@ -65,6 +70,8 @@ export type MetricReadingRow = MetricNumbers & {
     captured_at: string;
     /** ...until at least here. */
     checked_at: string;
+    /** The numbers of this row that were kept from an earlier reading. */
+    kept: MetricName[];
 };
 
 export type VariantInsights = {
@@ -99,6 +106,8 @@ export type PostInsights = {
     total: {
         /** Reach is null for several channels: it cannot be added up. */
         numbers: MetricNumbers;
+        /** The numbers that hold one the platform stopped giving. */
+        kept: MetricName[];
         score: number | null;
         measured: number;
         published: number;
@@ -114,8 +123,8 @@ export type Reading = {
     cadence: string;
     /** The age after which a post is not read any more, for example "21 days". */
     stop_after: string;
-    /** How far back a post that was never read is still read once. */
-    once_within: string;
+    /** How far back a post that was never read is still read once. Null: not at all. */
+    once_within: string | null;
     /** How old a post has to be before it is compared, for example "2 days". */
     min_age: string;
     /** How many posts have to compete before one is called the best. */

@@ -17,6 +17,16 @@ const props = defineProps<{
 
 const timezone = useWorkspaceTimezone();
 
+// A number the platform stopped giving is not shown as fresh.
+const kept = computed(() =>
+    Object.fromEntries(
+        (props.insights.total?.kept ?? []).map((metric) => [
+            metric,
+            '(kept from an earlier reading)',
+        ]),
+    ),
+);
+
 const unmeasured = computed(() => {
     const variants = props.insights.variants;
 
@@ -36,6 +46,7 @@ const unmeasured = computed(() => {
         <MetricList
             :numbers="insights.total.numbers"
             :score="insights.total.score"
+            :partly="kept"
         />
         <p class="text-sm text-muted-foreground">
             <template v-if="insights.total.measured < insights.total.published">

@@ -871,13 +871,18 @@ How to read them:
   the next run of `noongun:poll-metrics`, about ten minutes after it went out.
   If it says that a reading is due and nothing changes within the hour, check
   that the `scheduler` and `horizon` containers are running.
-- When reading is paused for a channel, the post and the channel table say so
-  instead of promising a time.
+- When reading is paused for a channel, the post and the channel table say
+  why and until when: the platform asked for a wait, it did not accept the
+  access of the channel for reading (connecting again starts reading at once,
+  and it is tried again by itself), or a reading did not get through.
+- A number the platform stopped giving is kept and marked "kept", and the
+  post page says since when the platform has not given it.
 - A post older than the last step of `NOONGUN_INSIGHTS_CADENCE` says "Last
   measured on" with the time of its last reading. One that was never read
-  says that it waits for the one reading older posts get, that the platform
-  gave no numbers when it was asked, or that it went out too long ago to be
-  read at all.
+  says that it waits for the one reading older posts get
+  (`NOONGUN_INSIGHTS_BACKFILL_DAYS`; such posts are read after the young
+  ones, newest first), that the platform gave no numbers when it was asked,
+  or that it went out too long ago to be read at all.
 - A channel that needs to be connected again keeps its last numbers, and the
   pages say that they are not updated until it is connected.
 - A post that Facebook reported as gone `NOONGUN_INSIGHTS_GONE_AFTER` times

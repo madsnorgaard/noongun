@@ -5,6 +5,7 @@ import ScrollTable from '@/components/insights/ScrollTable.vue';
 import TextLink from '@/components/TextLink.vue';
 import {
     hiddenNote,
+    keptNote,
     metricLabels,
     metricsShown,
     missingReason,
@@ -55,6 +56,16 @@ const notes = computed(() =>
         id: variant.variant_id,
         channel: variant.channel_name,
         text: variantNote(variant, props.reading, timezone.value),
+        kept: keptNote(
+            Object.fromEntries(
+                Object.entries(variant.numbers ?? {}).map(([metric, cell]) => [
+                    metric,
+                    cell.kept_since,
+                ]),
+            ),
+            variant.platform_label,
+            timezone.value,
+        ),
         reconnect: props.reading.can_set_up && needsReconnect(variant),
     })),
 );
@@ -161,6 +172,10 @@ const historyShown = computed(() =>
                             >
                                 <MetricValue
                                     :value="variant.numbers[metric].value"
+                                    :kept="
+                                        variant.numbers[metric].kept_since !==
+                                        null
+                                    "
                                     :reason="
                                         missingReason(
                                             variant.numbers[metric].missing,
@@ -221,6 +236,7 @@ const historyShown = computed(() =>
                         >
                             <MetricValue
                                 :value="insights.total.numbers[metric]"
+                                :kept="insights.total.kept.includes(metric)"
                                 :reason="
                                     metric === 'reach' &&
                                     insights.total.measured > 1
@@ -254,6 +270,7 @@ const historyShown = computed(() =>
                 <TextLink v-if="note.reconnect" :href="channels()">
                     Open Channels
                 </TextLink>
+                <template v-if="note.kept">{{ note.kept }}</template>
             </li>
             <li v-if="measured.length">
                 Score = {{ scoreFormula(reading.weights) }}. Clicks and reach
@@ -360,7 +377,10 @@ const historyShown = computed(() =>
                                     :key="metric"
                                     class="px-3 py-2 text-right last:pr-0"
                                 >
-                                    <MetricValue :value="row[metric]" />
+                                    <MetricValue
+                                        :value="row[metric]"
+                                        :kept="row.kept.includes(metric)"
+                                    />
                                 </td>
                             </tr>
                         </tbody>

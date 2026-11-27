@@ -1,10 +1,13 @@
 <?php
 
 use App\Domain\Channels\Contracts\Metric;
+use App\Domain\Channels\Contracts\MetricReading;
 use App\Domain\Content\PostState;
 use App\Domain\Insights\ChannelPolling;
+use App\Domain\Insights\Models\MetricSnapshot;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Queue;
 
@@ -114,11 +117,35 @@ describe('a post that is not measured yet', function () {
 
         ChannelPolling::pause($this->page->id, 600);
 
-        // Only the fact of a pause is known today, and no more is claimed.
-        expect(($this->numbersOf)($waiting->post_id)['variants'][0])->toMatchArray(['state' => 'pending', 'pause' => ['kind' => 'unknown', 'until' => null]])
-            ->and(($this->numbersOf)($measured->post_id)['variants'][0]['pause'])->toBe(['kind' => 'unknown', 'until' => null])
+        $other = ['kind' => 'other', 'until' => '2026-11-26T10:10:00+00:00'];
+
+        expect(($this->numbersOf)($waiting->post_id)['variants'][0])->toMatchArray(['state' => 'pending', 'pause' => $other])
+            ->and(($this->numbersOf)($measured->post_id)['variants'][0]['pause'])->toBe($other)
             // No reading is expected for a post that is not read any more.
             ->and(($this->numbersOf)($old->post_id)['variants'][0]['pause'])->toBeNull();
+    });
+
+    it('says which kind of pause it is and until when, so that the next step is the right one', function () {
+        $waiting = publishedVariant($this->workspace, $this->page, now()->subMinutes(30));
+        $pause = fn () => ($this->numbersOf)($waiting->post_id)['variants'][0]['pause'];
+
+        ChannelPolling::pause($this->page->id, 1800, ChannelPolling::PAUSE_RATE_LIMIT);
+
+        expect($pause())->toBe(['kind' => 'rate_limit', 'until' => '2026-11-26T10:30:00+00:00']);
+
+        ChannelPolling::resume($this->page->id);
+        ChannelPolling::pauseUntilConnectedAgain($this->page->id, 21600);
+
+        expect($pause())->toBe(['kind' => 'token', 'until' => '2026-11-26T16:00:00+00:00']);
+
+        ChannelPolling::connectedAgain($this->page->id);
+
+        expect($pause())->toBeNull();
+
+        // A pause that cannot be read is still a pause, and no more is claimed of it.
+        Cache::put("noongun:insights:pause:{$this->page->id}", 'not a time', 600);
+
+        expect($pause())->toBe(['kind' => 'unknown', 'until' => null]);
     });
 });
 
@@ -138,10 +165,11 @@ describe('a post that is measured', function () {
         ])
             ->and($numbers['variants'][0]['numbers'])->toBe(array_fill_keys(
                 ['reactions', 'comments', 'shares', 'clicks', 'reach'],
-                ['value' => 0, 'missing' => null],
+                ['value' => 0, 'kept_since' => null, 'missing' => null],
             ))
             ->and($numbers['total'])->toBe([
                 'numbers' => ['reactions' => 0, 'comments' => 0, 'shares' => 0, 'clicks' => 0, 'reach' => 0],
+                'kept' => [],
                 'score' => 0,
                 'measured' => 1,
                 'published' => 1,
@@ -158,11 +186,11 @@ describe('a post that is measured', function () {
         $numbers = ($this->numbersOf)($variant->post_id);
 
         expect($numbers['variants'][0]['numbers'])->toBe([
-            'reactions' => ['value' => 12, 'missing' => null],
-            'comments' => ['value' => 3, 'missing' => null],
-            'shares' => ['value' => 1, 'missing' => null],
-            'clicks' => ['value' => null, 'missing' => 'platform'],
-            'reach' => ['value' => null, 'missing' => 'platform'],
+            'reactions' => ['value' => 12, 'kept_since' => null, 'missing' => null],
+            'comments' => ['value' => 3, 'kept_since' => null, 'missing' => null],
+            'shares' => ['value' => 1, 'kept_since' => null, 'missing' => null],
+            'clicks' => ['value' => null, 'kept_since' => null, 'missing' => 'platform'],
+            'reach' => ['value' => null, 'kept_since' => null, 'missing' => 'platform'],
         ])
             ->and($numbers['variants'][0]['needs_permission'])->toBe([])
             ->and($numbers['total']['numbers'])->toBe(['reactions' => 12, 'comments' => 3, 'shares' => 1, 'clicks' => null, 'reach' => null])
@@ -178,10 +206,10 @@ describe('a post that is measured', function () {
         $measured = ($this->numbersOf)($variant->post_id)['variants'][0];
 
         expect($measured['needs_permission'])->toBe(['clicks', 'reach'])
-            ->and($measured['numbers']['clicks'])->toBe(['value' => null, 'missing' => 'permission'])
-            ->and($measured['numbers']['reach'])->toBe(['value' => null, 'missing' => 'permission'])
+            ->and($measured['numbers']['clicks'])->toBe(['value' => null, 'kept_since' => null, 'missing' => 'permission'])
+            ->and($measured['numbers']['reach'])->toBe(['value' => null, 'kept_since' => null, 'missing' => 'permission'])
             // Permitted, and the platform still gave nothing this time.
-            ->and($measured['numbers']['shares'])->toBe(['value' => null, 'missing' => 'not_given']);
+            ->and($measured['numbers']['shares'])->toBe(['value' => null, 'kept_since' => null, 'missing' => 'not_given']);
 
         $waiting = publishedVariant($this->workspace, $this->page, now()->subMinutes(2));
 
@@ -189,6 +217,39 @@ describe('a post that is measured', function () {
             'state' => 'pending',
             'needs_permission' => ['clicks', 'reach'],
         ]);
+    });
+
+    it('says of a number the platform stopped giving that it is kept, and since when', function () {
+        $second = channelIn($this->workspace, ['display_name' => 'Lion Battery']);
+        $variant = publishedVariant($this->workspace, $this->page, now()->subHours(6));
+        $fresh = alsoPublishedOn($this->workspace, $variant, $second);
+        $all = Metric::cases();
+
+        $record = fn ($of, array $numbers, $at) => inWorkspace($this->workspace, fn () => MetricSnapshot::record($of, new MetricReading(...$numbers), $at, $all));
+
+        $record($variant, ['reactions' => 4, 'clicks' => 30, 'reach' => 500], now()->subHours(5));
+        $record($variant, ['reactions' => 6], now()->subHours(3));
+        $record($variant, ['reactions' => 6], now()->subHour());
+        $record($fresh, ['reactions' => 1, 'clicks' => 2], now()->subHour());
+
+        $numbers = ($this->numbersOf)($variant->post_id);
+        $kept = $numbers['variants'][0];
+
+        expect($kept['numbers']['clicks'])->toBe(['value' => 30, 'kept_since' => '2026-11-26T07:00:00+00:00', 'missing' => null])
+            ->and($kept['numbers']['reach'])->toBe(['value' => 500, 'kept_since' => '2026-11-26T07:00:00+00:00', 'missing' => null])
+            ->and($kept['numbers']['reactions'])->toBe(['value' => 6, 'kept_since' => null, 'missing' => null])
+            ->and($kept['checked_at'])->toBe('2026-11-26T09:00:00+00:00')
+            // The row where they were given, then the row that keeps them.
+            ->and(array_column($kept['history'], 'kept'))->toBe([[], ['clicks', 'reach']])
+            ->and($numbers['variants'][1]['numbers']['clicks'])->toBe(['value' => 2, 'kept_since' => null, 'missing' => null])
+            // The total holds a kept number of clicks; reach is not added up at all.
+            ->and($numbers['total']['numbers'])->toMatchArray(['clicks' => 32, 'reach' => null])
+            ->and($numbers['total']['kept'])->toBe(['clicks']);
+
+        // The list of the queue is told the same, in the same one query.
+        $history = $this->get(route('queue.index', ['view' => 'history']))->inertiaProps('history');
+
+        expect($history['insights'][$variant->post_id]['total']['kept'])->toBe(['clicks']);
     });
 
     it('says that measuring stopped once the post is older than the cadence reaches', function () {
@@ -229,8 +290,8 @@ describe('a post that is measured', function () {
         snapshotFor($variant, ['reactions' => 4, 'comments' => 1], now()->subHour());
 
         expect(($this->numbersOf)($variant->post_id)['variants'][0]['history'])->toBe([
-            ['captured_at' => '2026-11-26T07:00:00+00:00', 'checked_at' => '2026-11-26T08:00:00+00:00', 'reactions' => 1, 'comments' => null, 'shares' => null, 'clicks' => null, 'reach' => null],
-            ['captured_at' => '2026-11-26T09:00:00+00:00', 'checked_at' => '2026-11-26T09:00:00+00:00', 'reactions' => 4, 'comments' => 1, 'shares' => null, 'clicks' => null, 'reach' => null],
+            ['captured_at' => '2026-11-26T07:00:00+00:00', 'checked_at' => '2026-11-26T08:00:00+00:00', 'reactions' => 1, 'comments' => null, 'shares' => null, 'clicks' => null, 'reach' => null, 'kept' => []],
+            ['captured_at' => '2026-11-26T09:00:00+00:00', 'checked_at' => '2026-11-26T09:00:00+00:00', 'reactions' => 4, 'comments' => 1, 'shares' => null, 'clicks' => null, 'reach' => null, 'kept' => []],
         ]);
     });
 });
@@ -268,6 +329,18 @@ describe('a post that will not be measured', function () {
         ])
             ->and(($this->numbersOf)($asked->post_id)['variants'][0])->toMatchArray(['state' => 'no_numbers', 'asked' => true])
             ->and(($this->numbersOf)($ancient->post_id)['variants'][0])->toMatchArray(['state' => 'too_old', 'asked' => false]);
+
+        // With the one reading of old posts turned off, nothing waits for it.
+        config(['noongun.insights.backfill_days' => 0]);
+
+        expect(($this->numbersOf)($waiting->post_id)['variants'][0]['state'])->toBe('too_old')
+            ->and($this->get(route('posts.show', $waiting->post_id))->inertiaProps('reading.once_within'))->toBeNull();
+
+        config(['noongun.insights.backfill_days' => 30]);
+
+        expect(($this->numbersOf)($waiting->post_id)['variants'][0]['state'])->toBe('waiting_once')
+            ->and(($this->numbersOf)($ancient->post_id)['variants'][0]['state'])->toBe('too_old')
+            ->and($this->get(route('posts.show', $waiting->post_id))->inertiaProps('reading.once_within'))->toBe('30 days');
 
         // An old post is not said to be waiting for a reading that cannot come.
         config(['noongun.insights.enabled' => false]);
@@ -358,6 +431,7 @@ describe('a post on several channels', function () {
             ->and($numbers['total'])->toBe([
                 // Reach is not added up: 300 and 80 may be the same people.
                 'numbers' => ['reactions' => 7, 'comments' => 1, 'shares' => 1, 'clicks' => null, 'reach' => null],
+                'kept' => [],
                 'score' => 12,
                 'measured' => 2,
                 'published' => 3,

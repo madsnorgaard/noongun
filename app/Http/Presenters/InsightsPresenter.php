@@ -103,7 +103,8 @@ final class InsightsPresenter
             'cadence' => 'A post is read '.implode(', then ', $steps).', and not after that.',
             'stop_after' => self::age(InsightsConfig::stopAfterHours()),
             // How far back a post that was never read is still read once.
-            'once_within' => self::age(self::readOnceWithinDays() * 24),
+            // Null when old posts are not read at all.
+            'once_within' => InsightsConfig::backfillDays() > 0 ? self::age(InsightsConfig::backfillDays() * 24) : null,
             // How old a post has to be before it is compared with others.
             'min_age' => self::age(EngagementScore::minAgeHours()),
             'min_measured' => EngagementScore::minMeasuredPosts(),
@@ -277,27 +278,13 @@ final class InsightsPresenter
     }
 
     /**
-     * How many days back a post that was never read is still read once.
-     * The key is the one the one-time read of old posts is expected to
-     * use; this is the only place the pages read it.
-     */
-    private static function readOnceWithinDays(): int
-    {
-        $days = config('noongun.insights.backfill_days');
-
-        return is_numeric($days) && (int) $days >= 0 ? (int) $days : 365;
-    }
-
-    /**
-     * Why reading is paused for a channel, or null when it is not. The one
-     * place the pages ask: kind is "rate_limit" (the platform asked for a
-     * wait), "token" (it did not accept the token for reading, until the
-     * channel is connected again), "other" (a reading did not get through)
-     * or "unknown" when only the fact of a pause is known. "until" is when
-     * reading starts again, when that is known.
-     *
-     * ChannelPolling only says that a channel is paused today, so every
-     * pause is "unknown" and the pages say what is true of all of them.
+     * Why reading is paused for a channel, or null when it is not, as
+     * ChannelPolling::pauseOf() tells it: "rate_limit" (the platform asked
+     * for a wait), "token" (it did not accept the token for reading; a new
+     * connection or a good token check ends it sooner) or "other" (a
+     * reading did not get through), with the time reading starts again by
+     * itself. "unknown" is only left for a pause whose time cannot be
+     * read: the pages then say what is true of every pause.
      *
      * @return array{kind: string, until: string|null}|null
      */
@@ -307,9 +294,35 @@ final class InsightsPresenter
             return $this->pauses[$channel->id];
         }
 
-        return $this->pauses[$channel->id] = ChannelPolling::isPaused($channel->id)
-            ? ['kind' => 'unknown', 'until' => null]
-            : null;
+        $pause = ChannelPolling::pauseOf($channel->id);
+
+        return $this->pauses[$channel->id] = match (true) {
+            $pause === null => null,
+            $pause['until'] === null => ['kind' => 'unknown', 'until' => null],
+            default => ['kind' => $pause['kind'], 'until' => $pause['until']->toIso8601String()],
+        };
+    }
+
+    /**
+     * The metrics of a row whose number the platform stopped giving and
+     * that is kept from an earlier reading, with the time it was first
+     * missing: the number was last given before that.
+     *
+     * @return array<string, string>
+     */
+    private function kept(MetricSnapshot $snapshot): array
+    {
+        $kept = [];
+
+        foreach (Metric::cases() as $metric) {
+            $since = $snapshot->carriedSince($metric);
+
+            if ($since !== null && $snapshot->reading()->get($metric) !== null) {
+                $kept[$metric->value] = $since->toIso8601String();
+            }
+        }
+
+        return $kept;
     }
 
     /**
@@ -334,12 +347,13 @@ final class InsightsPresenter
             $metrics['platform'] === [] => 'unavailable',
             // Read while it was young, or once later, and nothing came.
             $stopped && $asked => 'no_numbers',
-            $stopped && ($publishedAt === null || $publishedAt->lessThan($now->subDays(self::readOnceWithinDays()))) => 'too_old',
+            $stopped && ($publishedAt === null || $publishedAt->lessThan($now->subDays(InsightsConfig::backfillDays()))) => 'too_old',
             ! InsightsConfig::enabled() => 'off',
             ! $read => 'blocked',
             $gone => 'gone',
             // Older than the cadence reaches and never asked about: it
-            // waits for the one reading that old posts get.
+            // waits for the one reading that old posts get, after the
+            // posts the cadence reads, newest first.
             $stopped => 'waiting_once',
             default => 'pending',
         };
@@ -348,12 +362,16 @@ final class InsightsPresenter
 
         if ($snapshot !== null) {
             $numbers = [];
+            $kept = $this->kept($snapshot);
 
             foreach (Metric::cases() as $metric) {
                 $value = $snapshot->reading()->get($metric);
 
                 $numbers[$metric->value] = [
                     'value' => $value,
+                    // Set when the platform stopped giving the number and
+                    // this is the last one it gave, before that time.
+                    'kept_since' => $kept[$metric->value] ?? null,
                     'missing' => match (true) {
                         $value !== null => null,
                         ! in_array($metric, $metrics['platform'], true) => 'platform',
@@ -398,6 +416,8 @@ final class InsightsPresenter
                 'captured_at' => $row->captured_at->toIso8601String(),
                 'checked_at' => $row->checked_at->toIso8601String(),
                 ...$row->reading()->toArray(),
+                // The numbers of this row that were kept from an earlier one.
+                'kept' => array_keys($this->kept($row)),
             ], $history),
         ];
     }
@@ -453,9 +473,16 @@ final class InsightsPresenter
         }
 
         $totals = new MetricTotals(...$sums);
+        $kept = [];
+
+        foreach ($measured as $snapshot) {
+            $kept += $this->kept($snapshot);
+        }
 
         return [
             'numbers' => $totals->toArray(),
+            // The numbers that hold one the platform stopped giving.
+            'kept' => array_values(array_filter(array_keys($kept), fn (string $metric): bool => $sums[$metric] !== null)),
             'score' => EngagementScore::comparable($totals),
             'measured' => count($measured),
             'published' => $published,
