@@ -775,8 +775,22 @@ two numbers. It is never a reason for "connect again".
   logged and tried again later.
 - **A token that Facebook refuses for reading** pauses reading for that Page
   for six hours and changes nothing else. Whether the Page needs to be
-  connected again is decided by publishing and the token check.
-  Connecting the Page again ends the pause at once.
+  connected again is decided by publishing and by the token check (see
+  "Checking tokens"), never by a reading. Connecting the Page again, or a
+  token check that finds the token good, ends the pause at once.
+- **A number a post has is not lost when Facebook stops giving it.** When
+  Meta renames a metric, or the permission is removed on Facebook, the
+  insights of a post come back empty. Reach and clicks then keep their last
+  values for as long as the Page is recorded as having `read_insights`, and
+  the post says since when they are no longer fresh. They become empty only
+  when the token check has recorded that the permission is gone.
+- **One post that Facebook will not show** does not stop the others. It gets
+  no numbers and moves to the back of the line.
+- **Posts from before insights existed** are read once: a published post that
+  was never read is read a single time when it is up to
+  `NOONGUN_INSIGHTS_BACKFILL_DAYS` old (365), after the posts that are due
+  anyway and within the same share of the rate limit. With a long history
+  this takes a few runs. Such a post is not read again.
 - **A post that was deleted on Facebook** is not read for ever. After
   Facebook has answered three times in a row that it does not have the post
   (`NOONGUN_INSIGHTS_GONE_AFTER`), Noon Gun stops asking about it. The numbers
@@ -1003,7 +1017,10 @@ it there.
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
 | `NOONGUN_INSIGHTS_ENABLED` | `true` | Whether the numbers of published posts are read at all. `false` stops the scheduler command and the job. |
-| `NOONGUN_INSIGHTS_CADENCE` | `24:60,504:1440` | How often a published post is read, by its age, as `hours:minutes` pairs: until the post is that many hours old, read it every that many minutes. A post older than the last pair is not read any more. |
+| `NOONGUN_INSIGHTS_CADENCE` | `24:60,504:1440` | How often a published post is read, by its age, as `hours:minutes` pairs: until the post is that many hours old, read it every that many minutes. A post older than the last pair is not read any more. When any pair cannot be read, the whole default is used and the log says so. |
+| `NOONGUN_INSIGHTS_BACKFILL_DAYS` | `365` | A published post that was never read is read once when it is older than the cadence reaches and at most this many days old. `0` turns that off. |
+| `NOONGUN_TOKEN_CHECK_ENABLED` | `true` | Whether the tokens of connected channels are checked with their platform (see "Checking tokens"). |
+| `NOONGUN_TOKEN_CHECK_EVERY_HOURS` | `24` | Hours between two checks of the token of one channel. |
 | `NOONGUN_INSIGHTS_VARIANTS_PER_RUN` | `25` | Most posts of one channel that one run of the job reads. Never more than 500. |
 | `NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT` | `20` | The share of a channel's rate limit that reading may use, so that publishing always has calls left. From 1 to 90. |
 | `NOONGUN_INSIGHTS_PAUSE_MINUTES` | `60` | How long a channel is left alone after the platform refused a reading. A longer wait the platform asks for is respected, up to a day. |
@@ -1125,6 +1142,31 @@ keeps the history of what was published.
 Only owners of a workspace can connect and disconnect channels, because a
 channel holds the access to an account on a platform. Editors and viewers can
 see them.
+
+## Checking tokens
+
+A platform can withdraw a token at any time, and a permission can be added or
+removed on its side. So that Noon Gun does not find out only when a post
+fails, the `scheduler` container runs `noongun:check-channel-tokens` every
+hour. It queues a check for each active channel that was not checked in the
+last 24 hours (`NOONGUN_TOKEN_CHECK_EVERY_HOURS`), at most 50 in one run, and
+the check runs in the `horizon` container on the `insights` queue.
+
+A check asks the platform about the token (`debug_token` for a Facebook Page,
+token introspection for a LinkedIn profile) and records the permissions and
+the expiry it reports. That is how a Page that gained or lost `read_insights`
+starts or stops getting reach and clicks.
+
+A channel is marked **Needs reconnecting** only when the platform says so in
+so many words: the token is not valid, it has expired, or a permission that
+publishing needs is no longer among the ones it names. Everything else
+leaves the channel exactly as it was and is tried again the next day: a
+platform that cannot be reached, a rate limit, an answer that cannot be read,
+wrong app credentials on this instance. The log line "The token of a channel
+could not be checked" names the reason. A check never makes a channel active
+again; only connecting it does.
+
+`NOONGUN_TOKEN_CHECK_ENABLED=false` turns the checks off.
 
 ## Connecting a LinkedIn profile
 

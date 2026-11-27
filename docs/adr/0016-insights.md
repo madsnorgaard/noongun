@@ -130,7 +130,8 @@ the safe message of the `ChannelException`, the channel is left alone for
 next run tries again. The queue never retries the job. In particular a
 "connect again" answer to a metrics call does not mark the channel: a missing
 permission for insights must never stop a channel from publishing. Whether a
-token is still good is decided by publishing and the token check.
+token is still good is decided by publishing and the token check
+(`noongun:check-channel-tokens`, see "Added after review").
 
 The payload is two ids. No token is in it or in a log line.
 
@@ -157,6 +158,81 @@ long the workers are away, and when a platform is away the pause keeps the
 scheduler from queuing at all. A job that was lost blocks its channel for at
 most an hour. Two runs that do overlap are harmless as before: the lock lets
 one of them read, and the other finds nothing due.
+
+### Added after review (2026-11-27)
+
+**A number is not lost because a platform stops giving it.** The first
+version stored every reading as it came, so a reading without reach and
+clicks replaced the stored ones with "not given". That happens for reasons
+that say nothing about the post: Meta retires a metric name and the whole
+insights read fails, `read_insights` is removed on Facebook and the answer
+is empty, an answer is empty for a moment. `MetricSnapshot::record()` now
+takes the metrics the channel can still read (`metricsFor()`), and for those
+a number the variant has is carried forward when the reading lacks it. The
+row notes this in `carried`, a map from metric to the time since which the
+number is carried, and `carriedSince(Metric)` reads it; a page can say
+"last given before" that time. A number becomes "not given" only when the
+channel no longer lists the metric, which the token check records. Zero is
+never carried over, and nothing is carried into a first row.
+
+**One post cannot hold up a channel.** A post that answers with a
+permission error is "no reading for this post"; the call fails as a missing
+permission only when every post of the call answered that way. The job
+hands the due variants to the adapter in parts
+(`noongun.insights.variants_per_call`, 25, one request to Facebook) and
+stores what each part returned before the next, so a failure keeps what was
+read and has spent calls only for what was asked. After a failure that is
+not the platform limiting requests, the variants of that part are marked as
+asked, so they go to the back of the line instead of heading every run that
+follows. `ChannelException::rateLimited()` tells the two apart: the platform
+named a time to wait, or the adapter put `rate_limited` in the context.
+Before another part is sent the job checks that one more call
+(`noongun.publishing.timeout`) still fits in its time limit; the rest stays
+due.
+
+**The pause says why.** `ChannelPolling::pauseOf()` gives the kind of a pause
+(`rate_limit`, `token`, `other`) and until when, so a page can tell the
+truth about a channel whose numbers are not moving.
+
+**The token check exists.** This record relied on "the token check" before
+anything ran it. `noongun:check-channel-tokens` now runs every hour and
+queues a `CheckChannelTokenJob` for each active channel that was not checked
+in the last 24 hours, at most 50 in one run, on the insights queue. The job
+calls `ChannelAdapter::refreshToken()` with the row of the channel locked,
+so a connect at the same moment is not overwritten by the answer about the
+token it replaced. It is how stored scopes follow what the platform grants,
+and how a withdrawn token is found before a post fails.
+
+A mark stops a channel from publishing, so it takes a definite answer: the
+platform says the token is not valid (`is_valid` false, `active` false) or
+has expired, names the permissions and one that publishing needs is not
+among them, or refuses a refresh token as such. An answer that does not say
+(`is_valid` or `active` missing or not a boolean), an outage, a rate limit,
+an error about the app credentials and any exception leave the channel as it
+was. Both adapters were tightened for this: before, a missing `is_valid` or
+`active` counted as "not valid", and LinkedIn marked a channel on any
+refusal of a refresh, also a wrong client secret. A check never makes a
+channel active. When it finds the token good it fires
+`ChannelTokenVerified`, which ends a pause of reading that was about the
+token.
+
+**Posts from before insights are read once.** A published variant that was
+never asked about is due a single time when it is older than the cadence
+reaches and at most `NOONGUN_INSIGHTS_BACKFILL_DAYS` (365) old. Such
+variants come after the ones inside the cadence, newest first, within the
+same size of a run and share of the rate limit, and are never due again:
+`metrics_checked_at` is set whether or not the platform answered.
+
+**The cadence is all or nothing.** One pair that cannot be read used to be
+dropped, which turned `24:60,504:1440m` into "read for one day". Now the
+whole default is used and a warning is logged once a day.
+
+**Open for M8: the share is counted for a channel row, the limit is for a
+Page.** `ChannelPolling` keys its counter by channel id. While a Page can be
+connected in one workspace only that is the same thing. When the same Page
+can be connected in several workspaces, each row would spend its own 20
+percent of one limit; the counter must then be keyed by platform and
+account id.
 
 ### Publishing comes first
 
