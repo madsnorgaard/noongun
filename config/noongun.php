@@ -148,11 +148,11 @@ return [
             'rate_limit_per_day' => 150,
             // Images. A stored image is a JPEG or a PNG, and LinkedIn takes
             // both. The numbers are LinkedIn's where it documents one, see
-            // docs/platform-notes/linkedin.md. It names no size in bytes:
-            // 5 MB is a careful figure, because LinkedIn cannot be asked
-            // whether it could process a file.
+            // docs/platform-notes/linkedin.md. It names no size in bytes, so
+            // none is enforced unless LINKEDIN_MAX_IMAGE_BYTES is set: an
+            // image LinkedIn finds too large fails when it is uploaded.
             'max_images' => (int) env('LINKEDIN_MAX_IMAGES', 20),
-            'max_image_bytes' => (int) env('LINKEDIN_MAX_IMAGE_BYTES', 5242880),
+            'max_image_bytes' => env('LINKEDIN_MAX_IMAGE_BYTES'),
             'max_image_pixels' => (int) env('LINKEDIN_MAX_IMAGE_PIXELS', 36152319),
             'alt_text_length' => (int) env('LINKEDIN_ALT_TEXT_LENGTH', 4086),
             // Seconds an uploaded image is used for a later attempt before
@@ -160,9 +160,11 @@ return [
             // image that is on no post.
             'image_lifetime' => (int) env('LINKEDIN_IMAGE_LIFETIME', 86400),
             // Hosts an image may be uploaded to, comma separated. Each name
-            // allows itself and every name below it. LinkedIn names the
-            // address in a response, and the image and the token are sent
-            // only to an https address on one of these.
+            // allows itself and every name below it, and must have at least
+            // two parts (linkedin.com, not com). LinkedIn names the address
+            // in a response, and the image and the token are sent only to
+            // an https address on one of these. A list that is empty or
+            // holds anything else allows nothing.
             'upload_hosts' => array_values(array_filter(array_map(
                 trim(...),
                 explode(',', (string) env('LINKEDIN_UPLOAD_HOSTS', 'linkedin.com')),

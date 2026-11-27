@@ -17,6 +17,7 @@ use App\Domain\Channels\Exceptions\PublishFailed;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\MediaAttachment;
 use App\Domain\Content\Models\PostVariant;
+use App\Domain\Content\PostPreconditions;
 use App\Domain\Workspaces\Models\Workspace;
 use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Exception\NetworkTimeoutException;
@@ -79,7 +80,8 @@ describe('capabilities', function () {
         expect(linkedInAdapter())->toBeInstanceOf(UploadsMedia::class)
             ->and($capabilities->mediaTypes)->toBe(['image/jpeg', 'image/png'])
             ->and($capabilities->maxMediaItems)->toBe(20)
-            ->and($capabilities->maxMediaBytes)->toBe(5242880)
+            // LinkedIn documents no size in bytes, so none is enforced.
+            ->and($capabilities->maxMediaBytes)->toBeNull()
             ->and($capabilities->maxMediaPixels)->toBe(36152319)
             ->and($capabilities->altTextLength)->toBe(4086)
             ->and($capabilities->mediaLinkRule)->toBe(MediaLinkRule::InText)
@@ -102,13 +104,30 @@ describe('capabilities', function () {
         // The file itself: configureLinkedIn() replaced what was loaded.
         expect((require config_path('noongun.php'))['channels']['linkedin'])->toMatchArray([
             'max_images' => 20,
-            'max_image_bytes' => 5242880,
+            'max_image_bytes' => null,
             'max_image_pixels' => 36152319,
             'alt_text_length' => 4086,
             'image_lifetime' => 86400,
             'upload_hosts' => ['linkedin.com'],
         ]);
-    })->skip(fn () => env('LINKEDIN_UPLOAD_HOSTS') !== null || env('LINKEDIN_MAX_IMAGES') !== null, 'The environment sets its own values.');
+    })->skip(fn () => env('LINKEDIN_UPLOAD_HOSTS') !== null || env('LINKEDIN_MAX_IMAGES') !== null || env('LINKEDIN_MAX_IMAGE_BYTES') !== null, 'The environment sets its own values.');
+
+    it('holds no image back for its size in bytes unless the instance sets a limit', function () {
+        $variant = ($this->variant)();
+        attachImage($variant, storedImage($this->workspace, attributes: ['byte_size' => 9_500_000]));
+
+        $problems = fn (): array => inWorkspace($this->workspace, fn () => app(PostPreconditions::class)->mediaProblems(
+            $variant->fresh(),
+            $this->channel,
+            linkedInAdapter()->capabilities(),
+        ));
+
+        expect($problems())->toBe([]);
+
+        configureLinkedIn(['max_image_bytes' => '8000000']);
+
+        expect(json_encode($problems()))->toContain('LinkedIn takes 7.6 MB at most');
+    });
 });
 
 describe('uploadMedia', function () {
@@ -215,7 +234,14 @@ describe('uploadMedia', function () {
         'the real LinkedIn, which this instance does not allow' => ['https://www.linkedin.com/dms-uploads/1', 'host_not_allowed'],
         'an allowed name as the start of another host' => ['https://www.linkedin.test.evil.example/dms-uploads/1', 'host_not_allowed'],
         'an allowed name as the end of another name' => ['https://evillinkedin.test/dms-uploads/1', 'host_not_allowed'],
-        'a host that ends in a dot' => ['https://www.linkedin.test./dms-uploads/1', 'host_not_allowed'],
+        'a host that ends in a dot' => ['https://www.linkedin.test./dms-uploads/1', 'not_a_host_name'],
+        'a host that starts with a dot' => ['https://.linkedin.test/dms-uploads/1', 'not_a_host_name'],
+        'a host with an empty part' => ['https://a..linkedin.test/dms-uploads/1', 'not_a_host_name'],
+        'a host with a part that starts with a hyphen' => ['https://-a.linkedin.test/dms-uploads/1', 'not_a_host_name'],
+        'a host of one part' => ['https://test/dms-uploads/1', 'not_a_host_name'],
+        'a query straight after the host' => ['https://www.linkedin.test?@evil.example/', 'not_a_plain_https_address'],
+        'a query straight after the port' => ['https://www.linkedin.test:443?@evil.example/', 'not_a_plain_https_address'],
+        'no path at all' => ['https://www.linkedin.test', 'not_a_plain_https_address'],
         'an allowed name as the user name' => ['https://www.linkedin.test@evil.example/dms-uploads/1', 'not_a_plain_https_address'],
         'a user name and a password' => ['https://user:secret@www.linkedin.test/dms-uploads/1', 'not_a_plain_https_address'],
         'an empty user name' => ['https://@www.linkedin.test/dms-uploads/1', 'not_a_plain_https_address'],
@@ -249,15 +275,51 @@ describe('uploadMedia', function () {
         'https://linkedin.test/x',
         'https://www.linkedin.test:443/dms-uploads/1',
         'https://WWW.LinkedIn.Test/dms-uploads/1',
-        'https://a.b.linkedin.test',
+        'https://a.b.linkedin.test/',
+        'https://www.linkedin.test/dms-uploads/1?next=https://www.linkedin.test/@x',
     ]);
 
-    it('allows no host when the list is empty, and reads names with dots and capitals around them', function () {
-        expect(UploadAddress::from('https://www.linkedin.test/x', [])->allowed())->toBeFalse()
-            ->and(UploadAddress::from('https://www.linkedin.test/x', ['', ' '])->allowed())->toBeFalse()
-            ->and(UploadAddress::from('https://www.linkedin.test/x', ['.LinkedIn.test.'])->allowed())->toBeTrue()
+    it('allows nothing when the list of hosts is empty or holds something that is not a host name of two parts', function (array $hosts) {
+        // Every address, also one that another entry of the list allows.
+        $address = UploadAddress::from('https://www.linkedin.test/x', $hosts);
+
+        expect($address->allowed())->toBeFalse()
+            ->and($address->refusal)->toBe('allow_list_invalid')
+            ->and(UploadAddress::usable($hosts))->toBeFalse();
+    })->with([
+        'empty' => [[]],
+        'a top level name, which would allow every host below it' => [['test']],
+        'a top level name next to a good one' => [['linkedin.test', 'com']],
+        'an empty name next to a good one' => [['linkedin.test', '']],
+        'a name with a dot in front' => [['.linkedin.test']],
+        'a name with a dot behind' => [['linkedin.test.']],
+        'a pattern' => [['*.linkedin.test']],
+        'an address' => [['https://www.linkedin.test']],
+        'a name with a port' => [['linkedin.test:443']],
+        'something that is not text' => [[['linkedin.test']]],
+    ]);
+
+    it('reads the names of the list whatever their capitals and the white space around them', function () {
+        expect(UploadAddress::from('https://www.linkedin.test/x', [' LinkedIn.Test '])->allowed())->toBeTrue()
             ->and(UploadAddress::from('https://www.linkedin.test/x', ['example.test', 'linkedin.test'])->host)->toBe('www.linkedin.test');
     });
+
+    it('sends nothing at all when the list of upload hosts cannot be used, and says which setting is wrong', function (array $hosts) {
+        configureLinkedIn(['upload_hosts' => $hosts]);
+        fakeLinkedIn();
+        $variant = ($this->variant)();
+
+        $exception = ($this->failure)(fn () => ($this->upload)($variant, attachImage($variant, storedImage($this->workspace))));
+
+        Http::assertNothingSent();
+        expect($exception->retryable)->toBeFalse()
+            ->and($exception->requiresReconnect)->toBeFalse()
+            ->and($exception->getMessage())->toContain('LINKEDIN_UPLOAD_HOSTS')->toContain('No image was sent and nothing was posted.');
+    })->with([
+        'empty' => [[]],
+        'a top level name' => [['test']],
+        'a top level name next to a good one' => [['linkedin.test', 'com']],
+    ]);
 
     it('does not follow a redirect of the upload, and treats it as a failure that may be tried again', function () {
         fakeLinkedIn(['upload' => Http::response('', 307, ['Location' => 'https://evil.example/collect'])]);
@@ -353,6 +415,33 @@ describe('uploadMedia', function () {
         'timeout' => [fn (Request $request) => throw linkedInConnectionFailure($request, NetworkTimeoutException::class, 'Operation timed out after 45001 milliseconds'), true, false],
         'connection never made' => [fn (Request $request) => throw linkedInConnectionFailure($request, ConnectException::class, 'Could not resolve host: www.linkedin.test'), true, false],
     ]);
+
+    it('names the image and its size when LinkedIn finds the file too large, and says what to do', function () {
+        $puts = 0;
+        fakeLinkedIn(['upload' => function () use (&$puts) {
+            return Http::response('', ++$puts === 2 ? 413 : 201);
+        }]);
+        $variant = ($this->variant)();
+        $first = attachImage($variant, storedImage($this->workspace));
+        $second = attachImage($variant, storedImage($this->workspace, attributes: ['byte_size' => 9_961_472]));
+
+        ($this->upload)($variant, $first);
+        $exception = ($this->failure)(fn () => ($this->upload)($variant, $second));
+
+        expect($exception->getMessage())->toBe('Image 2 of this post is too large for LinkedIn (9.5 MB). Nothing was posted. Return the post to draft, take the image off and put a smaller copy of it on.')
+            ->and($exception->retryable)->toBeFalse()
+            ->and($exception->requiresReconnect)->toBeFalse()
+            ->and($exception->context())->toMatchArray(['http_status' => 413, 'image_number' => 2, 'image_bytes' => 9_961_472])
+            ->and($exception->context())->not->toHaveKey('outcome_unknown');
+    });
+
+    it('names the image when LinkedIn refuses the file for another reason', function (int $status) {
+        fakeLinkedIn(['upload' => Http::response('', $status)]);
+        $variant = ($this->variant)();
+
+        expect(($this->failure)(fn () => ($this->upload)($variant, attachImage($variant, storedImage($this->workspace))))->getMessage())
+            ->toBe('LinkedIn did not accept image 1 of this post. Nothing was posted. Return the post to draft, take the image off and put another copy of it on.');
+    })->with([400, 415, 422]);
 
     it('passes on how long LinkedIn asks to wait', function () {
         fakeLinkedIn(['upload' => Http::response('', 429, ['Retry-After' => '45'])]);

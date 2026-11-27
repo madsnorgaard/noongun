@@ -43,6 +43,9 @@ final class LinkedInClient
     /** Answers to an upload that say the file is the problem: sending it again cannot help. */
     private const FILE_REFUSED = [400, 413, 415, 422];
 
+    /** The one that says the file is too large. */
+    private const FILE_TOO_LARGE = 413;
+
     /**
      * @param  string  $platform  platform name for exceptions
      * @param  string  $apiUrl  address of the API, without a path
@@ -178,10 +181,11 @@ final class LinkedInClient
      * @param  int  $bytes  size of the file, sent as Content-Length so that the upload is not chunked
      * @param  int  $timeout  seconds for this call
      * @param  class-string<ChannelException>  $failure
+     * @param  int  $number  which image of the post this is, counted from 1, for the member
      *
      * @throws ChannelException
      */
-    public function upload(UploadAddress $address, #[SensitiveParameter] string $token, $stream, int $bytes, int $timeout, string $failure): void
+    public function upload(UploadAddress $address, #[SensitiveParameter] string $token, $stream, int $bytes, int $timeout, string $failure, int $number = 1): void
     {
         $endpoint = 'PUT upload address';
         $context = ['endpoint' => $endpoint, 'upload_host' => $address->host];
@@ -213,6 +217,8 @@ final class LinkedInClient
         $body = $response->json();
         $context += [
             'http_status' => $status,
+            'image_number' => $number,
+            'image_bytes' => $bytes,
             'platform_message' => $this->forLog(is_array($body) ? ($body['message'] ?? null) : null, [$token, $this->clientSecret]),
         ];
 
@@ -222,9 +228,21 @@ final class LinkedInClient
                 'LinkedIn no longer accepts this connection: the access has expired or was withdrawn. Connect the profile again on the Channels page.',
                 $context,
             ),
+            $status === self::FILE_TOO_LARGE => $failure::permanent(
+                $this->platform,
+                sprintf(
+                    'Image %d of this post is too large for LinkedIn (%s MB). Nothing was posted. Return the post to draft, take the image off and put a smaller copy of it on.',
+                    $number,
+                    number_format($bytes / 1048576, 1),
+                ),
+                $context,
+            ),
             in_array($status, self::FILE_REFUSED, true) => $failure::permanent(
                 $this->platform,
-                'LinkedIn did not accept an image of this post. Nothing was posted. Return the post to draft and put another copy of the image on it.',
+                sprintf(
+                    'LinkedIn did not accept image %d of this post. Nothing was posted. Return the post to draft, take the image off and put another copy of it on.',
+                    $number,
+                ),
                 $context,
             ),
             default => $failure::retryable(
