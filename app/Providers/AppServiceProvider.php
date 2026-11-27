@@ -4,9 +4,11 @@ namespace App\Providers;
 
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\Events\ChannelConnected;
+use App\Domain\Channels\Events\ChannelTokenVerified;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\Generators\ProviderReplies;
 use App\Domain\Drafting\PromptRenderer;
+use App\Domain\Insights\ChannelPolling;
 use App\Domain\Insights\ResumePollingOfConnectedChannel;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Support\Health\CheckBackingServices;
@@ -57,6 +59,9 @@ class AppServiceProvider extends ServiceProvider
 
         Event::listen(DiagnosingHealth::class, CheckBackingServices::class);
         Event::listen(ChannelConnected::class, ResumePollingOfConnectedChannel::class);
+        // The platform has just confirmed the token: a pause of reading
+        // that was about the token is over. Posts reported as gone stay so.
+        Event::listen(ChannelTokenVerified::class, fn (ChannelTokenVerified $event) => ChannelPolling::connectedAgain($event->channelId));
 
         View::addNamespace(PromptRenderer::NAMESPACE, resource_path('prompts'));
 
