@@ -1,0 +1,8 @@
+{
+    "error": {
+        "message": "(#100) Param alt_text_custom is too long",
+        "type": "OAuthException",
+        "code": 100,
+        "fbtrace_id": "AtestTraceAltTextLong01"
+    }
+}

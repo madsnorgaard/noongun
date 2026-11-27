@@ -80,6 +80,9 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
      */
     private const PHOTO_PROBLEM_CODES = [100, 324];
 
+    /** The code Facebook gives for a parameter it does not take. */
+    private const INVALID_PARAMETER = 100;
+
     private const FILE_EXTENSIONS = ['image/jpeg' => 'jpg', 'image/png' => 'png'];
 
     private readonly GraphClient $graph;
@@ -345,6 +348,8 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
                 PublishFailed::class,
                 "Facebook did not take image {$number} of this post.",
             );
+        } catch (PublishFailed $refusal) {
+            throw $this->withDescriptionLimit($refusal, $attachment, $number);
         } finally {
             if (is_resource($stream)) {
                 fclose($stream);
@@ -430,7 +435,9 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
         try {
             $response = $this->graph->send('POST', $channel->external_id.'/feed', $parameters, $channel->access_token, PublishFailed::class, safeToRepeat: false);
         } catch (PublishFailed $refusal) {
-            throw $this->blamesUploads($refusal, $images) ? $this->uploadsNoLongerValid($refusal) : $refusal;
+            throw $this->blamesUploads($refusal, $images)
+                ? $this->uploadsNoLongerValid($refusal)
+                : $this->withCountLimit($refusal, $images->count());
         }
 
         $id = $response['id'] ?? null;
@@ -460,13 +467,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
      */
     private function blamesUploads(PublishFailed $refusal, Collection $images): bool
     {
-        $context = $refusal->context();
-
-        if ($refusal->retryable || $refusal->requiresReconnect || ($context['outcome_unknown'] ?? false) === true) {
-            return false;
-        }
-
-        if (! in_array($context['code'] ?? null, self::PHOTO_PROBLEM_CODES, true)) {
+        if (! $this->refusedOutright($refusal, self::PHOTO_PROBLEM_CODES)) {
             return false;
         }
 
@@ -482,8 +483,88 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
         return PublishFailed::uploadsNoLongerValid(
             self::PLATFORM,
             $refusal->getMessage().' The images of this post were sent to Facebook some time ago and may no longer be kept there, so they are sent again.',
-            array_diff_key($refusal->context(), array_flip(['platform', 'retryable', 'retry_after_seconds', 'requires_reconnect'])),
+            $this->contextOf($refusal),
         );
+    }
+
+    /**
+     * Whether Facebook answered with an error of one of these codes that
+     * is a plain "no": not a limit on requests, not a token, and not an
+     * answer that leaves open what happened.
+     *
+     * @param  list<int>  $codes
+     */
+    private function refusedOutright(PublishFailed $refusal, array $codes): bool
+    {
+        $context = $refusal->context();
+
+        return ! $refusal->retryable
+            && ! $refusal->requiresReconnect
+            && ($context['outcome_unknown'] ?? false) !== true
+            && in_array($context['code'] ?? null, $codes, true);
+    }
+
+    /**
+     * How many images a post may carry is a setting that Meta gives no
+     * number for, so the number in use is a guess. When Facebook refuses
+     * a post with several images as an invalid parameter, the refusal is
+     * given back with that said, and with where the number is changed.
+     * It is certain only when Facebook's own words name the images;
+     * otherwise it is offered as a possible cause. The code Facebook
+     * gave stays in the context, which the job writes to the log.
+     */
+    private function withCountLimit(PublishFailed $refusal, int $count): PublishFailed
+    {
+        if ($count < 2 || ! $this->refusedOutright($refusal, [self::INVALID_PARAMETER])) {
+            return $refusal;
+        }
+
+        $allowed = $this->capabilities()->maxMediaItems;
+        $named = str_contains($refusal->getMessage(), 'attached_media');
+
+        return PublishFailed::permanent(
+            self::PLATFORM,
+            $refusal->getMessage().($named
+                ? " Facebook's answer is about the images of this post, and it has {$count}."
+                : " One possible cause is the number of images on this post, which is {$count}.")
+                ." Meta documents no limit for it, and the {$allowed} this instance allows for Facebook are an assumption. Take images off the post, or have the limit lowered in the configuration of the instance (FACEBOOK_MAX_MEDIA_ITEMS).",
+            [...$this->contextOf($refusal), 'suspected_limit' => 'max_media_items', 'limit_named_by_platform' => $named, 'images' => $count],
+        );
+    }
+
+    /**
+     * The same for the description of an image, whose longest length is
+     * also a guess.
+     */
+    private function withDescriptionLimit(PublishFailed $refusal, MediaAttachment $attachment, int $number): PublishFailed
+    {
+        $length = mb_strlen((string) $attachment->alt_text);
+
+        if ($length === 0 || ! $this->refusedOutright($refusal, [self::INVALID_PARAMETER])) {
+            return $refusal;
+        }
+
+        $allowed = $this->capabilities()->altTextLength;
+        $named = str_contains($refusal->getMessage(), 'alt_text_custom');
+
+        return PublishFailed::permanent(
+            self::PLATFORM,
+            $refusal->getMessage().($named
+                ? " Facebook's answer is about the description of image {$number}, which is {$length} characters long."
+                : " One possible cause is the description of image {$number}, which is {$length} characters long.")
+                ." Meta documents no limit for it, and the {$allowed} characters this instance allows for Facebook are an assumption. Shorten the description, or have the limit lowered in the configuration of the instance (FACEBOOK_ALT_TEXT_LENGTH).",
+            [...$this->contextOf($refusal), 'suspected_limit' => 'alt_text_length', 'limit_named_by_platform' => $named, 'description_length' => $length],
+        );
+    }
+
+    /**
+     * What a failure carries, without the fields every failure adds itself.
+     *
+     * @return array<string, mixed>
+     */
+    private function contextOf(PublishFailed $refusal): array
+    {
+        return array_diff_key($refusal->context(), array_flip(['platform', 'retryable', 'retry_after_seconds', 'requires_reconnect']));
     }
 
     /**
