@@ -32,6 +32,13 @@ cp .env.example .env            # fill in app id, secret, short-lived token, pho
 ./06-delete.sh                  # delete every post the spike created
 ```
 
+`./07-upload-photo-post.sh` is the path the application takes for a post with
+images (issue #25). It uploads `SPIKE_PHOTO_FILE` from this machine as an
+unpublished photo with a description, publishes a Page post that names the
+photo, prints the ids and the permalink, and deletes the post. Run it with
+`KEEP_POST=1` to look at the post first; `./06-delete.sh` removes it then.
+Record what it shows under the 2026-11-26 entry in the platform notes.
+
 Run the sequence twice:
 
 1. **Development mode** (the default for a new app). Expect the posts to be
