@@ -25,6 +25,12 @@ use SensitiveParameter;
  *
  * A file goes out with upload(), in the body of the request. This class
  * never logs or dumps a request: the body of an upload holds the token.
+ *
+ * No redirect is followed, on any call. The HTTP client would send the
+ * same request again to whatever address the answer names, and on a 307 or
+ * 308 with its body: the token, its proof and the file. The Graph API has
+ * no reason to redirect, so a 3xx is a failure like any other answer that
+ * was not expected.
  */
 final class GraphClient
 {
@@ -114,6 +120,7 @@ final class GraphClient
             ->baseUrl($this->baseUrl)
             ->timeout($this->timeout)
             ->connectTimeout(min(10, $this->timeout))
+            ->withoutRedirecting()
             ->acceptJson();
 
         try {
@@ -196,6 +203,7 @@ final class GraphClient
                 ->baseUrl($this->baseUrl)
                 ->timeout($timeout)
                 ->connectTimeout(min(10, $timeout))
+                ->withoutRedirecting()
                 ->acceptJson()
                 ->attach($field, $file, $filename, ['Content-Type' => $mimeType])
                 ->post($path, $parameters);
@@ -274,6 +282,17 @@ final class GraphClient
         ];
 
         $detail = $said === null ? '' : ' Facebook said: '.$said;
+
+        // Not followed, see the class comment. The address it names is
+        // not repeated either. For a call that creates something the
+        // outcome is unknown, as for every answer that was not expected.
+        if ($response->redirect()) {
+            $what = "Facebook answered with a redirect (HTTP {$response->status()}), which is not followed.";
+
+            return $safeToRepeat
+                ? $failure::retryable($this->platform, $what, context: $context)
+                : $this->outcomeUnknown($failure, $what, $context);
+        }
 
         if ($this->tokenOrPermissionProblem($code, $subcode)) {
             return $failure::reconnectRequired(
