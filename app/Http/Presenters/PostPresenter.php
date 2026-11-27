@@ -8,6 +8,7 @@ use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Channels\Contracts\MediaLinkRule;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Models\Channel;
+use App\Domain\Channels\Support\LinkWithUtm;
 use App\Domain\Content\Actions\DeletePost;
 use App\Domain\Content\Exceptions\PostNotPublishable;
 use App\Domain\Content\Media\MediaConfig;
@@ -224,6 +225,10 @@ final class PostPresenter
             // the place of the link card, this is the last line of the
             // text, and the editor counts it as the readiness check does.
             'link_as_sent' => $variant->linkToSend(),
+            // The campaign parameters as they are put on a link that has
+            // none of its own, for the count while the link is being
+            // typed. Null when the text has none.
+            'link_campaign' => self::campaign($variant),
             'media' => $variant->images()
                 ->filter(fn (MediaAttachment $attachment): bool => $attachment->media !== null)
                 ->map(fn (MediaAttachment $attachment): array => [...MediaPresenter::present($attachment->image()), 'alt_text' => $attachment->alt_text])
@@ -236,6 +241,13 @@ final class PostPresenter
             'published_at' => $variant->published_at?->toIso8601String(),
             'error' => $variant->isPublished() ? null : $variant->error,
         ];
+    }
+
+    private static function campaign(PostVariant $variant): ?string
+    {
+        $sent = LinkWithUtm::apply('', $variant->utm ?? []);
+
+        return $sent === '' ? null : ltrim($sent, '?');
     }
 
     /**

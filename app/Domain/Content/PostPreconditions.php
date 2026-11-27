@@ -136,7 +136,14 @@ class PostPreconditions
             $linkInText = $capabilities->linkGoesInText($variant->link, $variant->attachments->count());
 
             if (trim($variant->body) === '') {
-                $errors["variants.{$variant->id}.body"] = [self::text('The text for :channel is empty.', ['channel' => $channel->display_name])];
+                // A picture without a caption is not built: whether the
+                // platforms take one is not verified. The message says so.
+                $errors["variants.{$variant->id}.body"] = [self::text($variant->attachments->isEmpty()
+                    ? 'The text for :channel is empty.'
+                    : ':platform posts need a text for now, even with images. Write a text for :channel.', [
+                        'channel' => $channel->display_name,
+                        'platform' => PlatformLabel::for($channel->platform),
+                    ])];
             } elseif (! $capabilities->fits($text)) {
                 $errors["variants.{$variant->id}.body"] = [self::text($text === $variant->body
                     ? 'The text for :channel is :length characters long. The limit is :limit.'
@@ -204,10 +211,18 @@ class PostPreconditions
             }
 
             if ($capabilities->linkGoesInText($variant->link, $variant->attachments->count())) {
-                $advice["variants.{$variant->id}.link"] = [self::text('With an image, :platform shows no preview of the link. The link for :channel goes out as the last line of the text.', [
-                    'platform' => PlatformLabel::for($channel->platform),
-                    'channel' => $channel->display_name,
-                ])];
+                // A text that ends with the bare link gets the link once
+                // more when the link that is sent carries campaign
+                // parameters and so is not the same text.
+                $twice = str_ends_with(rtrim($variant->body), trim((string) $variant->link))
+                    && $variant->textFor($capabilities) !== $variant->body;
+
+                $advice["variants.{$variant->id}.link"] = [self::text($twice
+                    ? 'The text for :channel already ends with its link. With an image the link is added once more as the last line, with its campaign parameters. Take the link out of the text.'
+                    : 'With an image, :platform shows no preview of the link. The link for :channel goes out as the last line of the text.', [
+                        'platform' => PlatformLabel::for($channel->platform),
+                        'channel' => $channel->display_name,
+                    ])];
             }
         }
 
@@ -240,10 +255,13 @@ class PostPreconditions
         $errors = [];
 
         if ($attachments->count() > $capabilities->maxMediaItems) {
-            $errors[$key] = [self::text('The text for :channel has :count images. :platform takes :limit at most.', [
+            // The limit may be the platform's or one set for this
+            // instance, so the sentence names neither as the source.
+            $errors[$key] = [self::text('The text for :channel has :count images. Noon Gun sends :limit at most to :platform on one post. Take :over off.', [
                 ...$name,
                 'count' => $attachments->count(),
                 'limit' => $capabilities->maxMediaItems,
+                'over' => $attachments->count() - $capabilities->maxMediaItems,
             ])];
         } elseif ($capabilities->mediaLinkRule === MediaLinkRule::Refused && ! blank($variant->link)) {
             $errors[$key] = [self::text(':platform takes a post with images or a post with a link, not both. Take the link or the images off the text for :channel.', $name)];
@@ -254,13 +272,24 @@ class PostPreconditions
             $number = [...$name, 'number' => $index + 1];
             $problem = match (true) {
                 $image === null => self::text('Image :number for :channel no longer exists. Take it off the post.', $number),
-                ! $capabilities->supportsMedia($image->mime) => self::text('Image :number for :channel is of a type that :platform does not take.', $number),
-                $capabilities->maxMediaBytes !== null && $image->byte_size > $capabilities->maxMediaBytes => self::text('Image :number for :channel is :size MB. :platform takes :limit MB at most.', [
+                ! $capabilities->supportsMedia($image->mime) => self::text('Image :number for :channel is stored as a :type file, which is not sent to :platform. Take it off and add it again as :types.', [
                     ...$number,
-                    'size' => round($image->byte_size / 1024 / 1024, 1),
-                    'limit' => round($capabilities->maxMediaBytes / 1024 / 1024, 1),
+                    'type' => self::typeName($image->mime),
+                    'types' => implode(' or ', array_map(self::typeName(...), $capabilities->mediaTypes)),
                 ]),
-                $capabilities->maxMediaPixels !== null && $image->pixels() > $capabilities->maxMediaPixels => self::text('Image :number for :channel is :width x :height pixels. :platform takes :limit megapixels at most.', [
+                // What is compared is the stored file, which is not the
+                // file that was uploaded: it was scaled and encoded again.
+                // Exporting the same picture smaller in bytes alone may
+                // store at the same size, so the next step is fewer
+                // pixels, or JPEG where the stored file is a PNG.
+                $capabilities->maxMediaBytes !== null && $image->byte_size > $capabilities->maxMediaBytes => self::text($image->mime === 'image/png'
+                    ? 'Image :number for :channel is stored as a PNG file of :size MB. Noon Gun sends :limit MB at most to :platform for one image. Take it off and add it again as a JPEG, or with fewer pixels.'
+                    : 'Image :number for :channel is stored at :size MB. Noon Gun sends :limit MB at most to :platform for one image. Take it off and add it again with fewer pixels.', [
+                        ...$number,
+                        'size' => self::megabytes($image->byte_size),
+                        'limit' => self::megabytes($capabilities->maxMediaBytes),
+                    ]),
+                $capabilities->maxMediaPixels !== null && $image->pixels() > $capabilities->maxMediaPixels => self::text('Image :number for :channel is stored at :width x :height pixels. Noon Gun sends :limit megapixels at most to :platform. Take it off and add it again with fewer pixels.', [
                     ...$number,
                     'width' => $image->width,
                     'height' => $image->height,
@@ -276,7 +305,7 @@ class PostPreconditions
             $altText = (string) $attachment->alt_text;
 
             if ($capabilities->altTextLength !== null && mb_strlen($altText) > $capabilities->altTextLength) {
-                $errors["{$key}.{$attachment->media_id}.alt_text"] = [self::text('The description of image :number for :channel is :length characters long. The limit is :limit.', [
+                $errors["{$key}.{$attachment->media_id}.alt_text"] = [self::text('The description of image :number for :channel is :length characters long. Noon Gun sends :limit at most to :platform. Shorten it.', [
                     ...$number,
                     'length' => mb_strlen($altText),
                     'limit' => $capabilities->altTextLength,
@@ -285,6 +314,33 @@ class PostPreconditions
         }
 
         return $errors;
+    }
+
+    /**
+     * A size in megabytes as the pages write it (megabytes() in
+     * resources/js/lib/media.ts): a limit that was set in whole binary or
+     * whole decimal megabytes is that number, anything else is decimal
+     * megabytes to one place.
+     */
+    public static function megabytes(int $bytes): string
+    {
+        foreach ([1024 * 1024, 1_000_000] as $unit) {
+            if ($bytes >= $unit && $bytes % $unit === 0) {
+                return (string) intdiv($bytes, $unit);
+            }
+        }
+
+        return (string) round($bytes / 1_000_000, 1);
+    }
+
+    private static function typeName(string $mime): string
+    {
+        return match ($mime) {
+            'image/jpeg' => 'JPEG',
+            'image/png' => 'PNG',
+            'image/webp' => 'WebP',
+            default => strtoupper(str_contains($mime, '/') ? explode('/', $mime, 2)[1] : $mime),
+        };
     }
 
     /**

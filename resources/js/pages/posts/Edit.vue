@@ -562,6 +562,135 @@ function imageProblemsFor(channelId: number): Record<string, string> {
     return found;
 }
 
+// One description for an image on several channels. What is typed in one
+// column is typed in every other column where the description of the same
+// image is still empty or still the same. A column whose description was
+// changed on its own keeps its own.
+function describeImage(from: number, mediaId: number, text: string): void {
+    const before = variantFor(from)?.media.find(
+        (image) => image.id === mediaId,
+    )?.alt_text;
+
+    if (before === undefined) {
+        return;
+    }
+
+    form.variants.forEach((variant) => {
+        variant.media = variant.media.map((image) =>
+            image.id === mediaId &&
+            (variant.channel_id === from ||
+                image.alt_text === '' ||
+                image.alt_text === before)
+                ? { id: image.id, alt_text: text }
+                : image,
+        );
+    });
+}
+
+// Brings every column back in step with the description of one.
+function describeImageEverywhere(from: number, mediaId: number): void {
+    const text = variantFor(from)?.media.find(
+        (image) => image.id === mediaId,
+    )?.alt_text;
+
+    if (text === undefined) {
+        return;
+    }
+
+    form.variants.forEach((variant) => {
+        variant.media = variant.media.map((image) =>
+            image.id === mediaId ? { id: image.id, alt_text: text } : image,
+        );
+    });
+}
+
+// The order is kept per channel. This puts the images the other channels
+// share with one channel in its order; what only they have keeps its place
+// after those.
+function orderImagesEverywhere(from: number): void {
+    const order = (variantFor(from)?.media ?? []).map((image) => image.id);
+
+    form.variants.forEach((variant) => {
+        if (variant.channel_id === from) {
+            return;
+        }
+
+        const place = (id: number, own: number): number =>
+            order.includes(id) ? order.indexOf(id) : order.length + own;
+
+        variant.media = variant.media
+            .map((image, own) => ({ image, at: place(image.id, own) }))
+            .sort((a, b) => a.at - b.at)
+            .map((entry) => entry.image);
+    });
+}
+
+// The images a refused save said no longer exist, by channel. An upload
+// that is on no saved post is removed after a day, so a draft left open
+// over a weekend can name images that are gone. The refusal names them by
+// their place in what was sent, which is read here before anything moves.
+const goneImages = ref<Record<number, number[]>>({});
+
+watch(
+    () => form.errors,
+    (errors) => {
+        const found: Record<number, number[]> = {};
+
+        Object.keys(errors).forEach((key) => {
+            const match = /^variants\.(\d+)\.media\.(\d+)\.id$/.exec(key);
+            const variant = match ? form.variants[Number(match[1])] : undefined;
+            const image = match ? variant?.media[Number(match[2])] : undefined;
+
+            if (variant && image) {
+                (found[variant.channel_id] ??= []).push(image.id);
+            }
+        });
+
+        goneImages.value = found;
+    },
+    { deep: true },
+);
+
+// A file dropped beside a column would be opened by the browser, and the
+// page with its draft would be gone. Nothing is dropped outside a column,
+// and while files are held over the page it says where they go.
+const filesOverPage = ref(0);
+
+function carriesFiles(event: DragEvent): boolean {
+    return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+function onPageDragEnter(event: DragEvent): void {
+    if (carriesFiles(event)) {
+        filesOverPage.value++;
+    }
+}
+
+function onPageDragLeave(event: DragEvent): void {
+    if (carriesFiles(event)) {
+        filesOverPage.value = Math.max(0, filesOverPage.value - 1);
+    }
+}
+
+function onPageDragOver(event: DragEvent): void {
+    // A column that takes the files has said so already.
+    if (carriesFiles(event) && !event.defaultPrevented) {
+        event.preventDefault();
+
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'none';
+        }
+    }
+}
+
+function onPageDrop(event: DragEvent): void {
+    filesOverPage.value = 0;
+
+    if (carriesFiles(event) && !event.defaultPrevented) {
+        event.preventDefault();
+    }
+}
+
 // What a refused save said about the images of the text at a position.
 function mediaErrors(position: number): string[] {
     const prefix = `variants.${position}.media`;
@@ -645,6 +774,22 @@ const pending = computed(() =>
 );
 const pendingNames = computed(() =>
     pending.value.map((variant) => variant.channel_name).join(', '),
+);
+// Sending again can make a second copy only where a platform was called
+// and nothing says how that ended. Where the attempt stopped before a post
+// was made, for example on an image that could not be uploaded, nothing is
+// in doubt and nothing has to be looked at first.
+const unsure = computed(() =>
+    pending.value.filter((variant) => variant.outcome_unknown),
+);
+const unsureNames = computed(() =>
+    unsure.value.map((variant) => variant.channel_name).join(', '),
+);
+const certainNames = computed(() =>
+    pending.value
+        .filter((variant) => !variant.outcome_unknown)
+        .map((variant) => variant.channel_name)
+        .join(', '),
 );
 const pendingHasImages = computed(() =>
     pending.value.some((variant) => variant.media.length > 0),
@@ -734,7 +879,10 @@ function confirm(): void {
         act('publish-now', schedule.url({ post: props.post.id }), {
             now: true,
         });
-    } else if (confirming.value === 'retry' && checkedChannel.value) {
+    } else if (
+        confirming.value === 'retry' &&
+        (checkedChannel.value || unsure.value.length === 0)
+    ) {
         act('retry', retry.url({ post: props.post.id }));
     }
 }
@@ -762,11 +910,21 @@ function warnOnUnload(event: BeforeUnloadEvent): void {
     }
 }
 
-onMounted(() => window.addEventListener('beforeunload', warnOnUnload));
+onMounted(() => {
+    window.addEventListener('beforeunload', warnOnUnload);
+    window.addEventListener('dragenter', onPageDragEnter);
+    window.addEventListener('dragleave', onPageDragLeave);
+    window.addEventListener('dragover', onPageDragOver);
+    window.addEventListener('drop', onPageDrop);
+});
 
 onBeforeUnmount(() => {
     stopGuard();
     window.removeEventListener('beforeunload', warnOnUnload);
+    window.removeEventListener('dragenter', onPageDragEnter);
+    window.removeEventListener('dragleave', onPageDragLeave);
+    window.removeEventListener('dragover', onPageDragOver);
+    window.removeEventListener('drop', onPageDrop);
 });
 
 const status = computed(() => {
@@ -938,6 +1096,16 @@ const locked = computed(() => {
                         <InputError :message="fieldError('variants')" />
                     </fieldset>
 
+                    <p
+                        v-if="columns.length && filesOverPage > 0"
+                        class="rounded-lg bg-secondary px-4 py-3 text-base"
+                        role="status"
+                        data-test="drop-hint"
+                    >
+                        Drop images on the column of the channel they are for.
+                        Nothing is added outside a column.
+                    </p>
+
                     <div
                         v-if="columns.length"
                         class="grid grid-cols-[repeat(auto-fit,minmax(min(100%,20rem),1fr))] items-start gap-4"
@@ -965,6 +1133,14 @@ const locked = computed(() => {
                             :saved-link="
                                 savedLinkFor(column.variant.channel_id)
                             "
+                            :campaign="
+                                savedVariant(column.variant.channel_id)
+                                    ?.link_campaign ?? null
+                            "
+                            :gone-media-ids="
+                                goneImages[column.variant.channel_id] ?? []
+                            "
+                            :suggested-alt-text="post?.origin?.alt_text ?? null"
                             :image-problems="
                                 imageProblemsFor(column.variant.channel_id)
                             "
@@ -1005,6 +1181,24 @@ const locked = computed(() => {
                                         mediaId,
                                         targets,
                                     )
+                            "
+                            @describe="
+                                (mediaId: number, text: string) =>
+                                    describeImage(
+                                        column.variant.channel_id,
+                                        mediaId,
+                                        text,
+                                    )
+                            "
+                            @describe-all="
+                                (mediaId: number) =>
+                                    describeImageEverywhere(
+                                        column.variant.channel_id,
+                                        mediaId,
+                                    )
+                            "
+                            @order-all="
+                                orderImagesEverywhere(column.variant.channel_id)
                             "
                             @uploading="
                                 (count: number) =>
@@ -1466,13 +1660,29 @@ const locked = computed(() => {
                     </p>
 
                     <p
-                        v-if="post && post.state === 'failed' && post.can.retry"
+                        v-if="
+                            post &&
+                            post.state === 'failed' &&
+                            post.can.retry &&
+                            unsure.length
+                        "
                         class="text-sm text-muted-foreground"
+                        data-test="retry-caution"
                     >
-                        Before you send it again, look at the channel itself. If
-                        the post is there, leave this post as it is: sending it
-                        again publishes a second copy. If it is not there, send
-                        it again.
+                        Before you send it again, look at
+                        {{ unsureNames }} itself. If the post is there, leave
+                        this post as it is: sending it again publishes a second
+                        copy. If it is not there, send it again.
+                    </p>
+                    <p
+                        v-else-if="
+                            post && post.state === 'failed' && post.can.retry
+                        "
+                        class="text-sm text-muted-foreground"
+                        data-test="retry-certain"
+                    >
+                        Nothing was published: the attempt stopped before a post
+                        was made. Sending it again cannot make a second copy.
                     </p>
                 </section>
 
@@ -1673,12 +1883,20 @@ const locked = computed(() => {
                         of the scheduler, which is within a minute. Once it is
                         out, it cannot be taken back from here.
                     </template>
+                    <template v-else-if="dialog === 'retry' && unsure.length">
+                        Look at {{ unsureNames }} first. Noon Gun cannot see
+                        whether the post arrived there. If the post is there,
+                        choose Cancel and leave this post as it is. It stays
+                        listed as failed here, and that is all right. If the
+                        post is not there, tick the box and send it again.
+                        <template v-if="certainNames">
+                            Nothing was published on {{ certainNames }}.
+                        </template>
+                    </template>
                     <template v-else-if="dialog === 'retry'">
-                        Look at {{ pendingNames }} first. Noon Gun cannot see
-                        whether the post arrived. If the post is there, choose
-                        Cancel and leave this post as it is. It stays listed as
-                        failed here, and that is all right. If the post is not
-                        there, tick the box and send it again.
+                        Nothing was published on {{ pendingNames }}: the attempt
+                        stopped before a post was made. Sending it again cannot
+                        make a second copy.
                     </template>
                     <template v-else-if="dialog === 'remove-channel'">
                         <template v-if="removingLoses === 'text'">
@@ -1744,7 +1962,10 @@ const locked = computed(() => {
                         </span>
                     </li>
                 </ul>
-                <label class="flex min-h-11 cursor-pointer items-start gap-3">
+                <label
+                    v-if="unsure.length"
+                    class="flex min-h-11 cursor-pointer items-start gap-3"
+                >
                     <input
                         v-model="checkedChannel"
                         type="checkbox"
@@ -1752,7 +1973,7 @@ const locked = computed(() => {
                         data-test="checked-channel"
                     />
                     <span>
-                        I have looked at {{ pendingNames }} and the post is not
+                        I have looked at {{ unsureNames }} and the post is not
                         there.
                     </span>
                 </label>
@@ -1774,7 +1995,10 @@ const locked = computed(() => {
                             : 'default'
                     "
                     :disabled="
-                        busy !== null || (dialog === 'retry' && !checkedChannel)
+                        busy !== null ||
+                        (dialog === 'retry' &&
+                            unsure.length > 0 &&
+                            !checkedChannel)
                     "
                     data-test="confirm"
                     @click="confirm"
