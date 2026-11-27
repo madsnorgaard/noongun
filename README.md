@@ -313,7 +313,7 @@ there: Noon Gun estimates cost, it does not cap what the provider charges.
 | `NOONGUN_DRAFT_PROMPT_VERSION` | `v3` | The folder under `resources/prompts/draft/` that holds the prompt. `v3` asks for a text written for each channel and tells the model which examples did well; `v2` and `v1` are kept for the runs that used them. |
 | `NOONGUN_DRAFT_PRICES`, `NOONGUN_DRAFT_PRICE_CURRENCY` | empty, `USD` | The price table for the cost estimate. |
 | `NOONGUN_DRAFT_EXAMPLES` | `5` | How many texts the workspace approved are sent with a draft request as examples, for each target channel. `0` sends none. Never more than 10. |
-| `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` | `6000` | The most characters all examples of one request hold together. Over that, the texts chosen for how they did are left out first, then the oldest; a text is never cut. `0` sends none. Never more than 40000. |
+| `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` | `6000` | The most characters the examples of one target channel hold together. Over that, the texts chosen for how they did are left out first, then the oldest; a text is never cut. `0` sends none. Never more than 40000, also for all channels of one request together. |
 | `NOONGUN_DRAFT_EXAMPLES_TOP_SHARE` | `50` | The share of the examples of a channel, in percent, that goes to the approved posts that did best instead of the most recent ones. Rounded down, and one example always stays with the most recent post. `0` takes only the most recent. |
 | `NOONGUN_DRAFT_EXAMPLES_TOP_DAYS` | `90` | How many days back a post may have been published to be taken as an example for how it did. `0` takes none that way. Never more than 365. |
 
@@ -378,9 +378,10 @@ phrases, and that it must never copy a sentence.
   the rest are the most recent, newest approval first. A channel with fewer
   is topped up with the most recent texts of your other channels on the same
   platform. Nothing is taken from another platform.
-- All examples of one request hold at most `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS`
-  characters together. Over that, the texts chosen for how they did are left
-  out first, then the oldest. A text is never cut.
+- The examples of one channel hold at most `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS`
+  characters together, so a draft for two channels has room for both. Over
+  that, the texts chosen for how they did are left out first, then the
+  oldest. A text is never cut.
 - They are chosen when the draft is written, not when it is asked for. The
   drafts of one proposed week therefore do not see each other as examples
   until you approve them. What they do get is the list of the other posts of
@@ -402,10 +403,17 @@ are chosen for that:
   (default 50, which is 2 of 5) go to posts that did well. The others stay
   with the most recent posts, and at least one always does, so a draft still
   sees what you said last.
-- A post did well when its engagement score on that channel is above the
-  average of your approved posts on the same channel, among those published
-  in the last `NOONGUN_DRAFT_EXAMPLES_TOP_DAYS` days (default 90). After that
-  a post is no longer chosen for how it did, however well it did.
+- A post did well when its score on that channel is above the average of
+  your approved posts on the same channel, among those published in the last
+  `NOONGUN_DRAFT_EXAMPLES_TOP_DAYS` days (default 90). After that a post is no
+  longer chosen for how it did, however well it did.
+- For this comparison the score is reactions, comments and shares. Clicks and
+  reach are left out, because not every post of a channel has them: they need
+  a permission that can be added later.
+- A post is compared only when it has been out for
+  `NOONGUN_INSIGHTS_MIN_AGE_HOURS` hours (default 48), and nothing is chosen
+  this way until the channel has `NOONGUN_INSIGHTS_MIN_MEASURED_POSTS` such
+  posts (default 5). Until then the examples are the most recent posts.
 - At most one post of each pillar is chosen this way, so that the drafts do
   not all learn from the same theme.
 - A post without numbers is not a post that did badly. It is simply not
@@ -421,7 +429,13 @@ are chosen for that:
 
 `NOONGUN_DRAFT_EXAMPLES_TOP_SHARE=0` turns this off and takes only the most
 recent posts. Marking the examples needs prompt `v3`, the default; with `v2`
-the same posts are sent without the mark.
+the same posts are sent without the mark, and the draft run notes that.
+
+Reactions and comments come from anyone who can see a post, so someone
+outside your workspace can make one post look better than it did. What that
+changes is small: one of your own approved posts is marked as an example that
+did well, for one pillar on one channel. No text of anyone else is read or
+sent, and you still approve every draft.
 
 ### What comes back
 
@@ -646,7 +660,8 @@ Both figures include the examples from approved posts. The expected cost
 counts the examples that would be sent now, chosen the way a draft run
 chooses them. The worst case counts the most
 there could be, at four tokens for each of the
-`NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` characters, because a post can be approved
+`NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` characters of each channel the post is
+for, because a post can be approved
 between the start and the moment a draft is written. Lower that setting or
 `NOONGUN_DRAFT_EXAMPLES` to lower both.
 
@@ -1009,6 +1024,8 @@ it there.
 | `NOONGUN_INSIGHTS_PAUSE_MINUTES` | `60` | How long a channel is left alone after the platform refused a reading. A longer wait the platform asks for is respected, up to a day. |
 | `NOONGUN_INSIGHTS_TIMEOUT` | `45` | Time limit in seconds for one run of the job. Must stay below the `timeout` of `supervisor-insights` in `config/horizon.php`. |
 | `NOONGUN_INSIGHTS_QUEUE` | `insights` | Queue that the job runs on. `supervisor-insights` in `config/horizon.php` reads the same setting, so the queue always has a worker. Do not set it to the publishing queue. |
+| `NOONGUN_INSIGHTS_MIN_AGE_HOURS` | `48` | How long a post must have been out before it is compared with other posts. A younger post is never chosen as an example for how it did and does not count towards the average. Never more than 720. |
+| `NOONGUN_INSIGHTS_MIN_MEASURED_POSTS` | `5` | How many measured posts of that age a channel needs before any of them is said to have done well. Below that, drafting takes its examples by recency alone. Never fewer than 2. |
 | `NOONGUN_INSIGHTS_GONE_AFTER` | `3` | How many times in a row a platform must answer that a post is gone before Noon Gun stops asking for its numbers. |
 | `NOONGUN_INSIGHTS_WEIGHT_REACTIONS`, `_COMMENTS`, `_SHARES`, `_CLICKS` | `1`, `2`, `3`, `1` | Weights of the engagement score, the one number posts are compared by: each count times its weight, added up. Reach is not part of it. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |

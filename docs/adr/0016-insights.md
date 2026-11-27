@@ -207,12 +207,19 @@ last N days. Each is one query, scoped to the current workspace.
 
 The examples a draft request carries lean towards the posts that did well:
 `Content\ApprovedTexts::best()` ranks the approved texts of one channel by
-`EngagementScore::SQL` and gives those above the average of that channel in a
-recent window. What that does, the limits it keeps and the three ways it
+the comparable score and gives those above the average of that channel in a
+recent window. The comparable score (`EngagementScore::COMPARABLE_SQL`) is
+reactions, comments and shares with the same weights, and never clicks or
+reach: a channel can gain or lose `read_insights`, and posts older than the
+cadence are frozen, so a score with clicks would rank posts by when the
+permission was added. A post is compared only after
+`NOONGUN_INSIGHTS_MIN_AGE_HOURS` (default 48), and nothing is said to have
+done well until a channel has `NOONGUN_INSIGHTS_MIN_MEASURED_POSTS` (default
+5) such posts. What that does, the limits it keeps and the three ways it
 could go wrong (collapse, staleness, repetition) are recorded in ADR 0011,
 "Chosen for how they did". It does not use `Performance::top()`, which ranks
 what is public without asking for an approval and without the pillar of a
-post; the formula is the same one. Null is not zero there either: a text
+post. Null is not zero there either: a text
 without numbers is not ranked and does not count towards the average. No
 number is sent to a provider, only whether a text did well.
 
