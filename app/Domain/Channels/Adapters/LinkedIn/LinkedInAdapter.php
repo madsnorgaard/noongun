@@ -63,6 +63,9 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
 
     private const RATE_LIMIT_SECONDS = 86400;
 
+    /** The OAuth errors with which LinkedIn turns down a refresh token (HTTP 400). */
+    private const REFRESH_REFUSED = ['invalid_request', 'invalid_grant'];
+
     /** What a member id and the id part of a URN may consist of. */
     private const ID = '[A-Za-z0-9_-]{1,100}';
 
@@ -311,7 +314,18 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
             'token' => (string) $channel->access_token,
         ]);
 
-        if (($report['active'] ?? false) !== true) {
+        // Marking a channel stops it from publishing, so it takes a definite
+        // answer. One that does not say whether the token is active is a
+        // failed check, not a withdrawn token.
+        if (! is_bool($report['active'] ?? null)) {
+            throw ChannelException::retryable(
+                self::PLATFORM,
+                'LinkedIn answered the check of the access in a form that could not be read. The channel was left as it is.',
+                context: ['endpoint' => 'POST /oauth/v2/introspectToken'],
+            );
+        }
+
+        if ($report['active'] === false) {
             return $channel->markNeedsReconnect();
         }
 
@@ -342,11 +356,18 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
                 'client_secret' => $this->setting('client_secret'),
             ]));
         } catch (ChannelException $exception) {
-            if ($exception->retryable) {
+            // Only LinkedIn's own refusal of the refresh token says that it
+            // is expired, revoked or not valid. Anything else (an outage, a
+            // wrong client secret, an answer that cannot be read) says
+            // nothing about the channel, which is left as it is.
+            $context = $exception->context();
+
+            if ($exception->retryable
+                || ($context['http_status'] ?? null) !== 400
+                || ! in_array($context['code'] ?? null, self::REFRESH_REFUSED, true)) {
                 throw $exception;
             }
 
-            // The refresh token is expired, revoked or not valid.
             return $channel->markNeedsReconnect();
         }
 

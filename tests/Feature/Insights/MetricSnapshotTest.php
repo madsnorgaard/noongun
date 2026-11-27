@@ -1,5 +1,6 @@
 <?php
 
+use App\Domain\Channels\Contracts\Metric;
 use App\Domain\Channels\Contracts\MetricReading;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Insights\Models\MetricSnapshot;
@@ -13,6 +14,88 @@ require_once __DIR__.'/../../Support/posts.php';
 require_once __DIR__.'/../../Support/insights.php';
 
 itIsolatesWorkspaces(fn () => MetricSnapshot::factory()->create());
+
+describe('a number the platform stops giving', function () {
+    beforeEach(function () {
+        $this->record = fn (array $numbers, array $claimed) => inWorkspace($this->workspace, fn () => MetricSnapshot::record(
+            $this->variant,
+            new MetricReading(...$numbers),
+            null,
+            $claimed,
+        ));
+    });
+
+    it('is carried forward while the channel can read the metric, and the row says since when', function () {
+        ($this->record)(['reactions' => 12, 'clicks' => 40, 'reach' => 900], Metric::cases());
+
+        $this->travel(1)->hours();
+        $same = ($this->record)(['reactions' => 12], Metric::cases());
+
+        // No number changed: no new row, only the note and the time.
+        expect(snapshotsOf($this->variant))->toHaveCount(1)
+            ->and($same->reading()->toArray())->toBe(['reactions' => 12, 'comments' => null, 'shares' => null, 'clicks' => 40, 'reach' => 900])
+            ->and($same->checked_at->toDateTimeString())->toBe('2026-11-26 11:00:00')
+            ->and($same->carriedSince(Metric::Clicks)?->toDateTimeString())->toBe('2026-11-26 11:00:00')
+            ->and($same->carriedSince(Metric::Reach)?->toDateTimeString())->toBe('2026-11-26 11:00:00')
+            ->and($same->carriedSince(Metric::Reactions))->toBeNull();
+
+        $this->travel(1)->hours();
+        $changed = ($this->record)(['reactions' => 14], Metric::cases());
+
+        // Another number changed: a new row that still holds the carried
+        // ones, and still says since when they are.
+        expect(snapshotsOf($this->variant))->toHaveCount(2)
+            ->and($changed->reading()->toArray())->toBe(['reactions' => 14, 'comments' => null, 'shares' => null, 'clicks' => 40, 'reach' => 900])
+            ->and($changed->carriedSince(Metric::Clicks)?->toDateTimeString())->toBe('2026-11-26 11:00:00');
+    });
+
+    it('is no longer marked once the platform gives it again', function () {
+        ($this->record)(['reactions' => 12, 'clicks' => 40, 'reach' => 900], Metric::cases());
+        $this->travel(1)->hours();
+        ($this->record)(['reactions' => 12], Metric::cases());
+        $this->travel(1)->hours();
+
+        $back = ($this->record)(['reactions' => 12, 'clicks' => 40, 'reach' => 950], Metric::cases());
+
+        expect($back->reading()->toArray())->toBe(['reactions' => 12, 'comments' => null, 'shares' => null, 'clicks' => 40, 'reach' => 950])
+            ->and($back->carried)->toBeNull()
+            ->and(DB::table('metric_snapshots')->where('id', $back->id)->value('carried'))->toBeNull();
+    });
+
+    it('becomes "not given" when the channel no longer reads the metric, or nobody says what it reads', function (array $claimed) {
+        ($this->record)(['reactions' => 12, 'clicks' => 40], Metric::cases());
+        $this->travel(1)->hours();
+
+        $now = ($this->record)(['reactions' => 12], $claimed);
+
+        expect(snapshotsOf($this->variant))->toHaveCount(2)
+            ->and($now->clicks)->toBeNull()
+            ->and($now->carried)->toBeNull();
+    })->with([
+        'the metric is not claimed' => [[Metric::Reactions, Metric::Comments, Metric::Shares]],
+        'nothing is claimed' => [[]],
+    ]);
+
+    it('never turns a zero into a carried number, and has nothing to carry on a first reading', function () {
+        $first = ($this->record)(['reactions' => 12], Metric::cases());
+
+        expect($first->carried)->toBeNull();
+
+        $this->travel(1)->hours();
+        $zero = ($this->record)(['reactions' => 0, 'clicks' => 0], Metric::cases());
+
+        expect($zero->reading()->toArray())->toBe(['reactions' => 0, 'comments' => null, 'shares' => null, 'clicks' => 0, 'reach' => null])
+            ->and($zero->carried)->toBeNull();
+    });
+
+    it('still stores nothing for a reading without any number', function () {
+        ($this->record)(['reactions' => 12], Metric::cases());
+
+        expect(($this->record)([], Metric::cases()))->toBeNull()
+            ->and(snapshotsOf($this->variant))->toHaveCount(1)
+            ->and(snapshotsOf($this->variant)[0]->carried)->toBeNull();
+    });
+});
 
 beforeEach(function () {
     $this->travelTo('2026-11-26 10:00:00');

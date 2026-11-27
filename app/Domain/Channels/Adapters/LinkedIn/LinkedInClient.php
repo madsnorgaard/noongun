@@ -250,7 +250,7 @@ final class LinkedInClient
                 $this->platform,
                 'LinkedIn is limiting requests at the moment. Try again later.',
                 $this->retryAfter($response),
-                $context,
+                [...$context, 'rate_limited' => true],
             );
         }
 
@@ -263,7 +263,7 @@ final class LinkedInClient
                 $this->platform,
                 $status === 429 ? 'LinkedIn is limiting requests at the moment. Try again later.' : 'LinkedIn had a temporary problem. Try again later.',
                 $this->retryAfter($response),
-                $context,
+                $status === 429 ? [...$context, 'rate_limited' => true] : $context,
             );
         }
 

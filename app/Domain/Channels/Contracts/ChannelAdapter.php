@@ -96,9 +96,17 @@ interface ChannelAdapter
     public function delete(PostVariant $variant): void;
 
     /**
-     * Renews the channel's token where the platform supports it, saves and
-     * returns the channel. Where a token cannot be renewed the adapter marks
-     * the channel with Channel::markNeedsReconnect() and returns it.
+     * Checks the channel's token with the platform: renews it where the
+     * platform supports that, records the permissions and the expiry the
+     * platform reports, saves and returns the channel. Run for every active
+     * channel about once a day by CheckChannelTokenJob.
+     *
+     * The adapter marks the channel with Channel::markNeedsReconnect() only
+     * on a definite answer: the platform says the token is not valid or has
+     * expired, or names the token's permissions and one that publishing
+     * needs is not among them. A mark stops the channel from publishing, so
+     * anything less than that (an outage, a rate limit, an answer that does
+     * not say) is a ChannelException and leaves the channel as it was.
      *
      * @throws ChannelException
      */

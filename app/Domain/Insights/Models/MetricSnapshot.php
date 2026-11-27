@@ -2,6 +2,7 @@
 
 namespace App\Domain\Insights\Models;
 
+use App\Domain\Channels\Contracts\Metric;
 use App\Domain\Channels\Contracts\MetricReading;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Insights\EngagementScore;
@@ -44,11 +45,12 @@ use InvalidArgumentException;
  * @property int|null $clicks
  * @property int|null $reach
  * @property bool $is_latest
+ * @property array<string, string>|null $carried metric name to the time (ISO 8601, UTC) since which its number is carried forward because the platform stopped giving it; see record()
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  * @property-read PostVariant|null $variant
  */
-#[Fillable(['post_variant_id', 'captured_at', 'checked_at', 'reactions', 'comments', 'shares', 'clicks', 'reach', 'is_latest'])]
+#[Fillable(['post_variant_id', 'captured_at', 'checked_at', 'reactions', 'comments', 'shares', 'clicks', 'reach', 'carried', 'is_latest'])]
 #[UseFactory(MetricSnapshotFactory::class)]
 class MetricSnapshot extends Model
 {
@@ -76,6 +78,7 @@ class MetricSnapshot extends Model
             'clicks' => 'integer',
             'reach' => 'integer',
             'is_latest' => 'boolean',
+            'carried' => 'array',
         ];
     }
 
@@ -118,10 +121,22 @@ class MetricSnapshot extends Model
      * Calling it twice with the same reading changes nothing the second
      * time, apart from checked_at.
      *
+     * $claimed are the metrics the channel can still read (the caller's
+     * ReadsMetrics::metricsFor()). A number the variant has for one of them
+     * is never replaced by "not given": when the reading lacks it, the
+     * number of the newest row is carried forward, and `carried` on the row
+     * says since when. Platforms leave numbers out for reasons that say
+     * nothing about the post: a metric that was renamed, a permission that
+     * was withdrawn on their side, an empty answer. A metric that is not in
+     * $claimed is stored as the reading has it, so a number does become
+     * "not given" once the channel no longer lists the metric.
+     *
+     * @param  list<Metric>  $claimed
+     *
      * @throws InvalidArgumentException when the variant is not published
      * @throws CrossWorkspaceWrite when the variant belongs to another workspace
      */
-    public static function record(PostVariant $variant, MetricReading $reading, ?DateTimeInterface $at = null): ?static
+    public static function record(PostVariant $variant, MetricReading $reading, ?DateTimeInterface $at = null, array $claimed = []): ?static
     {
         static::guardWorkspace($variant);
 
@@ -135,18 +150,39 @@ class MetricSnapshot extends Model
 
         $at = CarbonImmutable::instance($at ?? now())->utc();
 
-        return DB::transaction(function () use ($variant, $reading, $at): static {
+        return DB::transaction(function () use ($variant, $reading, $at, $claimed): static {
             $latest = static::query()
                 ->where('post_variant_id', $variant->id)
                 ->current()
                 ->lockForUpdate()
                 ->first();
 
+            $numbers = $reading->toArray();
+            $carried = [];
+
+            foreach ($latest === null ? [] : $claimed as $metric) {
+                $known = $latest->reading()->get($metric);
+
+                if ($numbers[$metric->value] === null && $known !== null) {
+                    $numbers[$metric->value] = $known;
+                    $carried[$metric->value] = $latest->carried[$metric->value] ?? $at->toIso8601String();
+                }
+            }
+
+            ksort($carried);
+            $reading = new MetricReading(...$numbers);
+            $carried = $carried === [] ? null : $carried;
+
             if ($latest !== null && $latest->reading()->equals($reading)) {
                 if ($at->greaterThan($latest->checked_at)) {
                     $latest->checked_at = $at;
-                    $latest->save();
                 }
+
+                if ($latest->carried !== $carried) {
+                    $latest->carried = $carried;
+                }
+
+                $latest->save();
 
                 return $latest;
             }
@@ -161,8 +197,21 @@ class MetricSnapshot extends Model
                 'captured_at' => $at,
                 'checked_at' => $at,
                 ...$reading->toArray(),
+                'carried' => $carried,
                 'is_latest' => true,
             ]);
         });
+    }
+
+    /**
+     * Since when the number of a metric on this row is the last one the
+     * platform gave and not one it gave at checked_at. Null when the
+     * platform gave it at checked_at, or the row has no such number.
+     */
+    public function carriedSince(Metric $metric): ?CarbonImmutable
+    {
+        $since = $this->carried[$metric->value] ?? null;
+
+        return is_string($since) ? CarbonImmutable::parse($since)->utc() : null;
     }
 }

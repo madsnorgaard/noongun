@@ -5,6 +5,7 @@ use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Contracts\Metric;
 use App\Domain\Channels\Contracts\MetricReading;
+use App\Domain\Channels\Contracts\RateLimit;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Content\PostState;
@@ -17,6 +18,7 @@ use App\Domain\Workspaces\Models\Workspace;
 use Illuminate\Console\Scheduling\Event as ScheduledEvent;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Queue;
 use Laravel\Horizon\ProvisioningPlan;
 
@@ -75,10 +77,67 @@ it('reads a post once a day after its first day, and stops after three weeks', f
     $secondDue = variantAged('30 hours', '24 hours');
     $lastDay = variantAged('20 days 23 hours', '2 days');
     $old = variantAged('21 days 1 hour', '5 days');
-    $ancient = variantAged('90 days');
+    $ancient = variantAged('90 days', '80 days');
 
     expect(dueNow($this->channel))->toEqualCanonicalizing([$secondDue->id, $lastDay->id])
         ->not->toContain($second->id, $old->id, $ancient->id);
+});
+
+it('reads a post that was never read once, when it is older than the cadence reaches and younger than a year', function () {
+    $fresh = variantAged('2 hours');
+    $lastMonth = variantAged('30 days');
+    $lastSpring = variantAged('200 days');
+    $overAYear = variantAged('366 days');
+    $readBefore = variantAged('40 days', '39 days');
+
+    // Inside the cadence first, then the never read ones, newest first.
+    expect(dueNow($this->channel))->toBe([$fresh->id, $lastMonth->id, $lastSpring->id])
+        ->not->toContain($overAYear->id, $readBefore->id)
+        ->and(dueNow($this->channel, 2))->toBe([$fresh->id, $lastMonth->id]);
+
+    // Asked once, with or without an answer: never again.
+    $this->fake->reads($lastMonth, ['reactions' => 3]);
+    runFetchMetrics($this->channel);
+
+    expect($this->fake->lastMetricBatch())->toEqualCanonicalizing([$fresh->id, $lastMonth->id, $lastSpring->id])
+        ->and(snapshotsOf($lastMonth))->toHaveCount(1)
+        ->and(snapshotsOf($lastSpring))->toBe([]);
+
+    $this->travel(3)->days();
+
+    expect(dueNow($this->channel))->toBe([$fresh->id]);
+});
+
+it('follows the configured age for the one reading of old posts, and none when it is zero', function () {
+    $lastMonth = variantAged('30 days');
+    $lastSpring = variantAged('200 days');
+
+    config(['noongun.insights.backfill_days' => 60]);
+    expect(dueNow($this->channel))->toBe([$lastMonth->id]);
+
+    config(['noongun.insights.backfill_days' => 0]);
+    expect(dueNow($this->channel))->toBe([]);
+
+    // Not longer back than the cadence reaches: nothing to add.
+    config(['noongun.insights.backfill_days' => 21]);
+    expect(dueNow($this->channel))->toBe([]);
+
+    $this->artisan('noongun:poll-metrics')->expectsOutputToContain('Queued a reading for 0 channel(s).')->assertSuccessful();
+});
+
+it('keeps the one reading of old posts inside the share of the rate limit', function () {
+    $this->fake->withRateLimit(new RateLimit(maxCalls: 20, perSeconds: 86400), callsPerVariant: 2);
+
+    foreach (range(1, 5) as $i) {
+        variantAged((30 + $i).' days');
+    }
+
+    // 20 percent of 20 calls is 4 calls, and a variant costs 2.
+    runFetchMetrics($this->channel);
+    runFetchMetrics($this->channel);
+
+    $this->fake->assertMetricsFetchedTimes(1);
+    expect($this->fake->lastMetricBatch())->toHaveCount(2);
 });
 
 it('never lists a variant that is not published, whatever the state of its post', function () {
@@ -113,8 +172,9 @@ it('gives the variants that waited longest first, up to the limit', function () 
         ->and(dueNow($this->channel, 0))->toBe([]);
 });
 
-it('follows the configured cadence, and falls back to the default when it makes no sense', function () {
-    config(['noongun.insights.cadence' => ' 48:30 , 2:5,nonsense,0:10,7:0']);
+it('follows the configured cadence', function () {
+    config(['noongun.insights.cadence' => ' 48:30 , 2:5 ', 'noongun.insights.backfill_days' => 0]);
+    Log::spy();
 
     expect(InsightsConfig::cadence())->toBe([
         ['until_hours' => 2, 'every_minutes' => 5],
@@ -128,12 +188,44 @@ it('follows the configured cadence, and falls back to the default when it makes 
     expect(dueNow($this->channel))->toBe([$young->id])
         ->not->toContain($older->id, $tooOld->id);
 
-    config(['noongun.insights.cadence' => 'never']);
+    Log::shouldNotHaveReceived('warning');
+});
 
-    expect(InsightsConfig::cadence())->toBe([
+it('uses the whole default cadence when any pair cannot be read, and says so once', function (string $configured) {
+    config(['noongun.insights.cadence' => $configured]);
+
+    $logged = [];
+    Log::listen(function ($message) use (&$logged) {
+        $logged[] = $message->level.': '.$message->message;
+    });
+
+    $default = [
         ['until_hours' => 24, 'every_minutes' => 60],
         ['until_hours' => 504, 'every_minutes' => 1440],
-    ]);
+    ];
+
+    // Not "the pairs that could be read": 24:60,504:1440m would then mean
+    // one day of readings instead of three weeks.
+    expect(InsightsConfig::cadence())->toBe($default)
+        ->and(InsightsConfig::cadence())->toBe($default)
+        ->and(InsightsConfig::stopAfterHours())->toBe(504)
+        ->and($logged)->toHaveCount(1)
+        ->and($logged[0])->toStartWith('warning: NOONGUN_INSIGHTS_CADENCE cannot be read');
+})->with([
+    'a unit on a number' => ['24:60,504:1440m'],
+    'a word' => ['never'],
+    'a pair of zero' => ['24:60,0:10'],
+    'a pair without minutes' => ['24:60,504'],
+    'an empty pair' => ['24:60,,504:1440'],
+]);
+
+it('uses the default cadence without a word when none is configured', function () {
+    config(['noongun.insights.cadence' => '']);
+    Log::spy();
+
+    expect(InsightsConfig::stopAfterHours())->toBe(504);
+
+    Log::shouldNotHaveReceived('warning');
 });
 
 it('queues one job for each channel that has something due', function () {
@@ -143,7 +235,8 @@ it('queues one job for each channel that has something due', function () {
     variantAged('2 hours');
 
     $nothingDue = channelIn($this->workspace);
-    publishedVariant($this->workspace, $nothingDue, now()->subDays(60));
+    $read = publishedVariant($this->workspace, $nothingDue, now()->subDays(60));
+    DB::table('post_variants')->where('id', $read->id)->update(['metrics_checked_at' => now()->subDays(40)]);
 
     $otherWorkspace = Workspace::factory()->create();
     $otherChannel = channelIn($otherWorkspace);

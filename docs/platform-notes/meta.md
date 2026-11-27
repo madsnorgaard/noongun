@@ -826,3 +826,30 @@ developers.facebook.com/docs/graph-api/reference/v27.0/object/comments
    `FACEBOOK_SCOPES` would have refused the connect of every Page whose owner declines
    it, and `refreshToken()` would have marked every Page connected before the change
    as needing a reconnect.
+
+## 2026-11-27 - changes after review of the metrics adapter
+
+No new reading of the documentation; these follow from what the entries above could
+not settle.
+
+1. **A permission error on one post is about that post.** Error 10 or 200 to 299 on
+   the read of a post gives no reading for it. Only when every post of a call answers
+   that way does the call fail as a missing permission. Decision 4 of the entry above
+   still holds for a refused token and a rate limit.
+2. **Reach and clicks a post already has survive an insights read that gives
+   nothing.** Because the documentation says a missing `read_insights` answers with an
+   empty dataset, and a retired metric name fails the whole insights read with error
+   100, both would otherwise have emptied the numbers of every recent post within a
+   day. The adapter still reports them as not given; `MetricSnapshot::record()` keeps
+   the stored number while the Page is recorded as having the permission (ADR 0016).
+3. **`debug_token` is asked once a day for each connected Page**
+   (`noongun:check-channel-tokens`). `data.is_valid` must be a boolean to count: `false`
+   marks the Page, a missing value is a failed check. `data.scopes` replaces the
+   recorded permissions when it is there, and a required one missing from it marks the
+   Page; an answer without `scopes` proves nothing. An error on the call itself is
+   about the app token it is made with, never about the Page.
+4. **The id of a post must be digits, or digits joined by one underscore, to the last
+   character** (`\A...\z`). `publish()` treats any other id in Facebook's answer as an
+   unknown outcome and stores nothing; `delete()` refuses to send one.
+5. **Text from Facebook is cut**: the message at 300 characters, type and trace id at
+   64. The refusal of the insights of a Page is logged once a day.

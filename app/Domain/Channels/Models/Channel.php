@@ -36,6 +36,7 @@ use SensitiveParameter;
  * @property CarbonImmutable|null $token_expires_at
  * @property list<string> $scopes
  * @property ChannelStatus $status
+ * @property CarbonImmutable|null $token_checked_at when the platform was last asked about the token; written only by CheckChannelTokenJob
  * @property CarbonImmutable|null $created_at
  * @property CarbonImmutable|null $updated_at
  */
@@ -71,6 +72,7 @@ class Channel extends Model
             'access_token' => 'encrypted',
             'refresh_token' => 'encrypted',
             'token_expires_at' => 'datetime',
+            'token_checked_at' => 'datetime',
             'scopes' => 'array',
             'status' => ChannelStatus::class,
         ];

@@ -18,6 +18,11 @@ use Illuminate\Database\Eloquent\Collection;
  * than the step for its age allows, or never. The ones that waited longest
  * come first. Whether the channel may be read at all is not decided here.
  *
+ * A variant that is older than the cadence reaches is due once, when it was
+ * never asked about and is not older than InsightsConfig::backfillDays().
+ * That fills the time before insights existed. Such variants come after
+ * the ones inside the cadence, newest first.
+ *
  * A variant whose post the platform has reported as gone
  * InsightsConfig::goneAfter() times in a row is never due again, until a
  * reading or a new connection of the channel sets the count back.
@@ -37,8 +42,16 @@ final class DueVariants
             return new Collection;
         }
 
+        $now = CarbonImmutable::instance($now ?? now())->utc();
+        $stopped = $now->subHours(InsightsConfig::stopAfterHours());
+
+        // Posts inside the cadence first. The ones that are only read once
+        // because they were never read come after them, newest first, so a
+        // long history never keeps a fresh post waiting.
         return $this->query($channel, $now)
+            ->orderByRaw('case when post_variants.published_at <= ? then 1 else 0 end', [$stopped])
             ->orderByRaw('post_variants.metrics_checked_at asc nulls first')
+            ->orderByRaw('case when post_variants.published_at <= ? then post_variants.published_at end desc nulls last', [$stopped])
             ->orderBy('post_variants.id')
             ->limit($limit)
             ->get();
@@ -69,11 +82,25 @@ final class DueVariants
             $olderThanHours = $step['until_hours'];
         }
 
+        $backfillDays = InsightsConfig::backfillDays();
+        $stopped = $now->subHours($olderThanHours);
+        $tooOld = $now->subDays($backfillDays);
+
         return PostVariant::query()
             ->where('post_variants.channel_id', $channel->id)
             ->whereNotNull('post_variants.external_id')
             ->where('post_variants.metrics_gone_count', '<', InsightsConfig::goneAfter())
-            ->where(function (Builder $due) use ($steps): void {
+            ->where(function (Builder $due) use ($steps, $backfillDays, $stopped, $tooOld): void {
+                // Older than the cadence reaches and never asked about:
+                // once, so the time before insights existed is not empty.
+                if ($backfillDays > 0 && $tooOld->lessThan($stopped)) {
+                    $due->orWhere(function (Builder $query) use ($stopped, $tooOld): void {
+                        $query->where('post_variants.published_at', '<=', $stopped)
+                            ->where('post_variants.published_at', '>', $tooOld)
+                            ->whereNull('post_variants.metrics_checked_at');
+                    });
+                }
+
                 foreach ($steps as $step) {
                     $due->orWhere(function (Builder $query) use ($step): void {
                         $query->where('post_variants.published_at', '>', $step['published_after'])

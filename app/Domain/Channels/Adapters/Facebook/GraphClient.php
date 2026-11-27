@@ -9,6 +9,7 @@ use GuzzleHttp\Psr7\Response as Psr7Response;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Str;
 use SensitiveParameter;
 
 /**
@@ -67,6 +68,12 @@ final class GraphClient
     private const NOT_FOUND_SUBCODE = 33;
 
     private const UNKNOWN_ALIAS_CODE = 803;
+
+    /** Most characters of an error message from Facebook that are kept. */
+    private const MESSAGE_LENGTH = 300;
+
+    /** Most characters of an error type or trace id that are kept. */
+    private const LABEL_LENGTH = 64;
 
     /** Headers in which Facebook says how long to wait. */
     private const WAIT_HEADERS = ['X-Business-Use-Case-Usage', 'Retry-After'];
@@ -321,15 +328,17 @@ final class GraphClient
 
         $code = is_numeric($error['code'] ?? null) ? (int) $error['code'] : null;
         $subcode = is_numeric($error['error_subcode'] ?? null) ? (int) $error['error_subcode'] : null;
-        $said = is_string($error['message'] ?? null) ? $this->scrub($error['message'], $secrets) : null;
+        // Text from Facebook is cut to a length that fits a log line and a
+        // row: an answer can be as long as its sender likes.
+        $said = $this->said($error['message'] ?? null, self::MESSAGE_LENGTH, $secrets);
 
         $context = [
             'endpoint' => $endpoint,
             'http_status' => $response->status(),
             'code' => $code,
             'subcode' => $subcode,
-            'type' => is_string($error['type'] ?? null) ? $error['type'] : null,
-            'fbtrace_id' => is_string($error['fbtrace_id'] ?? null) ? $error['fbtrace_id'] : null,
+            'type' => $this->said($error['type'] ?? null, self::LABEL_LENGTH, $secrets),
+            'fbtrace_id' => $this->said($error['fbtrace_id'] ?? null, self::LABEL_LENGTH, $secrets),
         ];
 
         $detail = $said === null ? '' : ' Facebook said: '.$said;
@@ -349,7 +358,7 @@ final class GraphClient
                 $this->platform,
                 'Facebook is limiting requests at the moment.'.$detail,
                 $this->retryAfter($response),
-                $context,
+                [...$context, 'rate_limited' => true],
             );
         }
 
@@ -362,7 +371,7 @@ final class GraphClient
                 $this->platform,
                 $response->status() === 429 ? 'Facebook is limiting requests at the moment.'.$detail : 'Facebook had a temporary problem.'.$detail,
                 $this->retryAfter($response),
-                $context,
+                $response->status() === 429 ? [...$context, 'rate_limited' => true] : $context,
             );
         }
 
@@ -389,6 +398,21 @@ final class GraphClient
         }
 
         return $failure::permanent($this->platform, 'Facebook refused the request.'.$detail, $context);
+    }
+
+    /**
+     * A text field of a Graph error, without credentials and no longer than
+     * $length characters. Null when Facebook sent none.
+     *
+     * @param  list<string>  $secrets
+     */
+    private function said(mixed $value, int $length, #[SensitiveParameter] array $secrets): ?string
+    {
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        return Str::limit($this->scrub($value, $secrets), $length);
     }
 
     /**
