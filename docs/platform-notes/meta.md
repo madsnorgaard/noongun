@@ -677,3 +677,41 @@ otherwise disallowed", 200 "Permissions error", 190 "Invalid OAuth 2.0 Access To
 - What does `POST /{page-id}/feed` answer for a `media_fbid` that does not exist? Use
   an invented id. The code and subcode belong in `error_photo_expired.json`.
 - How many photos does one post take?
+
+## 2026-11-27 - review fixes for the image path
+
+Nothing new was read in Meta's documentation. Three things changed after review.
+
+**No redirect is followed.** `GraphClient` sends every request with redirects turned
+off: the sign-in exchanges, `/me/accounts`, `debug_token`, the feed post, the photo
+upload and the delete. There is no batch call. Before this the HTTP client would have
+repeated a request at whatever address a 3xx named, and on a 307 or 308 with its body,
+which for an upload is the Page token, its proof and the image. Meta documents no
+redirect for the Graph API, so a 3xx is treated as an answer that was not expected:
+retryable for a call that is safe to repeat, and "outcome unknown" for a post.
+
+**The assumed limits say that they are assumed.** Ten images and 1000 characters of
+description stay the defaults; neither is from Meta. When Facebook refuses a post with
+several images, or a photo with a description, outright with code 100, the failure now
+adds which of the two limits it may be, that the figure is an assumption, and the name
+of the setting (`FACEBOOK_MAX_MEDIA_ITEMS`, `FACEBOOK_ALT_TEXT_LENGTH`). It says "is
+about" only when Facebook's own message names `attached_media` or `alt_text_custom`,
+and "one possible cause" otherwise, because the real wording of these refusals is not
+known. The log entry "Publishing a variant failed" carries Facebook's `code`,
+`subcode`, `fbtrace_id` and `suspected_limit`. A refusal of uploads that are old is
+still answered with one new upload first (2026-11-26, decision 9); the sentence about
+the limit comes with the refusal after that.
+
+**The spike covers the whole path.** `scripts/spike/07-upload-photo-post.sh` now takes
+every open question of the 2026-11-26 entry in one run and prints a summary to paste
+below. It has not been run.
+
+### Spike results for the image path
+
+To be filled in from the summary the script prints.
+
+- Date run, Graph version, app mode:
+- Summary (the JSON block):
+- Posts visible from a logged-out browser (with `SPIKE_PAUSE=1`):
+- What was changed afterwards (fixtures, `FACEBOOK_MAX_MEDIA_ITEMS`,
+  `FACEBOOK_ALT_TEXT_LENGTH`, the codes in `FacebookAdapter::PHOTO_PROBLEM_CODES`):

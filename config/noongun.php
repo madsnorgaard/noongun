@@ -102,11 +102,15 @@ return [
                 fn (string $type): string => strtolower(trim($type)),
                 explode(',', (string) env('FACEBOOK_MEDIA_TYPES', 'image/jpeg,image/png')),
             ))),
+            // An assumption, not a fact: Meta names no number. When
+            // Facebook refuses a post that may be over its real limit,
+            // the failure says so and names this setting.
             'max_media_items' => (int) env('FACEBOOK_MAX_MEDIA_ITEMS', 10),
             // "Files can not exceed 10MB."
             'max_media_bytes' => (int) env('FACEBOOK_MAX_MEDIA_BYTES', 10_000_000),
             // Meta names no limit in pixels. Empty means none.
             'max_media_pixels' => env('FACEBOOK_MAX_MEDIA_PIXELS'),
+            // An assumption as well: Meta names no length for a description.
             'alt_text_length' => (int) env('FACEBOOK_ALT_TEXT_LENGTH', 1000),
             // in_text: the link of a post with images is sent as the last
             // line of its text. Meta does not document "link" together

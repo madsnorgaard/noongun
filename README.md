@@ -236,14 +236,19 @@ What a Facebook Page takes, with the defaults (each is a setting, see
 | | Facebook Page |
 |---|---|
 | Types | JPEG and PNG |
-| Images on one post | 10 |
+| Images on one post | 10 (assumed) |
 | Size of one file | 10 MB |
-| Description of an image | 1000 characters |
+| Description of an image | 1000 characters (assumed) |
 | Image and link | The link is the last line of the text. No preview is shown. |
 
 The size of a file is what Meta documents. The number of images and the
-length of a description are not documented by Meta and are careful
-assumptions. Meta also says that a PNG above 1 MB "may appear pixelated", so
+length of a description are not documented by Meta: the two figures are
+assumptions, and nobody has tried them against Facebook yet. If Facebook
+refuses a post that may be over its real limit, the post fails with a
+message that says which of the two it may be and names the setting
+(`FACEBOOK_MAX_MEDIA_ITEMS` or `FACEBOOK_ALT_TEXT_LENGTH`). The code Facebook
+gave is in the application log, in the entry "Publishing a variant failed".
+Lower the setting to what Facebook turned out to take. Meta also says that a PNG above 1 MB "may appear pixelated", so
 a large photo is better uploaded as JPEG.
 
 Each image goes to Facebook as a photo that is not published, and one call
@@ -1000,10 +1005,10 @@ it there.
 | `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
 | `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
 | `FACEBOOK_MEDIA_TYPES` | `image/jpeg,image/png` | Image types a Page post may carry, comma separated. Empty turns images off for Facebook. |
-| `FACEBOOK_MAX_MEDIA_ITEMS` | `10` | Most images on one Page post. Meta documents no number. `0` turns images off for Facebook. |
+| `FACEBOOK_MAX_MEDIA_ITEMS` | `10` | Most images on one Page post. An assumption: Meta documents no number, and it has not been tried against Facebook. `0` turns images off for Facebook. |
 | `FACEBOOK_MAX_MEDIA_BYTES` | `10000000` | Largest file of one image for Facebook, in bytes. Meta says 10 MB. |
 | `FACEBOOK_MAX_MEDIA_PIXELS` | empty | Most pixels (width x height) of one image for Facebook. Meta names no limit; empty means none. |
-| `FACEBOOK_ALT_TEXT_LENGTH` | `1000` | Longest description of an image for Facebook, in characters. Meta documents no number. |
+| `FACEBOOK_ALT_TEXT_LENGTH` | `1000` | Longest description of an image for Facebook, in characters. An assumption: Meta documents no number, and it has not been tried against Facebook. |
 | `FACEBOOK_MEDIA_LINK_RULE` | `in_text` | What happens to the link of a Page post with images: `in_text` sends it as the last line of the text, `refused` holds such a post back. `both` sends the link beside the photos, which Meta does not document. |
 | `FACEBOOK_MEDIA_UPLOAD_LIFETIME` | `72000` | Seconds an uploaded photo may wait for its post before it is sent again. Facebook deletes an unpublished photo after about 24 hours. |
 | `FACEBOOK_MEDIA_UPLOAD_TRUSTED` | `900` | Seconds for which a fresh upload is taken as held by Facebook. When Facebook refuses a post, only photos older than this are sent again. |
