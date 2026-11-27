@@ -1,0 +1,8 @@
+{
+    "error": {
+        "message": "(#100) param attached_media has too many elements",
+        "type": "OAuthException",
+        "code": 100,
+        "fbtrace_id": "AtestTraceTooManyPhotos1"
+    }
+}

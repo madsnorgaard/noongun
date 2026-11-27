@@ -193,10 +193,23 @@ In the editor each channel has its own images under its text. Add them with
 the text. Each image gets a description for that channel, can be moved
 earlier or later and can be taken off. "Also add to" and "Add to all
 channels" put the same file on other channels without a second upload, and
-"Copy from another channel" copies the text, the images or both. A file is
-stored the moment it is uploaded, but it is on the post only once the draft
-is saved. A channel whose platform takes no images says so and offers no
-upload.
+"Copy from another channel" copies the text, the images or both. A channel
+whose platform takes no images says so and offers no upload.
+
+An image on several channels normally needs one description. What is typed
+for it in one column is typed in every other column where its description is
+still empty or still the same. A column whose description was changed on its
+own keeps its own, and "Use this description on all channels" brings them
+back in step. The order of the images is kept per channel; "Use this order on
+all channels" makes the others follow.
+
+A file is stored the moment it is uploaded, but it is on the post only once
+the draft is saved. An upload that is on no saved post is removed after a
+day. One file is uploaded at a time for the whole page, and the same file is
+not sent twice from one page. The limit for an upload is the limit of this
+instance; what a platform takes is held against the stored image, which is
+resized and encoded again and is usually much smaller than the file that was
+sent. A post with images still needs a text.
 
 What happens to an upload:
 
@@ -236,14 +249,19 @@ What a Facebook Page takes, with the defaults (each is a setting, see
 | | Facebook Page |
 |---|---|
 | Types | JPEG and PNG |
-| Images on one post | 10 |
+| Images on one post | 10 (assumed) |
 | Size of one file | 10 MB |
-| Description of an image | 1000 characters |
+| Description of an image | 1000 characters (assumed) |
 | Image and link | The link is the last line of the text. No preview is shown. |
 
 The size of a file is what Meta documents. The number of images and the
-length of a description are not documented by Meta and are careful
-assumptions. Meta also says that a PNG above 1 MB "may appear pixelated", so
+length of a description are not documented by Meta: the two figures are
+assumptions, and nobody has tried them against Facebook yet. If Facebook
+refuses a post that may be over its real limit, the post fails with a
+message that says which of the two it may be and names the setting
+(`FACEBOOK_MAX_MEDIA_ITEMS` or `FACEBOOK_ALT_TEXT_LENGTH`). The code Facebook
+gave is in the application log, in the entry "Publishing a variant failed".
+Lower the setting to what Facebook turned out to take. Meta also says that a PNG above 1 MB "may appear pixelated", so
 a large photo is better uploaded as JPEG.
 
 Each image goes to Facebook as a photo that is not published, and one call
@@ -260,10 +278,12 @@ exists.
 
 #### Images on LinkedIn
 
-A LinkedIn text takes up to 20 images, as JPEG or PNG, each of at most 5 MB
-and fewer than 36,152,320 pixels, with a description of up to 4086
-characters. The 5 MB is a careful assumption: LinkedIn documents no size, see
-`LINKEDIN_MAX_IMAGE_BYTES`.
+A LinkedIn text takes up to 20 images, as JPEG or PNG, each of fewer than
+36,152,320 pixels, with a description of up to 4086 characters. LinkedIn
+documents no size in bytes, so Noon Gun holds no image back for its size:
+when LinkedIn finds a file too large, the post fails with a message that
+names the image and says to put a smaller copy on. Set
+`LINKEDIN_MAX_IMAGE_BYTES` to refuse large images before approval instead.
 
 - A LinkedIn post shows images or a link card, never both. With images the
   link goes out as the last line of the text, and the title and description
@@ -276,6 +296,11 @@ characters. The 5 MB is a careful assumption: LinkedIn documents no size, see
   the address the file goes to. Noon Gun sends the file and the access token
   there only when it is a plain HTTPS address on a host in
   `LINKEDIN_UPLOAD_HOSTS`, and fails the post otherwise.
+- LinkedIn allows 150 calls a day for one member. A text post is one call.
+  An image costs two more, so a post with four images is nine calls and a
+  post with twenty is 41. Noon Gun does not count the calls. When LinkedIn
+  turns one away, the post waits and is tried again like after any rate
+  limit, and what was already sent is not sent again.
 - Noon Gun cannot ask LinkedIn whether it has finished with an image: the
   permission a personal profile gives does not allow it. The post is created
   straight after the upload. When LinkedIn refuses it and says an image is
@@ -1000,10 +1025,10 @@ it there.
 | `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
 | `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
 | `FACEBOOK_MEDIA_TYPES` | `image/jpeg,image/png` | Image types a Page post may carry, comma separated. Empty turns images off for Facebook. |
-| `FACEBOOK_MAX_MEDIA_ITEMS` | `10` | Most images on one Page post. Meta documents no number. `0` turns images off for Facebook. |
+| `FACEBOOK_MAX_MEDIA_ITEMS` | `10` | Most images on one Page post. An assumption: Meta documents no number, and it has not been tried against Facebook. `0` turns images off for Facebook. |
 | `FACEBOOK_MAX_MEDIA_BYTES` | `10000000` | Largest file of one image for Facebook, in bytes. Meta says 10 MB. |
 | `FACEBOOK_MAX_MEDIA_PIXELS` | empty | Most pixels (width x height) of one image for Facebook. Meta names no limit; empty means none. |
-| `FACEBOOK_ALT_TEXT_LENGTH` | `1000` | Longest description of an image for Facebook, in characters. Meta documents no number. |
+| `FACEBOOK_ALT_TEXT_LENGTH` | `1000` | Longest description of an image for Facebook, in characters. An assumption: Meta documents no number, and it has not been tried against Facebook. |
 | `FACEBOOK_MEDIA_LINK_RULE` | `in_text` | What happens to the link of a Page post with images: `in_text` sends it as the last line of the text, `refused` holds such a post back. `both` sends the link beside the photos, which Meta does not document. |
 | `FACEBOOK_MEDIA_UPLOAD_LIFETIME` | `72000` | Seconds an uploaded photo may wait for its post before it is sent again. Facebook deletes an unpublished photo after about 24 hours. |
 | `FACEBOOK_MEDIA_UPLOAD_TRUSTED` | `900` | Seconds for which a fresh upload is taken as held by Facebook. When Facebook refuses a post, only photos older than this are sent again. |
@@ -1011,9 +1036,9 @@ it there.
 | `LINKEDIN_API_VERSION` | `202611` | Value of the `Linkedin-Version` header on every LinkedIn API call, `YYYYMM`. LinkedIn refuses a version about a year after it came out. |
 | `LINKEDIN_SCOPES` | `openid,profile,w_member_social` | Permissions requested when a profile is connected, comma separated. |
 | `LINKEDIN_API_URL`, `LINKEDIN_WEB_URL` | `https://api.linkedin.com`, `https://www.linkedin.com` | Base addresses of the API and of the sign-in. Must be HTTPS. Change only for testing. |
-| `LINKEDIN_UPLOAD_HOSTS` | `linkedin.com` | Hosts an image may be uploaded to, comma separated. Each name allows itself and every name below it. LinkedIn names the upload address in a response; the image and the access token are sent only to an HTTPS address on one of these hosts. Add a host only when the log shows that LinkedIn uses it. |
+| `LINKEDIN_UPLOAD_HOSTS` | `linkedin.com` | Hosts an image may be uploaded to, comma separated. Each name allows itself and every name below it, and must have at least two parts (`linkedin.com`, never `com`). LinkedIn names the upload address in a response; the image and the access token are sent only to an HTTPS address on one of these hosts. A list that is empty or holds anything else allows nothing, and uploads fail with a message that names this setting. Add a host only when the log shows that LinkedIn uses it. |
 | `LINKEDIN_MAX_IMAGES` | `20` | Most images on one LinkedIn text. `NOONGUN_MEDIA_MAX_PER_VARIANT` applies as well. |
-| `LINKEDIN_MAX_IMAGE_BYTES` | `5242880` | Largest image a LinkedIn text may carry, in bytes. LinkedIn documents no size; 5 MB is a careful assumption. |
+| `LINKEDIN_MAX_IMAGE_BYTES` | empty | Largest image a LinkedIn text may carry, in bytes. Empty: no limit, because LinkedIn documents none; an image LinkedIn finds too large then fails when it is uploaded. Set it to hold such images back before approval. |
 | `LINKEDIN_MAX_IMAGE_PIXELS` | `36152319` | Most pixels of one image on a LinkedIn text. LinkedIn takes "less than 36,152,320". |
 | `LINKEDIN_ALT_TEXT_LENGTH` | `4086` | Longest description of an image on a LinkedIn text, in characters. |
 | `LINKEDIN_IMAGE_LIFETIME` | `86400` | Seconds an image that was sent to LinkedIn is used for a later attempt before it is sent again. LinkedIn does not say how long it keeps an image that is on no post. |

@@ -65,6 +65,8 @@ export type PostVariant = {
     link_description: string | null;
     /** The link with its campaign parameters, as the platform gets it. */
     link_as_sent: string | null;
+    /** The campaign parameters put on the link, as a query. Null without any. */
+    link_campaign: string | null;
     /** The images in the order they are shown. */
     media: AttachedMedia[];
     media_rules: MediaRules;

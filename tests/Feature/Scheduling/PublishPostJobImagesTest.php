@@ -525,7 +525,7 @@ describe('images that cannot go out', function () {
         runPublishJob($job);
 
         expect($this->fake->calls)->toBe([])
-            ->and(variantsOf($post)[0]->error)->toContain('has 2 images. Facebook takes 1 at most.');
+            ->and(variantsOf($post)[0]->error)->toContain('has 2 images. Noon Gun sends 1 at most to Facebook on one post.');
     });
 });
 

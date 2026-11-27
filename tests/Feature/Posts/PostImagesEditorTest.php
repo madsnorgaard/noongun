@@ -2,6 +2,7 @@
 
 use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Content\Models\Post;
+use App\Domain\Content\PostPreconditions;
 use App\Domain\Content\PostState;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
@@ -205,7 +206,7 @@ describe('advice and problems for the column and the image they concern', functi
                     "variants.{$alpha}.media.{$this->harbour->id}.alt_text" => ['Image 1 for Alpha has no description. People who use a screen reader will not know what it shows.'],
                 ])
                 ->where('post.problems', [
-                    "variants.{$alpha}.media.{$this->gull->id}.alt_text" => ['The description of image 2 for Alpha is 52 characters long. The limit is 20.'],
+                    "variants.{$alpha}.media.{$this->gull->id}.alt_text" => ['The description of image 2 for Alpha is 52 characters long. Noon Gun sends 20 at most to Facebook. Shorten it.'],
                 ]));
 
         // With the description shortened only the advice is left, and the
@@ -249,7 +250,7 @@ describe('advice and problems for the column and the image they concern', functi
         $this->actingAs($this->owner)->get(route('posts.show', $post->id))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('post.problems', [
-                    "variants.{$alpha}.media" => ['The text for Alpha has 4 images. Facebook takes 3 at most.'],
+                    "variants.{$alpha}.media" => ['The text for Alpha has 4 images. Noon Gun sends 3 at most to Facebook on one post. Take 1 off.'],
                     "variants.{$quiet}.media" => ['Images cannot be published to LinkedIn from this instance. Take the images off the text for Quiet.'],
                 ])
                 ->where('post.can.approve', true));
@@ -271,7 +272,7 @@ describe('advice and problems for the column and the image they concern', functi
         $this->actingAs($this->owner)->get(route('posts.show', $post->id))
             ->assertInertia(fn (Assert $page) => $page
                 ->where('post.problems', [
-                    "variants.{$variant->id}.media.{$large->id}" => ['Image 2 for Alpha is 3 MB. Facebook takes 1 MB at most.'],
+                    "variants.{$variant->id}.media.{$large->id}" => ['Image 2 for Alpha is stored at 3 MB. Noon Gun sends 1 MB at most to Facebook for one image. Take it off and add it again with fewer pixels.'],
                 ])
                 ->where('post.variants.0.media.1.byte_size', 3 * 1024 * 1024)
                 ->where('post.variants.0.media_rules.max_bytes', 1024 * 1024));
@@ -302,6 +303,97 @@ describe('advice and problems for the column and the image they concern', functi
                 ])
                 ->where('post.variants.0.media_rules.link_rule', 'in_text')
                 ->where('post.variants.0.link_as_sent', $link));
+    });
+});
+
+describe('sentences that say what will help', function () {
+    it('names the stored size of a PNG that is too large and says that JPEG or fewer pixels will help', function () {
+        // 10,000,000 bytes is written "10 MB", and so is 10 x 1024 x 1024.
+        $this->facebook->acceptingImages(max: 3, maxBytes: 10_000_000);
+
+        $png = storedImage($this->workspace, pngBytes(), ['byte_size' => 12_345_678]);
+        $post = postInState($this->workspace, PostState::Draft, [$this->alpha]);
+        $variant = editorVariant($post, $this->alpha);
+
+        attachImage($variant, $png, 'A drawing.');
+
+        $this->actingAs($this->owner)->get(route('posts.show', $post->id))
+            ->assertInertia(fn (Assert $page) => $page->where('post.problems', [
+                "variants.{$variant->id}.media.{$png->id}" => ['Image 1 for Alpha is stored as a PNG file of 12.3 MB. Noon Gun sends 10 MB at most to Facebook for one image. Take it off and add it again as a JPEG, or with fewer pixels.'],
+            ]));
+    });
+
+    it('writes a size the same way everywhere', function (int $bytes, string $written) {
+        expect(PostPreconditions::megabytes($bytes))->toBe($written);
+    })->with([
+        'whole binary megabytes' => [20 * 1024 * 1024, '20'],
+        'whole decimal megabytes' => [10_000_000, '10'],
+        'the size of a file' => [2_512_345, '2.5'],
+        'a small file' => [40_000, '0'],
+    ]);
+
+    it('says plainly that a text is needed for now when a text has images and no words', function () {
+        $post = postInState($this->workspace, PostState::Draft, [$this->alpha, $this->bravo]);
+
+        DB::table('post_variants')->where('post_id', $post->id)->update(['body' => '  ']);
+        attachImage(editorVariant($post, $this->alpha), $this->harbour, 'A harbour.');
+
+        $alpha = editorVariant($post, $this->alpha)->id;
+        $bravo = editorVariant($post, $this->bravo)->id;
+
+        $this->actingAs($this->owner)->get(route('posts.show', $post->id))
+            ->assertInertia(fn (Assert $page) => $page->where('post.problems', [
+                "variants.{$alpha}.body" => ['Facebook posts need a text for now, even with images. Write a text for Alpha.'],
+                "variants.{$bravo}.body" => ['The text for Bravo is empty.'],
+            ]));
+    });
+
+    it('gives the campaign parameters of a text, and says when the link would go out twice', function () {
+        $post = postInState($this->workspace, PostState::Draft, [$this->alpha, $this->bravo]);
+        $alpha = editorVariant($post, $this->alpha);
+
+        DB::table('post_variants')->where('id', $alpha->id)->update([
+            'body' => "Fresh bread from eight.\n\nhttps://example.com/bread",
+            'link' => 'https://example.com/bread',
+            'utm' => json_encode(['utm_source' => 'noon gun', 'utm_medium' => 'social']),
+        ]);
+        attachImage($alpha, $this->harbour, 'A harbour.');
+
+        $this->actingAs($this->owner)->get(route('posts.show', $post->id))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('post.variants.0.link_campaign', 'utm_source=noon%20gun&utm_medium=social')
+                ->where('post.variants.0.link_as_sent', 'https://example.com/bread?utm_source=noon%20gun&utm_medium=social')
+                ->where('post.variants.1.link_campaign', null)
+                ->where('post.advice', [
+                    "variants.{$alpha->id}.link" => ['The text for Alpha already ends with its link. With an image the link is added once more as the last line, with its campaign parameters. Take the link out of the text.'],
+                ]));
+
+        // Without campaign parameters the link is not repeated, and the
+        // advice is the ordinary one.
+        DB::table('post_variants')->where('id', $alpha->id)->update(['utm' => null]);
+
+        $this->get(route('posts.show', $post->id))
+            ->assertInertia(fn (Assert $page) => $page->where('post.advice', [
+                "variants.{$alpha->id}.link" => ['With an image, Facebook shows no preview of the link. The link for Alpha goes out as the last line of the text.'],
+            ]));
+    });
+});
+
+describe('sending again', function () {
+    it('tells the page whether a failed text may be public or certainly is not', function () {
+        $post = postInState($this->workspace, PostState::Failed, [$this->alpha, $this->bravo]);
+        $unsure = editorVariant($post, $this->alpha);
+
+        DB::table('post_variants')->where('post_id', $post->id)->update(['error' => 'An image could not be sent.', 'outcome_unknown_since' => null]);
+        DB::table('post_variants')->where('id', $unsure->id)->update(['error' => null, 'outcome_unknown_since' => now()]);
+
+        $this->actingAs($this->owner)->get(route('posts.show', $post->id))
+            ->assertInertia(fn (Assert $page) => $page
+                ->where('post.can.retry', true)
+                ->where('post.variants.0.outcome_unknown', true)
+                ->where('post.variants.0.published', false)
+                ->where('post.variants.1.outcome_unknown', false)
+                ->where('post.variants.1.error', 'An image could not be sent.'));
     });
 });
 

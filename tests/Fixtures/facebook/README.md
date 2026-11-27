@@ -110,3 +110,21 @@ Not in a file, but assumed by the tests:
   tests use other numbers on purpose, so that nothing depends on the defaults.
 - **Errors of the upload** other than 324 use the fixtures of the feed call: the same
   envelope is assumed for both edges.
+
+### Refusals over an assumed limit (2026-11-27)
+
+| File | Documented or assumed |
+|---|---|
+| `error_too_many_photos.json` | **Assumed throughout.** Meta documents no limit for the photos of one post and no error for going over it. Code 100 and a message that names `attached_media` are a guess at what such a refusal looks like. |
+| `error_alt_text_too_long.json` | **Assumed throughout.** Meta documents no length for `alt_text_custom` and no error for a longer one. Code 100 and a message that names `alt_text_custom` are a guess. |
+
+The adapter does not depend on either guess being right. Any outright refusal
+with code 100 of a post with several images, or of a photo with a description,
+gets the sentence about the assumed limit; the name of the parameter in
+Facebook's words only decides whether that sentence says "is about" or "one
+possible cause". Steps 6 and 7 of `scripts/spike/07-upload-photo-post.sh`
+record the real answers.
+
+**Redirects.** The tests answer some calls with a 301, 302, 307 or 308 and a
+`Location`. Meta documents no redirect for the Graph API; the answers exist to
+prove that none is followed.

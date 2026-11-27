@@ -108,6 +108,8 @@ function fakeGraph(array $responses = []): void
 {
     $uploads = &facebookUploadLog();
     $uploads = [];
+    $sent = &facebookOptionsLog();
+    $sent = [];
 
     $responses += [
         'code' => 'oauth_code_exchange',
@@ -121,8 +123,10 @@ function fakeGraph(array $responses = []): void
 
     Http::preventStrayRequests();
 
-    Http::fake(function (Request $request, array $options = []) use ($responses, &$uploads) {
+    Http::fake(function (Request $request, array $options = []) use ($responses, &$uploads, &$sent) {
         expect($request->url())->toStartWith(FACEBOOK_TEST_GRAPH.'/');
+
+        $sent[] = ['method' => $request->method(), 'path' => (string) parse_url($request->url(), PHP_URL_PATH), 'options' => $options];
 
         $path = (string) parse_url($request->url(), PHP_URL_PATH);
 
@@ -245,4 +249,25 @@ function facebookMultipart(Request $request): array
     }
 
     return ['fields' => $fields, 'file' => $file];
+}
+
+/**
+ * @return list<array{method: string, path: string, options: array<string, mixed>}>
+ */
+function &facebookOptionsLog(): array
+{
+    static $log = [];
+
+    return $log;
+}
+
+/**
+ * Every call the faked Graph API received since fakeGraph(), with the
+ * options the HTTP client was given for it (timeout, allow_redirects).
+ *
+ * @return list<array{method: string, path: string, options: array<string, mixed>}>
+ */
+function facebookCalls(): array
+{
+    return facebookOptionsLog();
 }

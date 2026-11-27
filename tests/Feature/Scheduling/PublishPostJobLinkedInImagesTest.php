@@ -174,6 +174,32 @@ it('uploads nothing again when the post call was turned away, and creates the po
         ->and($posts)->toBe(2);
 });
 
+it('waits when LinkedIn limits the calls for an image, and loses nothing that was sent', function () {
+    Queue::fake();
+    $initialised = 0;
+    fakeLinkedIn(['images' => function () use (&$initialised) {
+        // The daily limit counts every call, and an image is two of them.
+        return ++$initialised === 2 ? linkedInResponse('error_rate_limit', 429) : linkedInUploadInitialised($initialised);
+    }]);
+
+    runPublishJob(($this->claim)());
+
+    [$variant] = variantsOf($this->post);
+
+    expect(freshPost($this->post)->state)->toBe(PostState::Publishing)
+        ->and($variant->hasUnknownOutcome())->toBeFalse()
+        ->and($variant->error)->toBe('LinkedIn is limiting requests at the moment. Try again later.')
+        ->and(($this->uploads)())->toBe([linkedInImageUrn(1), null]);
+
+    Http::assertNotSent(fn (Request $request) => $request->url() === LINKEDIN_TEST_API.'/rest/posts');
+
+    runPublishJob(Queue::pushed(PublishPostJob::class)->sole());
+
+    expect(freshPost($this->post)->state)->toBe(PostState::Published)
+        ->and(($this->uploads)())->toBe([linkedInImageUrn(1), linkedInImageUrn(3)])
+        ->and(Http::recorded(fn (Request $request) => $request->url() === LINKEDIN_TEST_API.'/rest/posts'))->toHaveCount(1);
+});
+
 it('waits and tries again when LinkedIn says an image is not ready, without calling the outcome unknown', function () {
     Queue::fake();
     $posts = 0;

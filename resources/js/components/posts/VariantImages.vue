@@ -5,8 +5,10 @@ import NativeSelect from '@/components/NativeSelect.vue';
 import ImageViewer from '@/components/posts/ImageViewer.vue';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { altFor, imageCount, megabytes, typeList } from '@/lib/media';
+import { altFor, imageCount, megabytes, typeList, typeName } from '@/lib/media';
 import { textLength } from '@/lib/posts';
+import { enqueue, fileKey, storedCopy } from '@/lib/uploadQueue';
+import type { UploadFailure, UploadState } from '@/lib/uploadQueue';
 import type {
     ChannelOption,
     MediaInput,
@@ -18,7 +20,9 @@ import type {
  * The images of one text in the editor: adding them, describing them,
  * putting them in order and taking them off. A file is stored the moment
  * it is uploaded, but it is on the post only once the draft is saved; the
- * page that holds the columns keeps the list and saves it.
+ * page that holds the columns keeps the list and saves it. What reaches
+ * into other columns (a description that several channels share, the same
+ * order everywhere) is asked of that page.
  */
 const props = defineProps<{
     channel: ChannelOption;
@@ -27,7 +31,7 @@ const props = defineProps<{
     library: Record<number, MediaItem>;
     /** The images this text has as it is saved. */
     savedIds: number[];
-    /** The other texts of the post that could take an image of this one. */
+    /** The other texts of the post, with the images they have. */
     others: {
         channel_id: number;
         name: string;
@@ -42,12 +46,19 @@ const props = defineProps<{
     problems: Record<string, string>;
     /** What the last save refused about the images of this text. */
     errors: string[];
+    /** Images the last save said no longer exist. */
+    goneIds: number[];
+    /** A description a model suggested with the draft. Offered, never filled in. */
+    suggestedAltText: string | null;
 }>();
 
 const emit = defineEmits<{
     uploaded: [image: MediaItem];
     share: [mediaId: number, channelIds: number[]];
     uploading: [count: number];
+    describe: [mediaId: number, text: string];
+    describeAll: [mediaId: number];
+    orderAll: [];
 }>();
 
 const media = defineModel<MediaInput[]>('media', { required: true });
@@ -71,20 +82,17 @@ const hasUnsaved = computed(() =>
     media.value.some((item) => !props.savedIds.includes(item.id)),
 );
 
-const limits = computed(() => {
-    const types = typeList(props.uploads.accept);
-    // The smaller of what this instance stores and what the platform takes.
-    const size = megabytes(
-        Math.min(
-            props.uploads.max_bytes,
-            rules.value.max_bytes ?? props.uploads.max_bytes,
-        ),
-    );
+const gone = computed(() =>
+    media.value.filter((item) => props.goneIds.includes(item.id)),
+);
 
-    return rules.value.max_items === 1
-        ? `1 image, ${types}, up to ${size} MB.`
-        : `Up to ${rules.value.max_items} images, ${types}, ${size} MB each.`;
-});
+// What can be uploaded is the limit of this instance. The limit of a
+// platform is held against the stored image, which is usually far smaller
+// than the file that was sent.
+const limits = computed(
+    () =>
+        `Noon Gun sends up to ${imageCount(rules.value.max_items)} to ${platform.value} on one post. ${typeList(props.uploads.accept)}, up to ${megabytes(props.uploads.max_bytes)} MB each. Each image is resized and stored again for publishing, so a large photo usually ends up much smaller.`,
+);
 
 // Read out politely: what was added, moved, removed or refused.
 const announcement = ref('');
@@ -104,6 +112,10 @@ function elementId(part: string, mediaId?: number): string {
         : `${part}-${props.channel.id}-${mediaId}`;
 }
 
+function names(list: { name: string }[]): string {
+    return list.map((each) => each.name).join(', ');
+}
+
 // Describing
 
 function altOver(item: MediaInput): number {
@@ -112,46 +124,99 @@ function altOver(item: MediaInput): number {
         : Math.max(0, textLength(item.alt_text.trim()) - altLimit.value);
 }
 
-function setAltText(mediaId: number, event: Event): void {
-    const text = (event.target as HTMLTextAreaElement).value;
+// The other channels that have this image, by whether what is typed here
+// is typed there too: their description is the same, or still empty.
+function sharing(item: MediaInput): {
+    together: { name: string }[];
+    apart: { name: string }[];
+} {
+    const together: { name: string }[] = [];
+    const apart: { name: string }[] = [];
 
-    media.value = media.value.map((item) =>
-        item.id === mediaId ? { ...item, alt_text: text } : item,
+    props.others.forEach((other) => {
+        const theirs = other.media.find((each) => each.id === item.id);
+
+        if (theirs) {
+            (theirs.alt_text === '' || theirs.alt_text === item.alt_text
+                ? together
+                : apart
+            ).push({ name: other.name });
+        }
+    });
+
+    return { together, apart };
+}
+
+function describeEverywhere(mediaId: number): void {
+    emit('describeAll', mediaId);
+    announce(
+        'The description is now the same on every channel that has this image.',
     );
+    focus(elementId('image-alt', mediaId));
+}
+
+function useSuggestion(mediaId: number): void {
+    if (props.suggestedAltText !== null) {
+        emit('describe', mediaId, props.suggestedAltText);
+        focus(elementId('image-alt', mediaId));
+    }
 }
 
 /**
  * Why this image cannot go out on this channel, from what is known of the
- * file. What only the server knows comes in with `problems`.
+ * stored file. What only the server knows comes in with `problems`. The
+ * next step is one that works: the stored file is not the file that was
+ * uploaded, so "a smaller file" may store at the same size. Fewer pixels
+ * do not, and neither does JPEG where the stored file is a PNG.
  */
 function fileProblem(item: MediaInput): string | null {
     const image = props.library[item.id];
+
+    if (props.goneIds.includes(item.id)) {
+        return 'This image is gone. An upload that is on no saved post is removed after a day. Take it off and add the file again.';
+    }
 
     if (!accepts.value) {
         return null;
     }
 
     if (image) {
+        const until = 'The post cannot be approved until it is taken off.';
+
         if (!rules.value.types.includes(image.mime)) {
-            return `${platform.value} does not take this type of image. The post cannot be approved until it is taken off. Add it again as ${typeList(rules.value.types)}.`;
+            return `Stored as a ${typeName(image.mime)} file, which is not sent to ${platform.value}. ${until} Add it again as ${typeList(rules.value.types)}.`;
         }
 
         if (
             rules.value.max_bytes !== null &&
             image.byte_size > rules.value.max_bytes
         ) {
-            return `Too large for ${platform.value}: ${megabytes(image.byte_size)} MB, and the limit is ${megabytes(rules.value.max_bytes)} MB. The post cannot be approved until it is taken off. Add a smaller file in its place.`;
+            const limit = `Noon Gun sends ${megabytes(rules.value.max_bytes)} MB at most to ${platform.value} for one image.`;
+
+            return image.mime === 'image/png'
+                ? `Stored as a PNG file of ${megabytes(image.byte_size)} MB. ${limit} ${until} Add it again as a JPEG, or with fewer pixels.`
+                : `Stored at ${megabytes(image.byte_size)} MB. ${limit} ${until} Add it again with fewer pixels.`;
         }
 
         if (
             rules.value.max_pixels !== null &&
             image.width * image.height > rules.value.max_pixels
         ) {
-            return `Too large for ${platform.value}: ${image.width} x ${image.height} pixels, and the limit is ${Math.round(rules.value.max_pixels / 100000) / 10} megapixels. The post cannot be approved until it is taken off. Add a smaller image in its place.`;
+            return `Stored at ${image.width} x ${image.height} pixels. Noon Gun sends ${Math.round(rules.value.max_pixels / 100000) / 10} megapixels at most to ${platform.value}. ${until} Add it again with fewer pixels.`;
         }
     }
 
     return props.problems[String(item.id)] ?? null;
+}
+
+function removeGone(): void {
+    media.value = media.value.filter(
+        (item) => !props.goneIds.includes(item.id),
+    );
+    announce(
+        `The images that are gone were taken off the text for ${name.value}.`,
+    );
+    focus(elementId('add-images'));
 }
 
 // Order
@@ -180,6 +245,34 @@ function move(index: number, by: -1 | 1): void {
     const other = by === -1 ? 'image-later' : 'image-earlier';
 
     focus(elementId(atEnd ? other : same, moved.id));
+}
+
+// The order is kept per channel: moving an image here moves it nowhere
+// else. The channels where the images both have are in another order.
+const otherOrders = computed(() => {
+    const mine = media.value.map((item) => item.id);
+
+    return props.others.filter((other) => {
+        const theirs = other.media
+            .map((item) => item.id)
+            .filter((id) => mine.includes(id));
+        const shared = mine.filter((id) => theirs.includes(id));
+
+        return (
+            shared.length > 1 &&
+            shared.some((id, position) => id !== theirs[position])
+        );
+    });
+});
+
+function orderEverywhere(): void {
+    const changed = names(otherOrders.value);
+
+    emit('orderAll');
+    announce(
+        `The images for ${changed} are now in the order of ${name.value}.`,
+    );
+    focus(elementId('images'));
 }
 
 function remove(index: number): void {
@@ -226,7 +319,7 @@ function share(
         targets.map((target) => target.channel_id),
     );
     announce(
-        `The image was added for ${targets.map((target) => target.name).join(', ')}. It is one file, and each channel has its own description.`,
+        `The image was added for ${names(targets)}, with its description. It is one file.`,
     );
     // The button that was pressed may be gone now.
     void nextTick(() =>
@@ -255,23 +348,24 @@ function sharePicked(mediaId: number, channelId: string | undefined): void {
     void nextTick(() => (picks.value[mediaId] = ''));
 }
 
-// Uploading
+// Uploading. The files of every column go through one queue for the page
+// (lib/uploadQueue), one request at a time.
 
 type Pending = {
     key: number;
     file: File;
     name: string;
-    status: 'waiting' | 'sending' | 'failed';
+    status: UploadState | 'failed';
     /** Percent of the file that has left this computer. */
     progress: number;
     error: string;
     retryable: boolean;
+    cancel: (() => void) | null;
 };
 
 const pending = ref<Pending[]>([]);
 const input = ref<HTMLInputElement | null>(null);
 let nextKey = 0;
-let request: XMLHttpRequest | null = null;
 
 const inFlight = computed(
     () => pending.value.filter((item) => item.status !== 'failed').length,
@@ -282,6 +376,14 @@ const free = computed(() =>
 
 watch(inFlight, (count) => emit('uploading', count), { immediate: true });
 
+function row(key: number): Pending | undefined {
+    return pending.value.find((candidate) => candidate.key === key);
+}
+
+function drop(key: number): void {
+    pending.value = pending.value.filter((candidate) => candidate.key !== key);
+}
+
 function refuse(file: File, error: string): void {
     pending.value.push({
         key: nextKey++,
@@ -291,82 +393,28 @@ function refuse(file: File, error: string): void {
         progress: 0,
         error,
         retryable: false,
+        cancel: null,
     });
     announce(error);
 }
 
-/**
- * Takes files from the picker, a drop or the clipboard. What cannot be
- * stored is refused here, before anything is sent.
- */
-function addFiles(files: File[]): void {
-    if (!accepts.value) {
-        return;
-    }
-
-    const limit = megabytes(props.uploads.max_bytes);
-    let room = free.value;
-
-    for (const file of files) {
-        if (file.type !== '' && !props.uploads.accept.includes(file.type)) {
-            refuse(
-                file,
-                `${file.name} is not a ${typeList(props.uploads.accept)} file. Save it as one of these, then add it again.`,
-            );
-        } else if (file.size > props.uploads.max_bytes) {
-            refuse(
-                file,
-                `${file.name} is ${megabytes(file.size)} MB. This instance accepts ${limit} MB at most. Choose a smaller file.`,
-            );
-        } else if (room < 1) {
-            refuse(
-                file,
-                `${file.name} was not added. ${platform.value} takes ${imageCount(rules.value.max_items)} at most on a post. Take one off to add another.`,
-            );
-        } else {
-            room--;
-            pending.value.push({
-                key: nextKey++,
-                file,
-                name: file.name,
-                status: 'waiting',
-                progress: 0,
-                error: '',
-                retryable: false,
-            });
-        }
-    }
-
-    sendNext();
-}
-
-function onPicked(event: Event): void {
-    const field = event.target as HTMLInputElement;
-
-    addFiles(Array.from(field.files ?? []));
-    // So that the same file can be picked again after it was taken off.
-    field.value = '';
-}
-
-function csrfToken(): string | null {
-    const match = document.cookie.match(/(?:^|; )XSRF-TOKEN=([^;]*)/);
-
-    return match ? decodeURIComponent(match[1]) : null;
+function fullMessage(fileName: string): string {
+    return `${fileName} was not added. Noon Gun sends ${imageCount(rules.value.max_items)} at most to ${platform.value} on one post. Take one off to add another.`;
 }
 
 function refusal(
-    status: number,
-    body: string,
+    failure: UploadFailure,
     fileName: string,
 ): { error: string; retryable: boolean } {
     const limit = megabytes(props.uploads.max_bytes);
 
-    if (status === 422) {
+    if (failure.status === 422) {
         let sentence: unknown;
 
         try {
-            sentence = (JSON.parse(body) as { errors?: { file?: unknown[] } })
-                .errors?.file?.[0];
+            sentence = (
+                JSON.parse(failure.body) as { errors?: { file?: unknown[] } }
+            ).errors?.file?.[0];
         } catch {
             sentence = undefined;
         }
@@ -380,7 +428,12 @@ function refusal(
         };
     }
 
-    switch (status) {
+    switch (failure.status) {
+        case 0:
+            return {
+                error: `${fileName} did not reach the server. Check the connection, then try again.`,
+                retryable: true,
+            };
         case 413:
             return {
                 error: `${fileName} is larger than this instance accepts (${limit} MB). Choose a smaller file.`,
@@ -388,7 +441,7 @@ function refusal(
             };
         case 429:
             return {
-                error: 'Too many uploads at once. Wait a minute, then try again.',
+                error: `The server stayed busy with other images, so ${fileName} was not sent. Wait a minute, then try again.`,
                 retryable: true,
             };
         case 403:
@@ -410,129 +463,167 @@ function refusal(
     }
 }
 
-// One request at a time, in the order the files were given.
-function sendNext(): void {
-    if (request !== null) {
+// Puts a stored image on this text. The same image is never on it twice.
+function attach(image: MediaItem, fileName: string, reused: boolean): void {
+    emit('uploaded', image);
+
+    if (media.value.some((existing) => existing.id === image.id)) {
+        refuse(
+            new File([], fileName),
+            `${fileName} is already on the text for ${name.value}. It was not added a second time.`,
+        );
+
         return;
     }
 
-    const item = pending.value.find(
-        (candidate) => candidate.status === 'waiting',
+    media.value = [...media.value, { id: image.id, alt_text: '' }];
+    announce(
+        reused
+            ? `${fileName} was already stored from this page, so it was added without a second upload. It is on the post once the draft is saved.`
+            : `${fileName} was uploaded. It is on the post once the draft is saved.`,
     );
+}
+
+function start(key: number): void {
+    const item = row(key);
 
     if (!item) {
         return;
     }
 
-    const form = new FormData();
-    const sending = new XMLHttpRequest();
-    const token = csrfToken();
+    item.status = 'waiting';
+    item.error = '';
+    item.cancel = enqueue({
+        file: item.file,
+        url: props.uploads.url,
+        field: props.uploads.field,
+        onState: (state, progress) => {
+            const current = row(key);
 
-    form.append(props.uploads.field, item.file, item.name);
-    request = sending;
-    item.status = 'sending';
-    item.progress = 0;
+            if (current) {
+                current.status = state;
+                current.progress = progress;
+            }
+        },
+        onDone: (image) => {
+            const fileName = row(key)?.name ?? item.name;
 
-    const finish = (failure: { error: string; retryable: boolean } | null) => {
-        request = null;
+            drop(key);
+            attach(image, fileName, false);
+        },
+        onFail: (failure) => {
+            const current = row(key);
 
-        if (failure === null) {
-            pending.value = pending.value.filter(
-                (candidate) => candidate.key !== item.key,
-            );
-        } else {
-            item.status = 'failed';
-            item.error = failure.error;
-            item.retryable = failure.retryable;
-            announce(failure.error);
-        }
+            if (current) {
+                const told = refusal(failure, current.name);
 
-        sendNext();
-    };
+                current.status = 'failed';
+                current.error = told.error;
+                current.retryable = told.retryable;
+                current.cancel = null;
+                announce(told.error);
+            }
+        },
+    });
+}
 
-    sending.upload.onprogress = (event) => {
-        if (event.lengthComputable && event.total > 0) {
-            item.progress = Math.round((event.loaded / event.total) * 100);
-        }
-    };
-
-    sending.onload = () => {
-        if (sending.status !== 201 && sending.status !== 200) {
-            finish(refusal(sending.status, sending.responseText, item.name));
-
-            return;
-        }
-
-        let image: MediaItem | null;
-
-        try {
-            image = JSON.parse(sending.responseText) as MediaItem;
-        } catch {
-            image = null;
-        }
-
-        if (image === null || typeof image.id !== 'number') {
-            finish(refusal(0, '', item.name));
-
-            return;
-        }
-
-        emit('uploaded', image);
-
-        if (media.value.some((existing) => existing.id === image.id)) {
-            announce(`${item.name} is already on the text for ${name.value}.`);
-        } else {
-            media.value = [...media.value, { id: image.id, alt_text: '' }];
-            announce(
-                `${item.name} was uploaded. It is on the post once the draft is saved.`,
-            );
-        }
-
-        finish(null);
-    };
-
-    sending.onerror = sending.ontimeout = () =>
-        finish({
-            error: `${item.name} did not reach the server. Check the connection, then try again.`,
-            retryable: true,
-        });
-
-    sending.onabort = () => (request = null);
-
-    sending.open('POST', props.uploads.url);
-    sending.setRequestHeader('Accept', 'application/json');
-    sending.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
-
-    if (token !== null) {
-        sending.setRequestHeader('X-XSRF-TOKEN', token);
+/**
+ * Takes files from the picker, a drop or the clipboard. What cannot be
+ * stored is refused here, before anything is sent, and a file that was
+ * already stored from this page is not sent again.
+ */
+function addFiles(files: File[]): void {
+    if (!accepts.value) {
+        return;
     }
 
-    sending.send(form);
+    const limit = megabytes(props.uploads.max_bytes);
+    let room = free.value;
+
+    for (const file of files) {
+        const copy = storedCopy(file);
+        const sameInFlight = pending.value.some(
+            (item) =>
+                item.status !== 'failed' &&
+                fileKey(item.file) === fileKey(file),
+        );
+
+        if (file.type !== '' && !props.uploads.accept.includes(file.type)) {
+            refuse(
+                file,
+                `${file.name} is not a ${typeList(props.uploads.accept)} file. Save it as one of these, then add it again.`,
+            );
+        } else if (file.size > props.uploads.max_bytes) {
+            refuse(
+                file,
+                `${file.name} is ${megabytes(file.size)} MB. This instance accepts ${limit} MB at most. Choose a smaller file.`,
+            );
+        } else if (sameInFlight) {
+            refuse(
+                file,
+                `${file.name} is already being uploaded for ${name.value}. It was not added a second time.`,
+            );
+        } else if (copy && media.value.some((item) => item.id === copy.id)) {
+            attach(copy, file.name, true);
+        } else if (room < 1) {
+            refuse(file, fullMessage(file.name));
+        } else if (copy) {
+            room--;
+            attach(copy, file.name, true);
+        } else {
+            room--;
+
+            const key = nextKey++;
+
+            pending.value.push({
+                key,
+                file,
+                name: file.name,
+                status: 'waiting',
+                progress: 0,
+                error: '',
+                retryable: false,
+                cancel: null,
+            });
+            start(key);
+        }
+    }
+}
+
+function onPicked(event: Event): void {
+    const field = event.target as HTMLInputElement;
+
+    addFiles(Array.from(field.files ?? []));
+    // So that the same file can be picked again after it was taken off.
+    field.value = '';
 }
 
 function retry(item: Pending): void {
     if (free.value < 1) {
-        item.error = `${item.name} was not added. ${platform.value} takes ${imageCount(rules.value.max_items)} at most on a post. Take one off to add another.`;
+        item.error = fullMessage(item.name);
         item.retryable = false;
         announce(item.error);
 
         return;
     }
 
-    item.status = 'waiting';
-    item.error = '';
-    sendNext();
+    start(item.key);
+}
+
+function cancel(item: Pending): void {
+    item.cancel?.();
+    drop(item.key);
+    announce(`The upload of ${item.name} was cancelled.`);
+    focus(elementId('add-images'));
 }
 
 function dismiss(item: Pending): void {
-    pending.value = pending.value.filter(
-        (candidate) => candidate.key !== item.key,
-    );
+    drop(item.key);
     focus(elementId('add-images'));
 }
 
 onBeforeUnmount(() => {
-    request?.abort();
+    pending.value.forEach((item) => item.cancel?.());
     emit('uploading', 0);
 });
 
@@ -664,7 +755,14 @@ defineExpose({ addFiles });
                                 altOver(item) > 0 ? 'true' : undefined
                             "
                             :aria-describedby="`${elementId('image-alt-count', item.id)} ${elementId('image-alt-note', item.id)}`"
-                            @input="setAltText(item.id, $event)"
+                            @input="
+                                emit(
+                                    'describe',
+                                    item.id,
+                                    ($event.target as HTMLTextAreaElement)
+                                        .value,
+                                )
+                            "
                         ></textarea>
                         <div
                             class="flex flex-wrap items-start justify-between gap-x-4 gap-y-1"
@@ -678,8 +776,10 @@ defineExpose({ addFiles });
                                     class="text-sm text-destructive"
                                     :data-test="`image-alt-too-long-${channel.id}-${item.id}`"
                                 >
-                                    Too long for {{ platform }}. The post cannot
-                                    be approved until this description fits.
+                                    Too long: Noon Gun sends
+                                    {{ altLimit }} characters at most to
+                                    {{ platform }} as a description. The post
+                                    cannot be approved until it fits.
                                 </p>
                                 <p
                                     v-else-if="
@@ -705,6 +805,30 @@ defineExpose({ addFiles });
                                     No description yet. People who use a screen
                                     reader hear this instead of the picture. The
                                     post can be approved without one.
+                                </p>
+                                <!-- One description for an image on several
+                                     channels, until a channel is given its
+                                     own. -->
+                                <p
+                                    v-if="sharing(item).together.length"
+                                    class="text-sm text-muted-foreground"
+                                    :data-test="`image-alt-shared-${channel.id}-${item.id}`"
+                                >
+                                    What you type here is also the description
+                                    on {{ names(sharing(item).together) }}.
+                                </p>
+                                <p
+                                    v-if="sharing(item).apart.length"
+                                    class="text-sm text-muted-foreground"
+                                    :data-test="`image-alt-apart-${channel.id}-${item.id}`"
+                                >
+                                    {{ names(sharing(item).apart) }}
+                                    {{
+                                        sharing(item).apart.length === 1
+                                            ? 'has a description of its own'
+                                            : 'have descriptions of their own'
+                                    }}
+                                    for this image.
                                 </p>
                             </div>
                             <span
@@ -733,6 +857,50 @@ defineExpose({ addFiles });
                                 </template>
                             </span>
                         </div>
+                        <Button
+                            v-if="
+                                sharing(item).apart.length &&
+                                item.alt_text.trim() !== ''
+                            "
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            class="w-fit"
+                            :aria-label="`Use the description of image ${index + 1} for ${name} on all channels that have this image`"
+                            :data-test="`image-alt-all-${channel.id}-${item.id}`"
+                            @click="describeEverywhere(item.id)"
+                        >
+                            Use this description on all channels
+                        </Button>
+                        <!-- What a model suggested with the draft. Shown
+                             as text and used only when asked for. -->
+                        <div
+                            v-if="
+                                index === 0 &&
+                                suggestedAltText !== null &&
+                                suggestedAltText.trim() !== '' &&
+                                item.alt_text.trim() === ''
+                            "
+                            class="grid gap-1.5 rounded-md bg-secondary px-3 py-2 text-sm"
+                            :data-test="`image-alt-suggestion-${channel.id}`"
+                        >
+                            <p class="break-words whitespace-pre-line">
+                                <span class="text-muted-foreground">
+                                    Suggested with the draft:
+                                </span>
+                                {{ suggestedAltText }}
+                            </p>
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                class="w-fit"
+                                :aria-label="`Use the suggested description for image 1 for ${name}`"
+                                @click="useSuggestion(item.id)"
+                            >
+                                Use the suggested description
+                            </Button>
+                        </div>
                     </div>
                     <div v-else class="grid gap-1">
                         <p class="text-base">
@@ -745,7 +913,8 @@ defineExpose({ addFiles });
                             </span>
                         </p>
                         <p v-if="accepts" class="text-sm text-muted-foreground">
-                            {{ platform }} takes no description for an image.
+                            Noon Gun sends no description to {{ platform }} for
+                            an image.
                         </p>
                     </div>
 
@@ -799,57 +968,89 @@ defineExpose({ addFiles });
                          upload. -->
                     <div
                         v-if="targetsFor(item.id).length"
-                        class="flex flex-wrap items-center gap-2"
+                        class="grid gap-1.5"
                         :data-test="`image-share-${channel.id}-${item.id}`"
                     >
-                        <Button
-                            v-if="targetsFor(item.id).length === 1"
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            :aria-label="`Also add image ${index + 1} for ${name} to ${targetsFor(item.id)[0].name}`"
-                            @click="share(item.id, targetsFor(item.id))"
-                        >
-                            Also add to {{ targetsFor(item.id)[0].name }}
-                        </Button>
-                        <template v-else>
+                        <div class="flex flex-wrap items-center gap-2">
                             <Button
+                                v-if="targetsFor(item.id).length === 1"
                                 type="button"
                                 size="sm"
                                 variant="outline"
-                                :aria-label="`Add image ${index + 1} for ${name} to ${everyOtherTakesImages ? 'all channels' : 'the other channels that take images'}`"
+                                :aria-label="`Also add image ${index + 1} for ${name} to ${targetsFor(item.id)[0].name}, with its description`"
                                 @click="share(item.id, targetsFor(item.id))"
                             >
-                                {{
-                                    everyOtherTakesImages
-                                        ? 'Add to all channels'
-                                        : 'Add to the other channels that take images'
-                                }}
+                                Also add to {{ targetsFor(item.id)[0].name }}
                             </Button>
-                            <div class="w-full sm:w-56">
-                                <NativeSelect
-                                    :model-value="picks[item.id] ?? ''"
-                                    :aria-label="`Also add image ${index + 1} for ${name} to one other channel`"
-                                    @update:model-value="
-                                        (value: string | undefined) =>
-                                            sharePicked(item.id, value)
-                                    "
+                            <template v-else>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    :aria-label="`Add image ${index + 1} for ${name} to ${everyOtherTakesImages ? 'all channels' : 'the other channels that take images'}, with its description`"
+                                    @click="share(item.id, targetsFor(item.id))"
                                 >
-                                    <option value="">Also add to...</option>
-                                    <option
-                                        v-for="target in targetsFor(item.id)"
-                                        :key="target.channel_id"
-                                        :value="String(target.channel_id)"
+                                    {{
+                                        everyOtherTakesImages
+                                            ? 'Add to all channels'
+                                            : 'Add to the other channels that take images'
+                                    }}
+                                </Button>
+                                <div class="w-full sm:w-56">
+                                    <NativeSelect
+                                        :model-value="picks[item.id] ?? ''"
+                                        :aria-label="`Also add image ${index + 1} for ${name} to one other channel, with its description`"
+                                        @update:model-value="
+                                            (value: string | undefined) =>
+                                                sharePicked(item.id, value)
+                                        "
                                     >
-                                        {{ target.name }}
-                                    </option>
-                                </NativeSelect>
-                            </div>
-                        </template>
+                                        <option value="">Also add to...</option>
+                                        <option
+                                            v-for="target in targetsFor(
+                                                item.id,
+                                            )"
+                                            :key="target.channel_id"
+                                            :value="String(target.channel_id)"
+                                        >
+                                            {{ target.name }}
+                                        </option>
+                                    </NativeSelect>
+                                </div>
+                            </template>
+                        </div>
+                        <p class="text-sm text-muted-foreground">
+                            It is the same file, and the description goes with
+                            it.
+                        </p>
                     </div>
                 </div>
             </li>
         </ol>
+
+        <!-- The order is for this channel. It is said, and one press
+             makes the other channels follow. -->
+        <div
+            v-if="otherOrders.length"
+            class="flex flex-wrap items-center gap-x-3 gap-y-1.5"
+            :data-test="`images-order-${channel.id}`"
+        >
+            <p class="flex-[1_1_14rem] text-sm text-muted-foreground">
+                This order is for {{ name }} only.
+                {{ names(otherOrders) }}
+                {{ otherOrders.length === 1 ? 'has' : 'have' }} the same images
+                in another order.
+            </p>
+            <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                :aria-label="`Use the order of the images for ${name} on all channels`"
+                @click="orderEverywhere"
+            >
+                Use this order on all channels
+            </Button>
+        </div>
 
         <p
             v-if="!accepts && media.length > 0"
@@ -864,9 +1065,9 @@ defineExpose({ addFiles });
             class="text-sm text-destructive"
             :data-test="`images-problem-${channel.id}`"
         >
-            Too many images for {{ platform }}: it takes
-            {{ rules.max_items }} at most. Take {{ tooMany }} off before the
-            post can be approved.
+            Too many images: Noon Gun sends {{ rules.max_items }} at most to
+            {{ platform }} on one post. Take {{ tooMany }} off before the post
+            can be approved.
         </p>
         <p
             v-else-if="problems[''] !== undefined"
@@ -876,7 +1077,38 @@ defineExpose({ addFiles });
             {{ problems[''] }}
         </p>
 
-        <ul v-if="errors.length" class="grid gap-1">
+        <div
+            v-if="gone.length"
+            class="flex flex-wrap items-center gap-x-3 gap-y-1.5"
+            :data-test="`images-gone-${channel.id}`"
+        >
+            <p class="flex-[1_1_14rem] text-sm text-destructive">
+                The draft was not saved:
+                {{
+                    gone.length === 1
+                        ? '1 image for this channel is gone'
+                        : `${gone.length} images for this channel are gone`
+                }}. An upload that is on no saved post is removed after a day.
+                Take
+                {{ gone.length === 1 ? 'it' : 'them' }}
+                off, save the draft, then add the
+                {{ gone.length === 1 ? 'file' : 'files' }} again.
+            </p>
+            <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                :aria-label="`Take the images that are gone off the text for ${name}`"
+                @click="removeGone"
+            >
+                {{
+                    gone.length === 1
+                        ? 'Take off the image that is gone'
+                        : 'Take off the images that are gone'
+                }}
+            </Button>
+        </div>
+        <ul v-else-if="errors.length" class="grid gap-1">
             <li
                 v-for="message in errors"
                 :key="message"
@@ -933,6 +1165,9 @@ defineExpose({ addFiles });
                             <template v-if="item.status === 'waiting'">
                                 Waiting for its turn
                             </template>
+                            <template v-else-if="item.status === 'held'">
+                                Waiting for the server to finish another image
+                            </template>
                             <template v-else-if="item.progress < 100">
                                 Uploading, {{ item.progress }}%
                             </template>
@@ -941,12 +1176,24 @@ defineExpose({ addFiles });
                             </template>
                         </span>
                     </p>
-                    <progress
-                        class="h-1.5 w-full overflow-hidden rounded-full accent-primary"
-                        max="100"
-                        :value="item.progress"
-                        :aria-label="`Upload of ${item.name}`"
-                    ></progress>
+                    <div class="flex items-center gap-3">
+                        <progress
+                            class="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full accent-primary"
+                            max="100"
+                            :value="item.progress"
+                            :aria-label="`Upload of ${item.name}`"
+                        ></progress>
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            class="text-muted-foreground"
+                            :aria-label="`Cancel the upload of ${item.name}`"
+                            @click="cancel(item)"
+                        >
+                            Cancel
+                        </Button>
+                    </div>
                 </template>
             </li>
         </ul>
@@ -979,7 +1226,8 @@ defineExpose({ addFiles });
                     v-if="free < 1 && tooMany === 0"
                     class="text-sm text-muted-foreground"
                 >
-                    That is as many as {{ platform }} takes on a post.
+                    That is as many as Noon Gun sends to {{ platform }} on one
+                    post.
                 </p>
             </div>
             <p
@@ -995,8 +1243,8 @@ defineExpose({ addFiles });
                 class="text-sm text-muted-foreground"
                 :data-test="`images-unsaved-${channel.id}`"
             >
-                The files are stored. They are on the post once you save the
-                draft.
+                The files are stored and kept for a day. Save the draft to keep
+                them on the post.
             </p>
         </div>
 

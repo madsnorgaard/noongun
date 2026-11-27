@@ -322,7 +322,7 @@ describe('whether the images can go out', function () {
         $variant = variantsOf($post)[0];
 
         expect(problemsOf($this->workspace, $post))->toBe([
-            "variants.{$variant->id}.media" => ['The text for Alpha has 4 images. Facebook takes 3 at most.'],
+            "variants.{$variant->id}.media" => ['The text for Alpha has 4 images. Noon Gun sends 3 at most to Facebook on one post. Take 1 off.'],
         ]);
     });
 
@@ -351,17 +351,17 @@ describe('whether the images can go out', function () {
         'a type it refuses' => [
             fn ($fake) => $fake->withCapabilities(new ChannelCapabilities(maxBodyLength: 5000, mediaTypes: ['image/jpeg'], maxMediaItems: 3, altTextLength: 100)),
             fn ($test) => $test->gull,
-            'Image 2 for Alpha is of a type that Facebook does not take.',
+            'Image 2 for Alpha is stored as a PNG file, which is not sent to Facebook. Take it off and add it again as JPEG.',
         ],
         'a file that is too large' => [
             fn ($fake) => $fake->acceptingImages(max: 3, maxBytes: 4 * 1024 * 1024),
             fn ($test) => storedImage($test->workspace, null, ['byte_size' => 6 * 1024 * 1024]),
-            'Image 2 for Alpha is 6 MB. Facebook takes 4 MB at most.',
+            'Image 2 for Alpha is stored at 6 MB. Noon Gun sends 4 MB at most to Facebook for one image. Take it off and add it again with fewer pixels.',
         ],
         'too many pixels' => [
             fn ($fake) => $fake->acceptingImages(max: 3, maxPixels: 36_000_000),
             fn ($test) => storedImage($test->workspace, null, ['width' => 8000, 'height' => 6000]),
-            'Image 2 for Alpha is 8000 x 6000 pixels. Facebook takes 36 megapixels at most.',
+            'Image 2 for Alpha is stored at 8000 x 6000 pixels. Noon Gun sends 36 megapixels at most to Facebook. Take it off and add it again with fewer pixels.',
         ],
     ]);
 
@@ -370,7 +370,7 @@ describe('whether the images can go out', function () {
         $variant = variantsOf($post)[0];
 
         expect(problemsOf($this->workspace, $post))->toBe([
-            "variants.{$variant->id}.media.{$this->harbour->id}.alt_text" => ['The description of image 1 for Alpha is 101 characters long. The limit is 100.'],
+            "variants.{$variant->id}.media.{$this->harbour->id}.alt_text" => ['The description of image 1 for Alpha is 101 characters long. Noon Gun sends 100 at most to Facebook. Shorten it.'],
         ]);
     });
 

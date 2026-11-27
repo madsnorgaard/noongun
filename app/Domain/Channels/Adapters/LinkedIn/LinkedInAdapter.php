@@ -84,13 +84,6 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMe
     /** "Images with less than 36,152,320 pixels." */
     private const MAX_IMAGE_PIXELS = 36152319;
 
-    /**
-     * The documentation names no size in bytes. 5 MB is the figure others
-     * report, and it is taken as the careful one: LinkedIn cannot be asked
-     * whether it could process a file. `max_image_bytes` replaces it.
-     */
-    private const MAX_IMAGE_BYTES = 5242880;
-
     /** "Maximum length is 4,086 characters." */
     private const ALT_TEXT_LENGTH = 4086;
 
@@ -184,7 +177,10 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMe
             rateLimit: new RateLimit($this->positiveSetting('rate_limit_per_day') ?? self::RATE_LIMIT_CALLS, self::RATE_LIMIT_SECONDS),
             linkTitleLength: self::LINK_TITLE_LENGTH,
             linkDescriptionLength: self::LINK_DESCRIPTION_LENGTH,
-            maxMediaBytes: $this->positiveSetting('max_image_bytes') ?? self::MAX_IMAGE_BYTES,
+            // LinkedIn documents no size in bytes, so none is enforced
+            // unless the instance sets one. LinkedIn is the judge: an
+            // upload it finds too large fails with words that say so.
+            maxMediaBytes: $this->positiveSetting('max_image_bytes'),
             maxMediaPixels: $this->positiveSetting('max_image_pixels') ?? self::MAX_IMAGE_PIXELS,
             altTextLength: $this->positiveSetting('alt_text_length') ?? self::ALT_TEXT_LENGTH,
             // A post holds images or a link card, never both. The images
@@ -290,6 +286,14 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMe
     {
         $channel = $this->channelOf($variant);
         $image = $attachment->image();
+        $number = $this->numberOf($variant, $attachment);
+
+        if (! UploadAddress::usable($this->uploadHosts())) {
+            throw PublishFailed::permanent(
+                self::PLATFORM,
+                'LinkedIn is not configured correctly on this instance: LINKEDIN_UPLOAD_HOSTS must be a list of host names of at least two parts, such as linkedin.com. No image was sent and nothing was posted.',
+            );
+        }
 
         if (! in_array(strtolower($image->mime), self::IMAGE_TYPES, true)) {
             throw PublishFailed::permanent(self::PLATFORM, 'LinkedIn takes JPEG and PNG images only. Return the post to draft and put another image on it.');
@@ -341,6 +345,7 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMe
                 $image->byte_size,
                 max(1, $this->mediaTimeout - (int) ceil(microtime(true) - $started)),
                 PublishFailed::class,
+                $number,
             );
         } finally {
             if (is_resource($stream)) {
@@ -632,6 +637,17 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMe
     }
 
     /**
+     * The place of an image among the images of its variant, counted from
+     * 1 as the editor shows them.
+     */
+    private function numberOf(PostVariant $variant, MediaAttachment $attachment): int
+    {
+        $index = $variant->images()->values()->search(fn (MediaAttachment $other): bool => $other->is($attachment));
+
+        return is_int($index) ? $index + 1 : max(1, $attachment->position);
+    }
+
+    /**
      * One image is a post with media, several are a MultiImage post. Each
      * image is named by what LinkedIn called it when it was uploaded, which
      * the publishing job wrote on the attachment. Fails before anything is
@@ -728,13 +744,13 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMe
      * The hosts an upload address may be on: each name and every name
      * below it.
      *
-     * @return list<string>
+     * @return list<mixed>
      */
     private function uploadHosts(): array
     {
         $hosts = $this->settings['upload_hosts'] ?? [];
 
-        return array_values(array_filter(is_array($hosts) ? $hosts : [], fn (mixed $host): bool => is_string($host) && trim($host) !== ''));
+        return is_array($hosts) ? array_values($hosts) : [];
     }
 
     private function permalink(string $urn): string
