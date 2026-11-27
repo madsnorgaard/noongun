@@ -46,18 +46,23 @@ profile, no second file behind the image data. GD writes a comment of its
 own into every JPEG, naming itself and the quality. That is taken out of the
 file again, so a stored file does not say how it was made either.
 
-`ImageProcessor` is an interface, and `GdImageProcessor` is the one class
-that touches the image library. The inspector, the limits and the two small
-JPEG readers are plain PHP and stay in front of whatever engine decodes. An
-open question for the owner is libvips, for output that keeps colours right
-(see Consequences); changing the engine is a second class and one line.
+`ImageProcessor` is an interface with two engines behind it:
+`VipsImageProcessor` (libvips, the default) and `GdImageProcessor` (the GD
+extension of PHP, the fallback). `noongun.media.engine`
+(`NOONGUN_MEDIA_ENGINE`, `vips` or `gd`) says which one answers. The
+inspector, the limits, the two small JPEG readers and the rules for what a
+stored file is (`EncodingRules`) are plain PHP, shared, and stay in front of
+whatever engine decodes. The same tests run against both engines. See "The
+image engine is libvips" below for why and how.
 
 The orientation of a JPEG is the one EXIF value that is used, because
 without it a photo from a phone would lie on its side. It is read by a small
 parser of our own (`JpegOrientation`) that looks at nothing else in the
 block, and it is applied to the pixels before the block is dropped. PHP's
 `exif` extension is not installed: it would parse the whole of an untrusted
-metadata block for one number.
+metadata block for one number. libvips does read the EXIF block when it
+opens a JPEG and has no switch for that; it does so in a process of its own
+(see below), and the orientation that is applied is still ours.
 
 **A stored image is a JPEG or a PNG.** Those are the types both platforms
 take. Which of the two is decided from the pixels, not from the type the
@@ -82,8 +87,8 @@ point. The estimate can only lower the quality, so a wrong one costs a
 little sharpness on one file. An image that is scaled down is a new image
 and gets the configured quality.
 
-**An animation is refused, not flattened.** GD reads the first frame of a
-GIF, an animated PNG or an animated WebP. Storing that would turn
+**An animation is refused, not flattened.** An image library reads the
+first frame of a GIF, an animated PNG or an animated WebP. Storing that would turn
 somebody's animation into a still picture without a word. GIF is refused as
 a type; an animated PNG is known by its `acTL` chunk and an animated WebP
 by a flag in its header, both before anything is decoded.
@@ -100,9 +105,94 @@ the picture.
 Every upload also gets a small JPEG copy (`thumbnail_side`, 480 pixels) next
 to it, for the lists.
 
-The image library is GD, which the Docker image now installs. It reads and
-writes JPEG, PNG and WebP, and a test fails if WebP support is missing from
-the container.
+### The image engine is libvips
+
+GD cannot read a colour profile. It keeps the numbers of the pixels and
+drops the profile, so a photo in a wide colour space (Display P3 from a
+recent phone, Adobe RGB or ProPhoto from a camera) was stored duller than it
+was taken, and a CMYK file came out in wrong colours. The owner chose
+libvips to fix this.
+
+**Colours are converted to sRGB, and the stored file has no profile.**
+`VipsImageProcessor` converts the pixels with the profile of the upload
+before the metadata is dropped. Sixteen bits a channel become eight. A CMYK
+file without a profile is read with the press profile libvips carries. A
+profile that is damaged or does not fit the image is left aside and the
+pixels are taken as sRGB, as GD takes them; it never fails the upload. An
+image without a profile is not changed by a single value.
+
+- The conversion is relative colorimetric with black point compensation. A
+  colour that sRGB can show stays exactly that colour, which is what a logo
+  needs, and one that it cannot show becomes the nearest it can. For Display
+  P3, Adobe RGB and ProPhoto a perceptual conversion gives the same result,
+  because those profiles as a rule hold no table for it. For CMYK the two differ.
+  Measured on a file made the way an editor makes one by default: relative
+  with compensation gives back the colour that went in (200, 60, 40 came
+  back as 200, 59, 42) and black as 7, 7, 5. Perceptual gave 200, 61, 35
+  and black with a tint (15, 11, 0). Relative without compensation gave a
+  grey for black (39, 38, 38).
+- No profile is written to the stored file. The W3C recommendation is that
+  an image without a profile is taken as sRGB, and a stored file that holds
+  only pixels is what the rest of this ADR promises. The one known
+  exception is Firefox with its default setting
+  (`gfx.color_management.mode` 2, only images with a profile are managed):
+  on a wide-gamut screen the preview inside Noon Gun can look a little too
+  saturated there. Not checked against a platform: whether Facebook or
+  LinkedIn treats a file without a profile differently from one tagged
+  sRGB. If one does, the change is to write a small sRGB profile when
+  saving, in `VipsImageProcessor` alone.
+
+**PHP reaches libvips by running its command-line program.** Three ways
+were checked on the image this project runs on
+(`dunglas/frankenphp:1.14-php8.5-alpine`, PHP 8.5.13 ZTS, libvips 8.18.2
+from Alpine 3.24):
+
+- `jcupitt/vips` (FFI). Its README says it needs FFI enabled globally
+  (`ffi.enable=true`; preloading is not supported) and
+  `zend.max_allowed_stack_size=-1`, which turns off the stack overflow
+  check of PHP for the whole application. FFI lets any PHP code call any
+  native library. libvips would also be loaded into the FrankenPHP process,
+  which is one process for all requests: a decoder that crashes on a
+  crafted file takes the web server down, and what it allocates is the
+  memory of the web server. Not chosen.
+- The `vips` PECL extension. It still builds and loads on PHP 8.5
+  (version 1.0.13), but its own README calls it deprecated and says it will
+  not be updated again. Same process as above. Not chosen.
+- The `vips` program through Symfony Process. Chosen. No extension and no
+  FFI. Each step is a short process (`VipsCommand`) that never goes through
+  a shell, gets fixed arguments and file names we made, a time limit, and
+  none of the environment of the application, so no key is in its reach.
+  A crash ends one upload with "could not be read". Its memory is given
+  back when it ends and never counts against PHP. The cost is starting five
+  to eleven processes for one image, about a tenth of a second together.
+
+One upload is: load, convert colours, scale, turn, look for transparency,
+write the small copy, write JPEG and where the rules ask for it PNG. The
+steps hand each other files in the format of libvips in a folder of their
+own under the temporary directory (`VipsScratch`), which is removed when the
+upload ends. A folder that a killed process left is removed by a later
+upload.
+
+**libvips only ever opens JPEG, PNG and WebP.** libvips is never asked to
+find out what a file is. `ImageInspector` has named the format, and the file
+is opened with `jpegload`, `pngload` or `webpload` by name, so no other
+loader can be reached by an upload, whatever the file holds. The process
+that reads the upload also has `VIPS_BLOCK_UNTRUSTED` set. That variable
+alone would not be enough: checked on 8.18.2,
+it switches off SVG, JPEG 2000, OpenEXR, FITS and others, but leaves TIFF
+and GIF on. The loaders for PDF, HEIC, JPEG XL and ImageMagick are separate
+Alpine packages and are not installed.
+
+**Limits.** Each run works with `noongun.media.vips_concurrency` threads (2;
+the default of libvips is one for every core) and with the operation cache
+off, which a process that runs one operation has no use for. All steps of
+one upload together get the lease of a processing slot less five seconds.
+
+**GD stays as a fallback** for an instance that cannot have libvips. It
+loses the colour conversion and nothing else. If the configured engine is
+not in the container, `/up` fails with a sentence in the log that names the
+setting, so the container is reported unhealthy when it starts; an upload is
+refused with a sentence as well.
 
 ### What limits an upload
 
@@ -331,9 +421,10 @@ suggestion and is not attached to anything.
 
 ## Consequences
 
-- **The Docker image changed.** The `base` stage installs GD, so both the
-  `dev` and the `prod` image must be rebuilt. Without GD an upload is refused
-  with a sentence that says so.
+- **The Docker image changed.** The `base` stage installs GD and the libvips
+  programs (`vips-tools`, about 60 MB), so both the `dev` and the `prod`
+  image must be rebuilt. An image without the configured engine fails its
+  health check, and an upload is refused with a sentence that says so.
 - **A new volume.** `media` is mounted at `/app/storage/app/media` in `app`,
   `horizon` and `scheduler`. Backups must include it (ADR 0003). In
   development the folder is in the checkout.
@@ -342,26 +433,47 @@ suggestion and is not attached to anything.
   and the web server (`NOONGUN_MAX_REQUEST_SIZE`, 32 MiB, in
   `docker-compose.yml`). The smallest applies, and the editor is told that
   one.
-- Colour profiles are dropped with the rest of the metadata. A photo in a
-  wide colour space (Display P3 from a recent phone) is stored without its
-  profile and looks slightly less saturated. Converting to sRGB needs
-  ImageMagick and is left until somebody misses it.
+- Colour profiles are dropped with the rest of the metadata, after the
+  pixels were converted to sRGB with them. With `NOONGUN_MEDIA_ENGINE=gd`
+  they are dropped without conversion, and a photo in a wide colour space
+  looks slightly less saturated.
+- A colour outside sRGB is clipped to the nearest one inside. A stored image
+  never holds more than sRGB can show.
+- An image that was stored before the engine changed is not converted
+  again. The same picture uploaded again is a new file, because the two
+  engines do not write the same bytes.
 - HEIC is refused. A browser on a phone converts to JPEG when the file field
   asks for JPEG, PNG and WebP, which the editor should do.
 - Sequential ids are in the addresses of images, as they are for posts. An id
   of another workspace gives 404, as an id that was never given out does.
-- One upload decodes one image in the web process. The rate limit does not
-  bound that: it counts requests in a minute, not how many run together.
-  What bounds it is `ProcessingSlots`: two images at once on the instance
-  and one for each user, held as cache locks with a lease of two minutes,
-  so a place is given back also when the process is killed. A request waits
-  up to five seconds for its turn and is then answered 429 with
-  `Retry-After` and `reason: busy`; the limit per minute answers 429 with
-  `reason: throttled`. Measured peaks of resident memory for one image:
-  282 MB for a 45 megapixel JPEG, 314 MB for 50, and 641 MB for a lossless
-  WebP of 49 megapixels, where the codec holds buffers that PHP's memory
-  limit does not count. So the web container needs room for about 1.3 GB on
-  top of what it uses anyway, with the defaults.
+- One upload decodes one image inside the web container while the request
+  waits. The rate limit does not bound that: it counts requests in a
+  minute, not how many run together. What bounds it is `ProcessingSlots`:
+  two images at once on the instance and one for each user, held as cache
+  locks with a lease of two minutes, so a place is given back also when the
+  process is killed. A request waits up to five seconds for its turn and is
+  then answered 429 with `Retry-After` and `reason: busy`; the limit per
+  minute answers 429 with `reason: throttled`.
+- Memory, measured as the peak of resident memory for one image of 50
+  megapixels (49 for WebP). With libvips it is the largest single run of
+  `vips`, and PHP itself stays where it was (55 MB): 88 MB for a JPEG,
+  192 MB for a PNG, 277 MB for a PNG with an alpha channel, 336 MB for a
+  PNG with sixteen bits a channel, and 476 MB for a lossless WebP, which
+  its codec decodes in one piece. With GD it is the PHP process: 303 MB,
+  401 MB, 449 MB, 401 MB and 704 MB for the same files. So with the
+  defaults the web container needs room for about 1 GB on top of what it
+  uses anyway (1.4 GB with GD), and about 200 MB when the uploads are
+  photos from a camera.
+- Time, same files: 0.40 s against 1.34 s with GD for the 50 megapixel
+  JPEG, 0.90 s against 1.66 s for the PNG, 1.30 s against 2.07 s for the
+  WebP. A 10.8 megapixel phone photo in Display P3 takes 0.26 s against
+  0.18 s: the conversion and starting the processes cost more there than
+  libvips saves.
+- libvips writes temporary files: for a moment up to twelve bytes for each
+  pixel of the upload in the worst case (a PNG with sixteen bits a channel
+  and an alpha channel: 600 MB at 50 megapixels), about 75 MB for a photo
+  as JPEG, which is decoded at a reduced size when it is large. They are in the temporary directory
+  of the container, on its disk.
 - No memory limit is set on the `app` container. Publishing runs in
   `horizon`, a container of its own, so a limit on `app` could not take
   publishing down; but a limit that is wrong for the machine kills the web
@@ -373,7 +485,12 @@ suggestion and is not attached to anything.
   runs it, and a photographer posting three photos a day would have met a
   default of 2 GB within months.
 - Looking for transparency reads every pixel of an image that could have
-  some, in PHP: about a fifth of a second for 11 megapixels.
+  some. GD does it in PHP: about a fifth of a second for 11 megapixels. GD
+  holds seven bits of transparency, so a pixel that is opaque but for one
+  part in 255 counts as opaque there and as transparent with libvips.
+- A JPEG stores colour at half the resolution with both engines, at every
+  quality. libvips would by itself store it at full resolution from quality
+  90 up; that is switched off, so that a JPEG does not grow.
 - Files are written before their row. A process killed in between, a failed
   delete and a deleted workspace leave files that no row points to.
   `noongun:sweep-orphaned-media-files` runs once a week, lists the media

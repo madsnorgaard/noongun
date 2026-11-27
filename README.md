@@ -225,6 +225,12 @@ What happens to an upload:
   image with transparency stays a PNG. A screenshot or a drawing stays a
   PNG as long as that is the smaller file, so its text stays sharp. A
   photograph becomes a JPEG, also when it was saved as PNG.
+- Colours are converted to sRGB. A photo in a wide colour space (Display P3
+  from a phone, Adobe RGB or ProPhoto from a camera) keeps its colours as
+  far as sRGB can show them, a CMYK file comes out as the picture it was,
+  and the colour profile itself is not kept. This is done by libvips, the
+  default image engine; with `NOONGUN_MEDIA_ENGINE=gd` the profile is
+  dropped without conversion and such a photo is stored a little duller.
 - An image with a longer side above 4096 pixels is scaled down to that.
 - A JPEG is stored at quality 90 at most, and at the quality it came with
   when that is lower, so a picture that was already made small for the web
@@ -922,10 +928,12 @@ The app keeps its data in three Docker volumes:
 is new and is mounted inside the folder of the `storage` volume. Docker
 creates it on the first `docker compose up`, empty and owned by the user the
 containers run as; nothing has to be moved, because no image existed before.
-Rebuild on that update, because processing images needs the GD extension of
-PHP, which the image now installs: `docker compose up -d --build --wait`. An
-instance without it refuses every upload and says why. To see that the
-volume is in place and can be written:
+Rebuild on that update, because processing images needs libvips and the GD
+extension of PHP, which the image now installs:
+`docker compose up -d --build --wait`. An instance without its image engine
+is reported unhealthy by `/up`, with a line in the log that says what is
+missing, and refuses every upload with a sentence that says why. To see
+that the volume is in place and can be written:
 
 ```sh
 docker compose exec app sh -c 'touch storage/app/media/.probe && rm storage/app/media/.probe && echo writable'
@@ -965,18 +973,34 @@ instance has no quota: the disk is yours to watch. Two settings help:
 - `NOONGUN_MEDIA_QUOTA_BYTES` sets a limit per workspace. An upload over it
   is refused with a sentence that names this setting.
 
-**How much memory images take.** Decoding an image takes four bytes for
-every pixel, whatever the size of the file, and the image library needs
-more on top that PHP does not count. Measured for one image, as resident
-memory of the process: 282 MB for a 45 megapixel JPEG, 314 MB for 50
-megapixels, and 641 MB for a lossless WebP of 49 megapixels. So that a
+**The image engine.** Uploads are processed by libvips
+(`NOONGUN_MEDIA_ENGINE=vips`, the default), which converts colours to sRGB
+with the profile of the upload. PHP does not load libvips: it runs the
+`vips` program for each step, in a short process that gets none of the
+settings of the app. `NOONGUN_MEDIA_ENGINE=gd` uses the GD extension of PHP
+instead. It does everything else the same way but cannot convert colours;
+it is there for an image built without libvips. Changing the engine changes
+uploads from then on and leaves stored images as they are.
+
+**How much memory images take.** Decoding an image takes memory for every
+pixel, whatever the size of the file. Measured for one image of 50
+megapixels, as the peak of resident memory: with libvips 88 MB for a JPEG,
+192 MB for a PNG, 336 MB for a PNG with sixteen bits a channel and 476 MB
+for a lossless WebP, in the `vips` process and not in PHP. With GD the same
+files take 303 MB, 401 MB, 401 MB and 704 MB in the PHP process. So that a
 handful of small files cannot take all the memory of the machine, only two
 images are processed at once on the whole instance
 (`NOONGUN_MEDIA_CONCURRENT_UPLOADS`) and one for each person. The web app
-therefore needs up to about 1.3 GB for images on top of its ordinary use. On
-a small machine set `NOONGUN_MEDIA_CONCURRENT_UPLOADS=1`. An upload that
-finds no free place waits five seconds and is then asked to come back; the
-editor does that by itself.
+therefore needs up to about 1 GB for images on top of its ordinary use
+(1.4 GB with GD), and about 200 MB when the uploads are photos from a
+camera. On a small machine set `NOONGUN_MEDIA_CONCURRENT_UPLOADS=1`. An
+upload that finds no free place waits five seconds and is then asked to
+come back; the editor does that by itself.
+
+libvips also writes temporary files while it works, in `/tmp` of the `app`
+container: about 75 MB for a photo, and in the worst case twelve bytes for
+each pixel (600 MB for a 50 megapixel PNG with sixteen bits a channel and
+an alpha channel). They are removed when the upload ends.
 
 No memory limit is set on the `app` container. If you want one, give it in a
 compose file of your own that `COMPOSE_FILE` names after `docker-compose.yml`
@@ -1005,11 +1029,12 @@ limit of its own.
 
 **Larger images.** The default of 50 megapixels takes a 45 megapixel camera
 file as it is. For a 61 megapixel body set `NOONGUN_MEDIA_MAX_MEGAPIXELS=62`.
-`NOONGUN_MEDIA_MEMORY_LIMIT` must hold the megapixels times four megabytes
-plus a margin of about 150 MB: the measured margin is 100 to 115 MB for a
-JPEG (282 MB of PHP memory for 45 megapixels, 314 MB for 50). By that rule
-62 megapixels need about 400 MB and fit the default of 512 MB; that figure
-is worked out and not measured.
+With libvips nothing else changes. With GD, `NOONGUN_MEDIA_MEMORY_LIMIT`
+must hold the megapixels times four megabytes plus a margin of about
+150 MB: the measured margin is 100 to 115 MB for a JPEG (282 MB of PHP
+memory for 45 megapixels, 314 MB for 50). By that rule 62 megapixels need
+about 400 MB and fit the default of 512 MB; that figure is worked out and
+not measured.
 
 **Another disk.** `NOONGUN_MEDIA_DISK` names a disk in
 `config/filesystems.php`. The default is the local disk `media`. An
@@ -1115,17 +1140,19 @@ it there.
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
 | `NOONGUN_PUBLISH_MEDIA_TIMEOUT` | `60` | Seconds allowed for sending one image to a platform, all calls for that image together. |
 | `NOONGUN_PUBLISH_MEDIA_UPLOADS_PER_JOB` | `2` | How many images one run of the publishing job sends before it hands the rest to a successor. The time limit of a job grows by this times `NOONGUN_PUBLISH_MEDIA_TIMEOUT` when its post has images. |
+| `NOONGUN_MEDIA_ENGINE` | `vips` | What processes an uploaded image: `vips` (libvips, converts colours to sRGB) or `gd` (the GD extension of PHP, no colour conversion). If the engine is not in the container, `/up` fails and says so in the log. |
+| `NOONGUN_MEDIA_VIPS_CONCURRENCY` | `2` | Threads one run of libvips works with, 1 to 16. More is a little faster on a large image and takes a little more memory. |
 | `NOONGUN_MEDIA_DISK` | `media` | The disk in `config/filesystems.php` that new images are written to. Must be private. See "Images, the media volume and backups". |
 | `NOONGUN_MEDIA_MAX_BYTES` | `20971520` | Largest file of one upload, in bytes. PHP and the web server must allow it as well; the smallest limit applies. |
 | `NOONGUN_MAX_REQUEST_SIZE` | `32MiB` | Largest request the web server passes on to the app. Read by `docker-compose.yml`. Keep it in step with `upload_max_filesize` and `post_max_size` in `docker/app/php.ini`. |
 | `NOONGUN_MEDIA_MAX_MEGAPIXELS` | `50` | Most pixels of one uploaded image, in millions. Checked from the header of the file before it is decoded. |
 | `NOONGUN_MEDIA_MAX_SIDE` | `16000` | Longest side of an uploaded image, in pixels. |
-| `NOONGUN_MEDIA_MEMORY_LIMIT` | `512M` | PHP memory limit while one image is processed: the megapixels times 4 MB, plus about 150 MB. |
+| `NOONGUN_MEDIA_MEMORY_LIMIT` | `512M` | Only with the GD engine: PHP memory limit while one image is processed, the megapixels times 4 MB, plus about 150 MB. libvips does not use the memory of PHP. |
 | `NOONGUN_MEDIA_STORED_SIDE` | `4096` | An image with a longer side than this is scaled down to it before it is stored. |
 | `NOONGUN_MEDIA_THUMBNAIL_SIDE` | `480` | Longest side of the small copy the lists show. |
 | `NOONGUN_MEDIA_JPEG_QUALITY` | `90` | Highest quality of stored JPEG files, 50 to 100. A JPEG that came at a lower quality and is not scaled down keeps about that quality, never under 60. |
 | `NOONGUN_MEDIA_LOSSLESS_CHOICE_MEGAPIXELS` | `9` | Up to this size an opaque image from a lossless format is written as PNG and as JPEG and the smaller file is kept. Above it, it becomes a JPEG. |
-| `NOONGUN_MEDIA_CONCURRENT_UPLOADS` | `2` | How many images the whole instance processes at once. Each can take 300 to 650 MB for a moment. One person always has one at a time. |
+| `NOONGUN_MEDIA_CONCURRENT_UPLOADS` | `2` | How many images the whole instance processes at once. Each can take 90 to 480 MB for a moment (300 to 700 MB with GD). One person always has one at a time. |
 | `NOONGUN_MEDIA_SLOT_WAIT_SECONDS` | `5` | How long an upload waits for its turn before it is answered with 429 and `Retry-After`. |
 | `NOONGUN_MEDIA_SLOT_LEASE_SECONDS` | `120` | After this long a turn that was never given back, because its process died, is free again. |
 | `NOONGUN_MEDIA_QUOTA_BYTES` | unset | Most bytes all stored images of one workspace may take together. Unset: no limit on a self-hosted instance, 2 GB in `saas` mode. `0`: no limit. |
@@ -1326,6 +1353,9 @@ not your email address, your connections or your posts.
 
 The Pest suite runs against the `noongun_testing` database, which the
 PostgreSQL container creates on first start. Tests never call external APIs.
+The tests of what a stored image is run once with each image engine
+(the dataset `image engines`); those for an engine the machine does not have
+are skipped, so the suite also runs where libvips is not installed.
 GitHub Actions runs Pint, Larastan, the migration check and Pest on every pull
 request (`.github/workflows/ci.yml`).
 
