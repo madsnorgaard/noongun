@@ -36,6 +36,14 @@ function configureFacebook(array $overrides = []): void
             'graph_url' => 'https://graph.facebook.test',
             'dialog_url' => 'https://www.facebook.test',
             'scopes' => ['pages_show_list', 'pages_read_engagement', 'pages_manage_posts'],
+            'media_types' => ['image/jpeg', 'image/png'],
+            'max_media_items' => 6,
+            'max_media_bytes' => 7_000_000,
+            'max_media_pixels' => null,
+            'alt_text_length' => 700,
+            'media_link_rule' => 'in_text',
+            'media_upload_lifetime' => 7200,
+            'media_upload_trusted' => 600,
             ...$overrides,
         ],
     ]);
@@ -85,25 +93,35 @@ function facebookProof(string $token): string
  *
  *     fakeGraph(['feed' => facebookResponse('error_validation', 400)]);
  *
- * Keys: code, exchange, accounts, debug, feed, delete. A value is a fixture
- * name, a response, or a closure that gets the request.
+ * Keys: code, exchange, accounts, debug, feed, photos, delete. A value is a
+ * fixture name, a response, or a closure that gets the request and the
+ * options of the HTTP client.
+ *
+ * Every photo upload is read while the call is open, because the adapter
+ * closes the file afterwards, and kept for facebookUploads(). Without a
+ * replacement each upload is answered with a photo id of its own:
+ * 800000000000001, 800000000000002 and so on.
  *
  * @param  array<string, mixed>  $responses
  */
 function fakeGraph(array $responses = []): void
 {
+    $uploads = &facebookUploadLog();
+    $uploads = [];
+
     $responses += [
         'code' => 'oauth_code_exchange',
         'exchange' => 'oauth_long_lived_exchange',
         'accounts' => 'me_accounts',
         'debug' => 'debug_token_page',
         'feed' => 'feed_post',
+        'photos' => fn () => Http::response(['id' => (string) (800000000000000 + count(facebookUploads()))]),
         'delete' => 'delete_post',
     ];
 
     Http::preventStrayRequests();
 
-    Http::fake(function (Request $request) use ($responses) {
+    Http::fake(function (Request $request, array $options = []) use ($responses, &$uploads) {
         expect($request->url())->toStartWith(FACEBOOK_TEST_GRAPH.'/');
 
         $path = (string) parse_url($request->url(), PHP_URL_PATH);
@@ -113,14 +131,19 @@ function fakeGraph(array $responses = []): void
             str_ends_with($path, '/me/accounts') => 'accounts',
             str_ends_with($path, '/debug_token') => 'debug',
             str_ends_with($path, '/feed') => 'feed',
+            str_ends_with($path, '/photos') => 'photos',
             $request->method() === 'DELETE' => 'delete',
             default => throw new RuntimeException("Unexpected Graph API call in a test: {$request->method()} {$path}"),
         };
 
+        if ($key === 'photos') {
+            $uploads[] = ['url' => $request->url(), 'timeout' => $options['timeout'] ?? null, ...facebookMultipart($request)];
+        }
+
         $response = $responses[$key];
 
         if ($response instanceof Closure) {
-            $response = $response($request);
+            $response = $response($request, $options);
         }
 
         return is_string($response) ? facebookResponse($response) : $response;
@@ -167,4 +190,59 @@ function facebookQuery(Request $request): array
     parse_str((string) parse_url($request->url(), PHP_URL_QUERY), $query);
 
     return $query;
+}
+
+/**
+ * @return list<array{url: string, timeout: mixed, fields: array<string, string>, file: array{field: string, filename: string, type: string, contents: string}|null}>
+ */
+function &facebookUploadLog(): array
+{
+    static $log = [];
+
+    return $log;
+}
+
+/**
+ * Every photo upload the faked Graph API received since fakeGraph(), in
+ * order: the address, the time limit of the call, the fields of the form
+ * and the file as it arrived.
+ *
+ * @return list<array{url: string, timeout: mixed, fields: array<string, string>, file: array{field: string, filename: string, type: string, contents: string}|null}>
+ */
+function facebookUploads(): array
+{
+    return facebookUploadLog();
+}
+
+/**
+ * The parts of a multipart/form-data request: its plain fields by name,
+ * and the one file it carries.
+ *
+ * @return array{fields: array<string, string>, file: array{field: string, filename: string, type: string, contents: string}|null}
+ */
+function facebookMultipart(Request $request): array
+{
+    expect($request->isMultipart())->toBeTrue();
+    expect(preg_match('/boundary="?([^";]+)"?/', $request->header('Content-Type')[0] ?? '', $boundary))->toBe(1);
+
+    $fields = [];
+    $file = null;
+
+    foreach (array_slice(explode('--'.$boundary[1], $request->body()), 1, -1) as $part) {
+        [$head, $contents] = explode("\r\n\r\n", ltrim($part, "\r\n"), 2);
+        $contents = substr($contents, 0, -2);
+
+        expect(preg_match('/name="([^"]*)"/', $head, $name))->toBe(1);
+
+        if (preg_match('/filename="([^"]*)"/', $head, $filename) === 1) {
+            preg_match('/Content-Type:\s*(\S+)/i', $head, $type);
+            $file = ['field' => $name[1], 'filename' => $filename[1], 'type' => $type[1] ?? '', 'contents' => $contents];
+
+            continue;
+        }
+
+        $fields[$name[1]] = $contents;
+    }
+
+    return ['fields' => $fields, 'file' => $file];
 }

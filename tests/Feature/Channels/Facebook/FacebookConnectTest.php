@@ -34,8 +34,6 @@ it('describes what a Page post accepts', function () {
 
     expect($capabilities->maxBodyLength)->toBe(63206)
         ->and($capabilities->linkPreviews)->toBeTrue()
-        ->and($capabilities->maxMediaItems)->toBe(0)
-        ->and($capabilities->mediaTypes)->toBe([])
         ->and($capabilities->rateLimit?->toArray())->toBe(['max_calls' => 4800, 'per_seconds' => 86400]);
 });
 

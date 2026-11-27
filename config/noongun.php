@@ -92,6 +92,33 @@ return [
             // gives no limit; this is the one Facebook has stated for posts.
             // See docs/platform-notes/meta.md.
             'max_body_length' => 63206,
+            // Images on a Page post. The types, the size of one file and the
+            // time an unpublished photo is kept are from the Page Photos
+            // reference; the count and the length of a description are not
+            // documented and are careful assumptions. An empty list of
+            // types, or a count of 0, turns images off for Facebook.
+            // See docs/platform-notes/meta.md, 2026-11-26.
+            'media_types' => array_values(array_filter(array_map(
+                fn (string $type): string => strtolower(trim($type)),
+                explode(',', (string) env('FACEBOOK_MEDIA_TYPES', 'image/jpeg,image/png')),
+            ))),
+            'max_media_items' => (int) env('FACEBOOK_MAX_MEDIA_ITEMS', 10),
+            // "Files can not exceed 10MB."
+            'max_media_bytes' => (int) env('FACEBOOK_MAX_MEDIA_BYTES', 10_000_000),
+            // Meta names no limit in pixels. Empty means none.
+            'max_media_pixels' => env('FACEBOOK_MAX_MEDIA_PIXELS'),
+            'alt_text_length' => (int) env('FACEBOOK_ALT_TEXT_LENGTH', 1000),
+            // in_text: the link of a post with images is sent as the last
+            // line of its text. Meta does not document "link" together
+            // with "attached_media", so the two are never sent together.
+            'media_link_rule' => env('FACEBOOK_MEDIA_LINK_RULE', 'in_text'),
+            // Seconds an uploaded photo may wait for its post. Facebook
+            // deletes an unpublished photo after "about 24 hours".
+            'media_upload_lifetime' => (int) env('FACEBOOK_MEDIA_UPLOAD_LIFETIME', 20 * 3600),
+            // An upload younger than this is taken as still held by
+            // Facebook: when Facebook refuses the post, its photos are
+            // not blamed and not sent again.
+            'media_upload_trusted' => (int) env('FACEBOOK_MEDIA_UPLOAD_TRUSTED', 900),
         ],
 
         // A member's own profile, through the self-serve products "Share on
