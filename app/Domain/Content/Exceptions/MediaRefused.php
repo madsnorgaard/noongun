@@ -70,7 +70,7 @@ class MediaRefused extends RuntimeException
 
     public static function notSupportedHere(): self
     {
-        return new self(self::text('This instance cannot process images: the image library of PHP is missing. Ask the person who runs it to rebuild the Docker image.'));
+        return new self(self::text('This instance cannot process images: its image library is missing. Ask the person who runs it to rebuild the Docker image.'));
     }
 
     /**

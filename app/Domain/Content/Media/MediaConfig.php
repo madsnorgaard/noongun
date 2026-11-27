@@ -93,6 +93,25 @@ final class MediaConfig
         return min(100, self::int('jpeg_quality', 90, 50));
     }
 
+    /**
+     * The engine that processes uploads. Anything that is not a known
+     * engine is the default one.
+     */
+    public static function engine(): ImageEngine
+    {
+        $engine = config('noongun.media.engine');
+
+        return ImageEngine::tryFrom(is_string($engine) ? strtolower(trim($engine)) : '') ?? ImageEngine::Vips;
+    }
+
+    /**
+     * How many threads one run of libvips works with.
+     */
+    public static function vipsConcurrency(): int
+    {
+        return min(16, self::int('vips_concurrency', 2, 1));
+    }
+
     public static function memoryLimit(): string
     {
         $limit = config('noongun.media.memory_limit');

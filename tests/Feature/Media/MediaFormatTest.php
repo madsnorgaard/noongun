@@ -1,6 +1,7 @@
 <?php
 
-use App\Domain\Content\Media\GdImageProcessor;
+use App\Domain\Content\Media\EncodingRules;
+use App\Domain\Content\Media\ImageEngine;
 use App\Domain\Content\Media\ImageProcessor;
 use App\Domain\Content\Media\JpegQuality;
 use App\Domain\Content\Models\Media;
@@ -12,7 +13,8 @@ require_once __DIR__.'/../../Support/media.php';
 
 /*
  * What a stored image is: a JPEG or a PNG, decided from its pixels and not
- * from the type it was sent as, and never larger than it has to be.
+ * from the type it was sent as, and never larger than it has to be. With
+ * each image engine: the rules are the same whatever decodes the pixels.
  */
 
 beforeEach(function () {
@@ -31,9 +33,9 @@ function stored(string $bytes, string $name = 'image.png'): Media
     return Media::query()->withoutGlobalScopes()->latest('id')->firstOrFail();
 }
 
-it('resolves the image engine through one interface', function () {
-    expect(app(ImageProcessor::class))->toBeInstanceOf(GdImageProcessor::class);
-});
+it('processes uploads with the engine that is configured', function (ImageEngine $engine) {
+    expect(app(ImageProcessor::class))->toBeInstanceOf($engine->processor());
+})->with('image engines');
 
 describe('a photograph that was saved in a lossless format', function () {
     it('is stored as a JPEG, far smaller than it came', function (Closure $bytes) {
@@ -49,14 +51,14 @@ describe('a photograph that was saved in a lossless format', function () {
         'a PNG' => [fn () => photoLikeBytes('png')],
         'a PNG with an alpha channel in which every pixel is opaque' => [fn () => photoLikeBytes('png', alphaChannel: true)],
         'a lossless WebP' => [fn () => photoLikeBytes('webp')],
-    ]);
+    ])->with('image engines');
 
     it('is stored as a JPEG without trying a PNG when it is large', function () {
         config(['noongun.media.lossless_choice_megapixels' => 0.01]);
 
         // Flat colour, where a PNG would win if it were tried.
         expect(stored(pngBytes(200, 100, transparent: false))->mime)->toBe('image/jpeg');
-    });
+    })->with('image engines');
 });
 
 describe('a screenshot or a drawing', function () {
@@ -78,7 +80,7 @@ describe('a screenshot or a drawing', function () {
     })->with([
         'sent as PNG' => [fn () => screenshotLikeBytes('png')],
         'sent as lossless WebP' => [fn () => screenshotLikeBytes('webp')],
-    ]);
+    ])->with('image engines');
 });
 
 describe('an image with transparency', function () {
@@ -95,7 +97,7 @@ describe('an image with transparency', function () {
         expect($media->mime)->toBe('image/png')
             ->and(pixelOf(storedBytes($media), 77, 41))->toBe([10, 20, 30, 60])
             ->and(pixelOf(storedBytes($media), 10, 10)[3])->toBe(0);
-    });
+    })->with('image engines');
 
     it('stays a PNG whatever its size, also when it was scaled down', function () {
         config(['noongun.media.lossless_choice_megapixels' => 0.001, 'noongun.media.stored_side' => 100]);
@@ -105,7 +107,7 @@ describe('an image with transparency', function () {
         expect($media->mime)->toBe('image/png')
             ->and([$media->width, $media->height])->toBe([100, 50])
             ->and(pixelOf(storedBytes($media), 1, 1)[3])->toBe(127);
-    });
+    })->with('image engines');
 
     it('is found in a PNG that says so with a palette', function () {
         $image = imagecreate(40, 20);
@@ -119,7 +121,7 @@ describe('an image with transparency', function () {
         expect($media->mime)->toBe('image/png')
             ->and(pixelOf(storedBytes($media), 1, 1)[3])->toBe(127)
             ->and(pixelOf(storedBytes($media), 20, 10))->toBe([200, 0, 0, 0]);
-    });
+    })->with('image engines');
 });
 
 describe('the quality of a stored JPEG', function () {
@@ -146,11 +148,11 @@ describe('the quality of a stored JPEG', function () {
         'web quality stays' => [70, 70],
         'a little under the configured quality stays' => [85, 85],
         'the configured quality is the most' => [97, 90],
-    ]);
+    ])->with('image engines');
 
     it('never stores a JPEG below the floor, whatever its tables say', function () {
-        expect(JpegQuality::fromBytes(storedBytes(stored(jpegAtQuality(30), 'photo.jpg'))))->toBe(GdImageProcessor::QUALITY_FLOOR);
-    });
+        expect(JpegQuality::fromBytes(storedBytes(stored(jpegAtQuality(30), 'photo.jpg'))))->toBe(EncodingRules::QUALITY_FLOOR);
+    })->with('image engines');
 
     it('would have made the file larger at the configured quality', function () {
         $sent = jpegAtQuality(70);
@@ -168,7 +170,7 @@ describe('the quality of a stored JPEG', function () {
 
         expect($media->width)->toBe(160)
             ->and(JpegQuality::fromBytes(storedBytes($media)))->toBe(90);
-    });
+    })->with('image engines');
 });
 
 describe('what a stored file says about itself', function () {
@@ -185,7 +187,7 @@ describe('what a stored file says about itself', function () {
     })->with([
         'a JPEG' => [fn () => jpegBytes(withLocation: true)],
         'a photograph sent as PNG' => [fn () => photoLikeBytes('png')],
-    ]);
+    ])->with('image engines');
 });
 
 describe('an animation', function () {
@@ -199,7 +201,7 @@ describe('an animation', function () {
     })->with([
         'an animated PNG' => [fn () => animatedPngBytes(), 'spinner.png'],
         'an animated WebP' => [fn () => animatedWebpBytes(), 'spinner.webp'],
-    ]);
+    ])->with('image engines');
 
     it('would be decoded as a still picture if it were not caught', function () {
         // The reason for the check: the image library reads an animated
@@ -215,5 +217,5 @@ describe('an animation', function () {
 
         expect($media->width)->toBe(40)
             ->and(storedBytes($media))->not->toContain('only a word here');
-    });
+    })->with('image engines');
 });

@@ -236,15 +236,21 @@ return [
     | are read through the application and never through a public address,
     | so the "public" disk is refused.
     |
+    | "engine" is what decodes an upload and writes it again: "vips" runs
+    | the vips program of libvips and converts colours to sRGB with the
+    | profile of the file; "gd" is the GD extension of PHP, which cannot.
+    | Anything else is taken as "vips". "vips_concurrency" is how many
+    | threads one run of libvips works with.
+    |
     | "max_bytes" is the largest file one upload may be. PHP must allow it as
     | well: upload_max_filesize and post_max_size in docker/app/php.ini, and
     | the request_body limit of the web server in docker-compose.yml. The
     | smallest of them is what applies.
     | "max_megapixels" and "max_side" are checked from the header of the
     | file, before the image is decoded: decoding takes four bytes of memory
-    | for every pixel. "memory_limit" is the PHP memory limit while one image
-    | is processed and must cover max_megapixels x 4 MB plus a margin of
-    | about 150 MB.
+    | for every pixel. "memory_limit" is the PHP memory limit while GD
+    | processes one image and must cover max_megapixels x 4 MB plus a margin
+    | of about 150 MB; libvips works outside the memory of PHP.
     | An image with a longer side than "stored_side" is scaled down to it.
     | "thumbnail_side" is the longest side of the small copy the lists show.
     | "jpeg_quality" is the quality a JPEG is stored with at most: a JPEG
@@ -272,6 +278,8 @@ return [
     */
 
     'media' => [
+        'engine' => env('NOONGUN_MEDIA_ENGINE', 'vips'),
+        'vips_concurrency' => (int) env('NOONGUN_MEDIA_VIPS_CONCURRENCY', 2),
         'disk' => env('NOONGUN_MEDIA_DISK', 'media'),
         'max_bytes' => (int) env('NOONGUN_MEDIA_MAX_BYTES', 20 * 1024 * 1024),
         'max_megapixels' => (float) env('NOONGUN_MEDIA_MAX_MEGAPIXELS', 50),
