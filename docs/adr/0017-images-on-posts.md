@@ -249,10 +249,21 @@ change nothing for an adapter that does not set them: `maxMediaBytes`,
 text), `mediaLinkRule` and `mediaUploadLifetime`. No aspect ratio rule was
 added: neither platform documents one that refuses an image.
 
-Both adapters still declare that they take no media. Until they do, a post
-with images cannot be approved for their channels.
+Both adapters declare what they take, from their block in `config/noongun.php`.
 
-The LinkedIn adapter now declares what it takes: JPEG and PNG, 20 images,
+The Facebook adapter takes JPEG and PNG, 10 images (an assumption, Meta
+documents no count), 10 MB, an alternative text of 1000 characters (an
+assumption), `in_text` for the link, and uploads that are used within 20
+hours, because Facebook deletes an unpublished photo after about a day. Each
+image is uploaded unpublished and one feed call attaches them, for one image
+as for several, so only that call makes anything public.
+
+An adapter that learns from a certain refusal of the publish call that its
+uploads are gone throws `PublishFailed::uploadsNoLongerValid()`. The job then
+forgets the upload state of the variant and the next attempt uploads again.
+Uploads made a moment ago are never blamed, so a second refusal is final.
+
+The LinkedIn adapter takes: JPEG and PNG, 20 images,
 5 MB (an assumption, LinkedIn documents no size), 36,152,319 pixels, an
 alternative text of 4086 characters, `in_text` for the link, and uploads
 that are used for a day. ADR 0015 has the reasons and what is assumed.
