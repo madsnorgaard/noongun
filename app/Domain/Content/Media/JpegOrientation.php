@@ -32,6 +32,28 @@ final class JpegOrientation
         return 1;
     }
 
+    /**
+     * How many quarter turns clockwise bring a picture with this
+     * orientation upright, 0 to 3. A mirrored one is mirrored afterwards.
+     */
+    public static function quarterTurns(int $orientation): int
+    {
+        return match ($orientation) {
+            3, 4 => 2,
+            5, 6 => 1,
+            7, 8 => 3,
+            default => 0,
+        };
+    }
+
+    /**
+     * Whether the picture is mirrored left to right once it is turned.
+     */
+    public static function mirrored(int $orientation): bool
+    {
+        return in_array($orientation, [2, 4, 5, 7], true);
+    }
+
     private static function fromTiff(string $tiff): int
     {
         $order = substr($tiff, 0, 2);

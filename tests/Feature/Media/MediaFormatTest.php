@@ -1,5 +1,6 @@
 <?php
 
+use App\Domain\Content\Media\EncodingRules;
 use App\Domain\Content\Media\GdImageProcessor;
 use App\Domain\Content\Media\ImageProcessor;
 use App\Domain\Content\Media\JpegQuality;
@@ -149,7 +150,7 @@ describe('the quality of a stored JPEG', function () {
     ]);
 
     it('never stores a JPEG below the floor, whatever its tables say', function () {
-        expect(JpegQuality::fromBytes(storedBytes(stored(jpegAtQuality(30), 'photo.jpg'))))->toBe(GdImageProcessor::QUALITY_FLOOR);
+        expect(JpegQuality::fromBytes(storedBytes(stored(jpegAtQuality(30), 'photo.jpg'))))->toBe(EncodingRules::QUALITY_FLOOR);
     });
 
     it('would have made the file larger at the configured quality', function () {

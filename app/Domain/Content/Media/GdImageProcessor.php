@@ -17,29 +17,26 @@ use Throwable;
  * the image data. GD writes a comment of its own into a JPEG, naming itself
  * and the quality; that is taken out again.
  *
- * What a stored image is, is decided from its pixels and not from the type
- * it was sent as:
+ * GD cannot read a colour profile. The numbers of the pixels are kept as
+ * they are and the profile is dropped, so a photo in a wide colour space
+ * is stored duller than it was. VipsImageProcessor converts; this engine is
+ * what an instance without libvips falls back to.
  *
- * - An image with a pixel that is not opaque is a PNG.
- * - An opaque image that came in a lossless format and is not large is
- *   written both ways, and the smaller file is kept. A screenshot or a
- *   drawing stays a sharp PNG. A photograph that was saved as PNG becomes
- *   a JPEG, a tenth of the size, which a platform will take.
- * - Everything else is a JPEG, at the configured quality, or at the quality
- *   it came with when that is lower and the image is not scaled down.
+ * What a stored image is, is decided from its pixels and not from the type
+ * it was sent as, by EncodingRules.
  */
 class GdImageProcessor implements ImageProcessor
 {
-    /** A JPEG is never stored below this quality, whatever its source says. */
-    public const QUALITY_FLOOR = 60;
-
-    private const THUMBNAIL_QUALITY = 80;
-
     public function __construct(private readonly ImageInspector $inspector) {}
+
+    public static function available(): bool
+    {
+        return function_exists('imagecreatetruecolor') && function_exists('imagecreatefromwebp');
+    }
 
     public function process(string $path): ProcessedImage
     {
-        if (! function_exists('imagecreatetruecolor') || ! function_exists('imagecreatefromwebp')) {
+        if (! self::available()) {
             throw MediaRefused::notSupportedHere();
         }
 
@@ -57,7 +54,7 @@ class GdImageProcessor implements ImageProcessor
                 $image = $this->upright($image, JpegOrientation::of($path));
             }
 
-            $thumbnail = $this->encodeJpeg($this->flatten($image, MediaConfig::thumbnailSide()), self::THUMBNAIL_QUALITY);
+            $thumbnail = $this->encodeJpeg($this->flatten($image, MediaConfig::thumbnailSide()), EncodingRules::THUMBNAIL_QUALITY);
 
             [$stored, $png] = $this->encode($image, $facts, $scaled);
         } catch (MediaRefused $e) {
@@ -66,21 +63,7 @@ class GdImageProcessor implements ImageProcessor
             throw MediaRefused::unreadable();
         }
 
-        $size = fstat($stored)['size'] ?? 0;
-        $hash = hash_init('sha256');
-        hash_update_stream($hash, $stored);
-        rewind($stored);
-
-        return new ProcessedImage(
-            image: $stored,
-            thumbnail: $thumbnail,
-            mime: $png ? 'image/png' : 'image/jpeg',
-            extension: $png ? 'png' : 'jpg',
-            byteSize: $size,
-            width: imagesx($image),
-            height: imagesy($image),
-            hash: hash_final($hash),
-        );
+        return ProcessedImage::of($stored, $thumbnail, $png, imagesx($image), imagesy($image));
     }
 
     /**
@@ -94,18 +77,9 @@ class GdImageProcessor implements ImageProcessor
             return [$this->encodePng($image), true];
         }
 
-        $quality = MediaConfig::jpegQuality();
+        $jpeg = $this->encodeJpeg($image, EncodingRules::jpegQuality($facts, $scaled));
 
-        // Writing a file again at a higher quality than it came with adds
-        // bytes and no detail. A scaled image is a new image and gets the
-        // configured quality.
-        if ($facts->jpegQuality !== null && ! $scaled) {
-            $quality = min($quality, max(self::QUALITY_FLOOR, $facts->jpegQuality));
-        }
-
-        $jpeg = $this->encodeJpeg($image, $quality);
-
-        if (! $facts->lossless || imagesx($image) * imagesy($image) > MediaConfig::losslessChoicePixels()) {
+        if (! EncodingRules::triesPng($facts, imagesx($image) * imagesy($image))) {
             return [$jpeg, false];
         }
 
@@ -220,15 +194,11 @@ class GdImageProcessor implements ImageProcessor
      */
     private function upright(GdImage $image, int $orientation): GdImage
     {
-        $angle = match ($orientation) {
-            3, 4 => 180,
-            5, 6 => 270,
-            7, 8 => 90,
-            default => 0,
-        };
+        $turns = JpegOrientation::quarterTurns($orientation);
 
-        if ($angle !== 0) {
-            $turned = imagerotate($image, $angle, 0);
+        if ($turns !== 0) {
+            // GD turns anticlockwise.
+            $turned = imagerotate($image, (4 - $turns) * 90, 0);
 
             if ($turned === false) {
                 throw new RuntimeException('The image could not be turned.');
@@ -237,7 +207,7 @@ class GdImageProcessor implements ImageProcessor
             $image = $turned;
         }
 
-        if (in_array($orientation, [2, 4, 5, 7], true)) {
+        if (JpegOrientation::mirrored($orientation)) {
             imageflip($image, IMG_FLIP_HORIZONTAL);
         }
 
@@ -273,7 +243,7 @@ class GdImageProcessor implements ImageProcessor
         imagealphablending($image, false);
         imagesavealpha($image, true);
 
-        if (! imagepng($image, $stream, 6)) {
+        if (! imagepng($image, $stream, EncodingRules::PNG_COMPRESSION)) {
             fclose($stream);
 
             throw new RuntimeException('The image could not be written.');
