@@ -94,18 +94,51 @@ final readonly class ChannelCapabilities
      * The text as the platform gets it: the body, and after it the link
      * when linkGoesInText(). The readiness check measures this text against
      * the limit, and an adapter sends exactly this, so that what was
-     * approved is what goes out. Pass the link as it is sent, with its
-     * campaign parameters. A link the body already ends with is not repeated.
+     * approved is what goes out.
+     *
+     * $link is the link as it is sent, with its campaign parameters, and
+     * $typedLink the link as the author typed it. A reader gets the link
+     * once: a body that already ends with either of them is not given a
+     * second one. Where it ends with the typed link, that is replaced by
+     * the link that is sent, so that a click is still counted for the
+     * campaign.
      */
-    public function textFor(string $body, ?string $link, int $images): string
+    public function textFor(string $body, ?string $link, int $images, ?string $typedLink = null): string
     {
         $link = trim((string) $link);
 
-        if (! $this->linkGoesInText($link, $images) || str_ends_with(rtrim($body), $link)) {
+        if (! $this->linkGoesInText($link, $images)) {
             return $body;
         }
 
-        return rtrim($body) === '' ? $link : rtrim($body).self::LINK_SEPARATOR.$link;
+        $text = rtrim($body);
+
+        if (self::endsWithLink($text, $link)) {
+            return $body;
+        }
+
+        $typed = trim((string) $typedLink);
+
+        if ($typed !== '' && self::endsWithLink($text, $typed)) {
+            return substr($text, 0, -strlen($typed)).$link;
+        }
+
+        return $text === '' ? $link : $text.self::LINK_SEPARATOR.$link;
+    }
+
+    /**
+     * Whether the text ends with the link as a word of its own, and not
+     * with another address that only ends the same way.
+     */
+    private static function endsWithLink(string $text, string $link): bool
+    {
+        if (! str_ends_with($text, $link)) {
+            return false;
+        }
+
+        $before = substr($text, 0, -strlen($link));
+
+        return $before === '' || preg_match('/\s$/u', $before) === 1;
     }
 
     /**

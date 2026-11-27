@@ -211,18 +211,13 @@ class PostPreconditions
             }
 
             if ($capabilities->linkGoesInText($variant->link, $variant->attachments->count())) {
-                // A text that ends with the bare link gets the link once
-                // more when the link that is sent carries campaign
-                // parameters and so is not the same text.
-                $twice = str_ends_with(rtrim($variant->body), trim((string) $variant->link))
-                    && $variant->textFor($capabilities) !== $variant->body;
-
-                $advice["variants.{$variant->id}.link"] = [self::text($twice
-                    ? 'The text for :channel already ends with its link. With an image the link is added once more as the last line, with its campaign parameters. Take the link out of the text.'
-                    : 'With an image, :platform shows no preview of the link. The link for :channel goes out as the last line of the text.', [
-                        'platform' => PlatformLabel::for($channel->platform),
-                        'channel' => $channel->display_name,
-                    ])];
+                // True also for a text that already ends with its link: the
+                // link is then not added a second time
+                // (ChannelCapabilities::textFor()).
+                $advice["variants.{$variant->id}.link"] = [self::text('With an image, :platform shows no preview of the link. The link for :channel goes out as the last line of the text.', [
+                    'platform' => PlatformLabel::for($channel->platform),
+                    'channel' => $channel->display_name,
+                ])];
             }
         }
 

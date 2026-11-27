@@ -70,22 +70,46 @@ export function linkGoesInText(
 /**
  * The text as the platform gets it, built the way the server builds it
  * (ChannelCapabilities::textFor), so that the count on the page is the
- * count the readiness check makes.
+ * count the readiness check makes. `link` is the link as it is sent, with
+ * its campaign parameters, and `typedLink` the link as it is typed. A text
+ * that already ends with either gets no second link; where it ends with
+ * the typed one, that is replaced by the one that is sent.
  */
 export function textAsSent(
     body: string,
     link: string,
     images: number,
     rule: MediaRules['link_rule'],
+    typedLink: string = '',
 ): string {
     const address = link.replace(trailing, '').replace(leading, '');
     const text = body.replace(trailing, '');
 
-    if (!linkGoesInText(address, images, rule) || text.endsWith(address)) {
+    if (!linkGoesInText(address, images, rule) || endsWithLink(text, address)) {
         return body;
     }
 
+    const typed = typedLink.replace(trailing, '').replace(leading, '');
+
+    if (typed !== '' && endsWithLink(text, typed)) {
+        return text.slice(0, text.length - typed.length) + address;
+    }
+
     return text === '' ? address : `${text}\n\n${address}`;
+}
+
+/**
+ * Whether the text ends with the link as a word of its own, and not with
+ * another address that only ends the same way.
+ */
+export function endsWithLink(text: string, link: string): boolean {
+    if (link === '' || !text.endsWith(link)) {
+        return false;
+    }
+
+    const before = text.slice(0, text.length - link.length);
+
+    return before === '' || /\s$/u.test(before);
 }
 
 /**

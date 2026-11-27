@@ -6,7 +6,12 @@ import VariantImages from '@/components/posts/VariantImages.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { linkGoesInText, textAsSent, withCampaign } from '@/lib/media';
+import {
+    endsWithLink as textEndsWithLink,
+    linkGoesInText,
+    textAsSent,
+    withCampaign,
+} from '@/lib/media';
 import { textLength } from '@/lib/posts';
 import type {
     ChannelOption,
@@ -135,18 +140,21 @@ const sent = computed(() =>
         sentLink.value,
         media.value.length,
         rules.value.link_rule,
+        link.value,
     ),
 );
 
-// The text already ends with the link that is typed in the link field.
+// The text already ends with the link, as it is typed or as it is sent.
+// It is then not added a second time.
 const endsWithLink = computed(
     () =>
         linkInText.value &&
-        link.value.trim() !== '' &&
-        body.value.trimEnd().endsWith(link.value.trim()),
+        (textEndsWithLink(body.value.trimEnd(), link.value.trim()) ||
+            textEndsWithLink(body.value.trimEnd(), sentLink.value.trim())),
 );
-// The link is then added once more when what is sent is not what is typed.
-const linkTwice = computed(
+// The typed link at the end of the text goes out with its campaign
+// parameters, so what is sent is not letter for letter what is typed.
+const linkGetsCampaign = computed(
     () => endsWithLink.value && sent.value !== body.value,
 );
 
@@ -569,10 +577,10 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                 >
                     Check
                 </span>
-                <template v-if="linkTwice">
-                    The text already ends with this link. With images the link
-                    is added once more as the last line, with its campaign
-                    parameters. Take the link out of the text.
+                <template v-if="linkGetsCampaign">
+                    With images, {{ channel.platform_label }} shows no link
+                    card. The text already ends with the link, so it is not
+                    added again. It goes out with its campaign parameters.
                 </template>
                 <template v-else-if="endsWithLink">
                     With images, {{ channel.platform_label }} shows no link

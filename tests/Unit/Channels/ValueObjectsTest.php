@@ -89,6 +89,29 @@ it('sends the link of a post with images as the last line of its text, where ima
         ->and($both->linkGoesInText('https://example.com/a', 1))->toBeFalse();
 });
 
+it('gives the reader one link, with its campaign parameters, when the text already ends with the link', function () {
+    $inText = new ChannelCapabilities(maxBodyLength: 500, mediaTypes: ['image/jpeg'], maxMediaItems: 2);
+    $typed = 'https://example.com/a';
+    $sent = 'https://example.com/a?utm_source=noongun';
+
+    // The typed link at the end is replaced by the one that is sent.
+    expect($inText->textFor("Open from eight.\n\n{$typed}", $sent, 1, $typed))->toBe("Open from eight.\n\n{$sent}")
+        ->and($inText->textFor("Open from eight. {$typed}  \n", $sent, 1, $typed))->toBe("Open from eight. {$sent}")
+        ->and($inText->textFor($typed, $sent, 1, $typed))->toBe($sent)
+        // Already the link that is sent: nothing to do.
+        ->and($inText->textFor("Open from eight.\n\n{$sent}", $sent, 1, $typed))->toBe("Open from eight.\n\n{$sent}")
+        // Without parameters both are the same link.
+        ->and($inText->textFor("Read {$typed}", $typed, 1, $typed))->toBe("Read {$typed}")
+        // The link somewhere else in the text is not the last line.
+        ->and($inText->textFor("{$typed} is where to read it.", $sent, 1, $typed))->toBe("{$typed} is where to read it.\n\n{$sent}")
+        // Another address that only ends the same way is not this link.
+        ->and($inText->textFor("See https://other.example/?next={$typed}", $sent, 1, $typed))->toBe("See https://other.example/?next={$typed}\n\n{$sent}")
+        // Not given the typed link, as before: the sent one is added.
+        ->and($inText->textFor("Open from eight.\n\n{$typed}", $sent, 1))->toBe("Open from eight.\n\n{$typed}\n\n{$sent}")
+        // Without images nothing is touched.
+        ->and($inText->textFor("Open from eight.\n\n{$typed}", $sent, 0, $typed))->toBe("Open from eight.\n\n{$typed}");
+});
+
 it('defaults to text only, with no rate limit known', function () {
     $capabilities = new ChannelCapabilities(maxBodyLength: 3000);
 

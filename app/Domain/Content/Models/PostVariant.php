@@ -181,7 +181,7 @@ class PostVariant extends Model
      */
     public function textFor(ChannelCapabilities $capabilities): string
     {
-        return $capabilities->textFor($this->body, $this->linkToSend(), $this->attachments->count());
+        return $capabilities->textFor($this->body, $this->linkToSend(), $this->attachments->count(), $this->link);
     }
 
     /**

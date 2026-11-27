@@ -2,6 +2,7 @@
 
 use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Content\Models\Post;
+use App\Domain\Content\Models\PostVariant;
 use App\Domain\Content\PostPreconditions;
 use App\Domain\Content\PostState;
 use App\Domain\Workspaces\Models\Workspace;
@@ -348,7 +349,7 @@ describe('sentences that say what will help', function () {
             ]));
     });
 
-    it('gives the campaign parameters of a text, and says when the link would go out twice', function () {
+    it('gives the campaign parameters of a text, and sends a link the text already ends with once', function () {
         $post = postInState($this->workspace, PostState::Draft, [$this->alpha, $this->bravo]);
         $alpha = editorVariant($post, $this->alpha);
 
@@ -365,11 +366,18 @@ describe('sentences that say what will help', function () {
                 ->where('post.variants.0.link_as_sent', 'https://example.com/bread?utm_source=noon%20gun&utm_medium=social')
                 ->where('post.variants.1.link_campaign', null)
                 ->where('post.advice', [
-                    "variants.{$alpha->id}.link" => ['The text for Alpha already ends with its link. With an image the link is added once more as the last line, with its campaign parameters. Take the link out of the text.'],
+                    "variants.{$alpha->id}.link" => ['With an image, Facebook shows no preview of the link. The link for Alpha goes out as the last line of the text.'],
                 ]));
 
-        // Without campaign parameters the link is not repeated, and the
-        // advice is the ordinary one.
+        // One link reaches the reader, and it carries the parameters.
+        inWorkspace($this->workspace, function () use ($alpha) {
+            $variant = PostVariant::query()->findOrFail($alpha->id);
+
+            expect($variant->textFor($this->facebook->capabilities()))
+                ->toBe("Fresh bread from eight.\n\nhttps://example.com/bread?utm_source=noon%20gun&utm_medium=social");
+        });
+
+        // Without campaign parameters the text goes out as it is typed.
         DB::table('post_variants')->where('id', $alpha->id)->update(['utm' => null]);
 
         $this->get(route('posts.show', $post->id))
