@@ -6,6 +6,7 @@ use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Channels\Support\NetworkFailure;
 use Closure;
 use GuzzleHttp\Exception\TransferException;
+use GuzzleHttp\Psr7\Utils;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\PendingRequest;
@@ -17,10 +18,11 @@ use SensitiveParameter;
  * Sends one request to LinkedIn and turns every failure into a
  * ChannelException that is safe to log.
  *
- * Requests go to the two configured addresses and nowhere else: no address
- * from a response is ever called, and redirects are not followed, so a token
- * cannot be carried to another host. Nothing from the HTTP client is passed
- * on either.
+ * Requests go to the two configured addresses, and redirects are not
+ * followed, so a token cannot be carried to another host. The one address
+ * taken from a response is the one an image is uploaded to, and upload()
+ * accepts it only as an UploadAddress that passed its check. Nothing from
+ * the HTTP client is passed on either.
  *
  * The message of a failure is written here, in plain words with a next step,
  * because a member reads it. What LinkedIn itself said goes into the context
@@ -37,6 +39,9 @@ final class LinkedInClient
 
     /** Longest text of LinkedIn's that is kept for the log. */
     private const MESSAGE_LENGTH = 300;
+
+    /** Answers to an upload that say the file is the problem: sending it again cannot help. */
+    private const FILE_REFUSED = [400, 413, 415, 422];
 
     /**
      * @param  string  $platform  platform name for exceptions
@@ -109,6 +114,8 @@ final class LinkedInClient
      * @param  array<string, mixed>  $json  body of a POST
      * @param  array<string, string>  $headers
      * @param  class-string<ChannelException>  $failure
+     * @param  int|null  $timeout  seconds for this call, when it must be shorter than the usual limit
+     * @param  string|null  $refused  what the member is told when LinkedIn refuses the call for a reason of its own
      * @return array{status: int, body: array<string, mixed>, id: string|null} id is the x-restli-id header
      *
      * @throws ChannelException
@@ -121,6 +128,8 @@ final class LinkedInClient
         array $headers = [],
         string $failure = ChannelException::class,
         bool $safeToRepeat = false,
+        ?int $timeout = null,
+        ?string $refused = null,
     ): array {
         $endpoint = $method.' /'.$path;
 
@@ -128,7 +137,7 @@ final class LinkedInClient
             $headers = ['Linkedin-Version' => $this->version, 'X-Restli-Protocol-Version' => '2.0.0', ...$headers];
         }
 
-        $request = fn (): PendingRequest => $this->request($this->apiUrl)->withToken($token)->withHeaders($headers);
+        $request = fn (): PendingRequest => $this->request($this->apiUrl, $timeout)->withToken($token)->withHeaders($headers);
 
         $response = $this->send($endpoint, fn (): Response => match ($method) {
             'GET' => $request()->get($path),
@@ -137,7 +146,7 @@ final class LinkedInClient
         }, $failure, $safeToRepeat);
 
         if (! $response->successful()) {
-            throw $this->failure($response, $failure, $endpoint, [$token, $this->clientSecret], $safeToRepeat);
+            throw $this->failure($response, $failure, $endpoint, [$token, $this->clientSecret], $safeToRepeat, refused: $refused);
         }
 
         $body = $response->json();
@@ -150,12 +159,91 @@ final class LinkedInClient
         ];
     }
 
-    private function request(string $baseUrl): PendingRequest
+    /**
+     * Sends the bytes of one image to the address LinkedIn named for it.
+     * Nothing is made public by this, so every temporary failure is
+     * retryable.
+     *
+     * The token is sent along because the documentation asks for it on the
+     * upload of an image. That is why the address must have passed the
+     * check of UploadAddress, and why a redirect is not followed.
+     *
+     * The answer is not in the format of the API: the documentation shows a
+     * 201 without a body and no failure at all. So only the status is read.
+     * 401 means the token; a status that says the file itself is the
+     * problem is permanent; everything else is worth another attempt, which
+     * starts with a new address.
+     *
+     * @param  resource  $stream  the file; the caller closes it
+     * @param  int  $bytes  size of the file, sent as Content-Length so that the upload is not chunked
+     * @param  int  $timeout  seconds for this call
+     * @param  class-string<ChannelException>  $failure
+     *
+     * @throws ChannelException
+     */
+    public function upload(UploadAddress $address, #[SensitiveParameter] string $token, $stream, int $bytes, int $timeout, string $failure): void
     {
+        $endpoint = 'PUT upload address';
+        $context = ['endpoint' => $endpoint, 'upload_host' => $address->host];
+
+        if (! $address->allowed()) {
+            throw $failure::permanent($this->platform, 'LinkedIn named an address for the image that may not be used. Nothing was sent to it.', $context);
+        }
+
+        $response = $this->send(
+            $endpoint,
+            fn (): Response => $this->http
+                ->timeout($timeout)
+                ->connectTimeout(min(10, $timeout))
+                ->withoutRedirecting()
+                ->withToken($token)
+                ->withHeaders(['Content-Length' => (string) $bytes])
+                ->withBody(Utils::streamFor($stream), 'application/octet-stream')
+                ->send('PUT', (string) $address->url),
+            $failure,
+            safeToRepeat: true,
+            context: $context,
+        );
+
+        if ($response->successful()) {
+            return;
+        }
+
+        $status = $response->status();
+        $body = $response->json();
+        $context += [
+            'http_status' => $status,
+            'platform_message' => $this->forLog(is_array($body) ? ($body['message'] ?? null) : null, [$token, $this->clientSecret]),
+        ];
+
+        throw match (true) {
+            $status === 401 => $failure::reconnectRequired(
+                $this->platform,
+                'LinkedIn no longer accepts this connection: the access has expired or was withdrawn. Connect the profile again on the Channels page.',
+                $context,
+            ),
+            in_array($status, self::FILE_REFUSED, true) => $failure::permanent(
+                $this->platform,
+                'LinkedIn did not accept an image of this post. Nothing was posted. Return the post to draft and put another copy of the image on it.',
+                $context,
+            ),
+            default => $failure::retryable(
+                $this->platform,
+                'LinkedIn did not take an image of this post. Nothing was posted.',
+                $this->retryAfter($response),
+                $context,
+            ),
+        };
+    }
+
+    private function request(string $baseUrl, ?int $timeout = null): PendingRequest
+    {
+        $timeout = max(1, min($timeout ?? $this->timeout, $this->timeout));
+
         return $this->http
             ->baseUrl($baseUrl)
-            ->timeout($this->timeout)
-            ->connectTimeout(min(10, $this->timeout))
+            ->timeout($timeout)
+            ->connectTimeout(min(10, $timeout))
             ->withoutRedirecting()
             ->acceptJson();
     }
@@ -163,9 +251,12 @@ final class LinkedInClient
     /**
      * @param  Closure(): Response  $call
      * @param  class-string<ChannelException>  $failure
+     * @param  array<string, mixed>|null  $context  for the log, in place of the endpoint alone
      */
-    private function send(string $endpoint, Closure $call, string $failure, bool $safeToRepeat): Response
+    private function send(string $endpoint, Closure $call, string $failure, bool $safeToRepeat, ?array $context = null): Response
     {
+        $context ??= ['endpoint' => $endpoint];
+
         try {
             return $call();
         } catch (ConnectionException|TransferException $exception) {
@@ -179,14 +270,14 @@ final class LinkedInClient
                     $neverConnected
                         ? 'LinkedIn could not be reached. No connection was made, so nothing was sent.'
                         : 'LinkedIn could not be reached. The connection failed or timed out.',
-                    context: ['endpoint' => $endpoint],
+                    context: $context,
                 );
             }
 
             throw $this->outcomeUnknown(
                 $failure,
                 'The connection to LinkedIn failed or timed out after the request may have been sent.',
-                ['endpoint' => $endpoint],
+                $context,
             );
         }
     }
@@ -211,8 +302,9 @@ final class LinkedInClient
      * @param  class-string<ChannelException>  $failure
      * @param  list<string>  $secrets
      * @param  bool  $signingIn  true for the OAuth endpoints, where a refusal is about the sign-in and not about a stored token
+     * @param  string|null  $refused  what the member is told about a refusal that has no message of its own here
      */
-    private function failure(Response $response, string $failure, string $endpoint, #[SensitiveParameter] array $secrets, bool $safeToRepeat, bool $signingIn = false): ChannelException
+    private function failure(Response $response, string $failure, string $endpoint, #[SensitiveParameter] array $secrets, bool $safeToRepeat, bool $signingIn = false, ?string $refused = null): ChannelException
     {
         $body = $response->json();
         $body = is_array($body) ? $body : [];
@@ -301,7 +393,7 @@ final class LinkedInClient
             $this->platform,
             $code === 'FIELD_LENGTH_TOO_LONG'
                 ? 'LinkedIn found the text or the link title too long. Return the post to draft, shorten it and try again.'
-                : 'LinkedIn did not accept this. Return the post to draft, check the text and the link, and try again. The reason LinkedIn gave is in the log of this instance.',
+                : $refused ?? 'LinkedIn did not accept this. Return the post to draft, check the text and the link, and try again. The reason LinkedIn gave is in the log of this instance.',
             $context,
         );
     }

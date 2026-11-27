@@ -3,7 +3,7 @@
 These files are **not recorded responses**. The LinkedIn spike
 (`scripts/spike/linkedin/`) has not been run against the real API yet, so every
 file here was written by hand from LinkedIn's documentation as reviewed on
-2026-11-23 and 2026-11-25 (see `docs/platform-notes/linkedin.md`). Ids, names,
+2026-11-23, 2026-11-25 and 2026-11-26 (see `docs/platform-notes/linkedin.md`). Ids, names,
 tokens and URNs are invented. No value in this folder is, or was ever, a real
 credential.
 
@@ -40,6 +40,14 @@ Each point is an assumption that the adapter or its tests rely on.
 | `error_code_used.json` | The token endpoint refuses a code with `error` and `error_description` and HTTP 401 or 400. Documented. |
 | `error_refresh_token_invalid.json` | HTTP 400 `invalid_request` for a refresh token that is expired or revoked. Documented. |
 | `error_echoes_credentials.json` | Invented. It exists to prove that credentials in an error message never reach an exception. |
+| `image_initialize_upload.json` | `POST /rest/images?action=initializeUpload` with `initializeUploadRequest.owner` answers `200` with `value.uploadUrl`, `value.uploadUrlExpiresAt` (milliseconds) and `value.image` (`urn:li:image:{id}`). Documented, with an organisation as the owner in the example. That a member URN is accepted as the owner with `w_member_social` is documented in the permissions of the page, not shown. The host of the address here is the test host; the documented examples are on `www.linkedin.com/dms-uploads/` and, on the older Share on LinkedIn page, `api.linkedin.com/mediaUpload/`. |
+| (no file) | The upload is a `PUT` of the bytes to `uploadUrl` with `Authorization: Bearer`, and answers `201` without a body. Documented on the Assets API page, which the Images API page points to. The adapter also sends `Content-Type: application/octet-stream` and `Content-Length`; the documented example sends neither header explicitly. Assumed to be accepted. |
+| (no file) | What the upload address answers when it fails. Not documented at all. The adapter reads the status only: `401` reconnect, `400`, `413`, `415`, `422` permanent, everything else retryable. Assumed. |
+| (no file) | A post with one image is `content.media` with `id` and `altText`; a post with several is `content.multiImage.images[]` with `id` and `altText`, 2 to 20 images. Documented. That a post is accepted straight after the upload, before LinkedIn has processed the image, is assumed. |
+| `error_image_forbidden.json` | HTTP 403 with `message` and `status` and no `code`, "Accessing this image resource is forbidden". Documented for the Images API. |
+| `error_image_invalid.json` | HTTP 400 `INVALID_IMAGE_ID`. Documented in the error table of the Images API; that the Posts API answers a post with an unknown image this way is assumed. |
+| `error_image_not_ready.json` | **Invented.** No page documents what the Posts API answers when an image of the post is still being processed, or whether it refuses such a post at all. The adapter treats a `400`, `404` or `422` in LinkedIn's error format that speaks of an image and of processing, waiting or not being available, and not of failing, as "not ready yet" and retryable. The spike must record the real answer. |
+| `error_image_processing_failed.json` | Invented, to prove that a refusal that speaks of a failure is not read as "not ready yet". `PROCESSING_FAILED` is a documented status of an image. |
 
 Not in a file, but assumed by the tests:
 

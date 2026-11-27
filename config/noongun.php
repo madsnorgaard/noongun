@@ -119,6 +119,27 @@ return [
             'max_body_length' => 3000,
             // Requests per member per day that Share on LinkedIn allows.
             'rate_limit_per_day' => 150,
+            // Images. A stored image is a JPEG or a PNG, and LinkedIn takes
+            // both. The numbers are LinkedIn's where it documents one, see
+            // docs/platform-notes/linkedin.md. It names no size in bytes:
+            // 5 MB is a careful figure, because LinkedIn cannot be asked
+            // whether it could process a file.
+            'max_images' => (int) env('LINKEDIN_MAX_IMAGES', 20),
+            'max_image_bytes' => (int) env('LINKEDIN_MAX_IMAGE_BYTES', 5242880),
+            'max_image_pixels' => (int) env('LINKEDIN_MAX_IMAGE_PIXELS', 36152319),
+            'alt_text_length' => (int) env('LINKEDIN_ALT_TEXT_LENGTH', 4086),
+            // Seconds an uploaded image is used for a later attempt before
+            // it is sent again. LinkedIn does not say how long it keeps an
+            // image that is on no post.
+            'image_lifetime' => (int) env('LINKEDIN_IMAGE_LIFETIME', 86400),
+            // Hosts an image may be uploaded to, comma separated. Each name
+            // allows itself and every name below it. LinkedIn names the
+            // address in a response, and the image and the token are sent
+            // only to an https address on one of these.
+            'upload_hosts' => array_values(array_filter(array_map(
+                trim(...),
+                explode(',', (string) env('LINKEDIN_UPLOAD_HOSTS', 'linkedin.com')),
+            ))),
         ],
     ],
 

@@ -1,0 +1,5 @@
+{
+    "status": 422,
+    "code": "UNPROCESSABLE_ENTITY",
+    "message": "Media asset urn:li:image:C4E10AQTestImage1 has status PROCESSING_FAILED"
+}
