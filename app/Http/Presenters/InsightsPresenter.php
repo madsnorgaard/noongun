@@ -9,6 +9,7 @@ use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Insights\ChannelPolling;
+use App\Domain\Insights\EngagementScore;
 use App\Domain\Insights\InsightsConfig;
 use App\Domain\Insights\MetricTotals;
 use App\Domain\Insights\Models\MetricSnapshot;
@@ -31,7 +32,7 @@ use Illuminate\Support\Str;
  * - Reach is people, and the same person sees several posts and follows
  *   several Pages. It is never added up over posts or channels; it goes out
  *   for one post on one channel, or as an average.
- * - "Score" is the comparable score (Performance::comparableScore()):
+ * - "Score" is the comparable score (EngagementScore::comparable()):
  *   reactions, comments and shares, which every measured channel has.
  *   Clicks are shown and not counted.
  * - Comparisons leave out posts that are too young to have collected their
@@ -104,8 +105,8 @@ final class InsightsPresenter
             // How far back a post that was never read is still read once.
             'once_within' => self::age(self::readOnceWithinDays() * 24),
             // How old a post has to be before it is compared with others.
-            'min_age' => self::age(self::minAgeHours()),
-            'min_measured' => self::minMeasuredPosts(),
+            'min_age' => self::age(EngagementScore::minAgeHours()),
+            'min_measured' => EngagementScore::minMeasuredPosts(),
             'weights' => Performance::comparableWeights(),
             'can_set_up' => $canSetUp,
         ];
@@ -182,7 +183,7 @@ final class InsightsPresenter
         $totals = $this->totals($this->performance->pillarSummaries($from, $until));
         $pillars = $totals['measured'] > 0 ? $this->performance->pillarSummaries($from, $until, $channelId, $settledBefore) : [];
         $top = $totals['measured'] > 0
-            ? $this->performance->topPosts($from, $until, max(self::TOP_POSTS, self::minMeasuredPosts()), $channelId, $settledBefore)
+            ? $this->performance->topPosts($from, $until, max(self::TOP_POSTS, EngagementScore::minMeasuredPosts()), $channelId, $settledBefore)
             : [];
 
         return [
@@ -203,7 +204,7 @@ final class InsightsPresenter
             'totals' => $totals,
             'pillars' => $this->pillars($pillars),
             // False while too few posts compete to say which did best.
-            'ranked' => count($top) >= self::minMeasuredPosts(),
+            'ranked' => count($top) >= EngagementScore::minMeasuredPosts(),
             'top' => array_slice($this->top($top, $channelId), 0, self::TOP_POSTS),
             'channels' => $channels,
         ];
@@ -226,12 +227,12 @@ final class InsightsPresenter
             return null;
         }
 
-        $top = $this->performance->topPosts($from, $until, self::minMeasuredPosts(), null, $this->settledBefore());
+        $top = $this->performance->topPosts($from, $until, EngagementScore::minMeasuredPosts(), null, $this->settledBefore());
 
         return [
             'days' => self::DASHBOARD_PERIOD,
             ...$totals,
-            'best' => count($top) >= self::minMeasuredPosts() ? ($this->top([$top[0]], null)[0] ?? null) : null,
+            'best' => count($top) >= EngagementScore::minMeasuredPosts() ? ($this->top([$top[0]], null)[0] ?? null) : null,
         ];
     }
 
@@ -272,28 +273,7 @@ final class InsightsPresenter
      */
     private function settledBefore(): CarbonImmutable
     {
-        return CarbonImmutable::now('UTC')->subHours(self::minAgeHours());
-    }
-
-    /**
-     * How old a post has to be before it competes, in hours. Read here
-     * and nowhere else on the pages.
-     */
-    private static function minAgeHours(): int
-    {
-        $hours = config('noongun.insights.min_age_hours');
-
-        return is_numeric($hours) && (int) $hours >= 0 ? min((int) $hours, 24 * 30) : 48;
-    }
-
-    /**
-     * How many posts have to compete before one is called the best.
-     */
-    private static function minMeasuredPosts(): int
-    {
-        $posts = config('noongun.insights.min_measured_posts');
-
-        return is_numeric($posts) && (int) $posts >= 1 ? min((int) $posts, 100) : 5;
+        return CarbonImmutable::now('UTC')->subHours(EngagementScore::minAgeHours());
     }
 
     /**
@@ -394,7 +374,7 @@ final class InsightsPresenter
             'channel_status' => $status->value,
             'state' => $state,
             'numbers' => $numbers,
-            'score' => $snapshot !== null ? Performance::comparableScore($snapshot->reading()) : null,
+            'score' => $snapshot !== null ? EngagementScore::comparable($snapshot->reading()) : null,
             'checked_at' => $snapshot?->checked_at->toIso8601String(),
             // Set while a reading is still to come: when the next one is due.
             'next_reading_at' => $state === 'pending'
@@ -476,7 +456,7 @@ final class InsightsPresenter
 
         return [
             'numbers' => $totals->toArray(),
-            'score' => Performance::comparableScore($totals),
+            'score' => EngagementScore::comparable($totals),
             'measured' => count($measured),
             'published' => $published,
             // The oldest of the readings: the total is at least this fresh.
@@ -516,7 +496,7 @@ final class InsightsPresenter
             'measured' => array_sum(array_map(fn (PerformanceSummary $pillar): int => $pillar->measured, $pillars)),
             'numbers' => $totals->toArray(),
             'with' => $with,
-            'score' => Performance::comparableScore($totals),
+            'score' => EngagementScore::comparable($totals),
         ];
     }
 
@@ -531,7 +511,7 @@ final class InsightsPresenter
      */
     private function pillars(array $pillars): array
     {
-        $enough = fn (PerformanceSummary $pillar): bool => $pillar->scored >= self::minMeasuredPosts();
+        $enough = fn (PerformanceSummary $pillar): bool => $pillar->scored >= EngagementScore::minMeasuredPosts();
         $key = fn (PerformanceSummary $pillar): array => [$pillar->id === null, ! $enough($pillar), -($pillar->averageScore() ?? -1.0), (string) $pillar->name];
 
         usort($pillars, fn (PerformanceSummary $a, PerformanceSummary $b): int => $key($a) <=> $key($b));

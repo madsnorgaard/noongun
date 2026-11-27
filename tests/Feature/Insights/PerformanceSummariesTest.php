@@ -2,7 +2,7 @@
 
 use App\Domain\Channels\Contracts\Metric;
 use App\Domain\Channels\Contracts\MetricReading;
-use App\Domain\Insights\MetricTotals;
+use App\Domain\Insights\EngagementScore;
 use App\Domain\Insights\Performance;
 use App\Domain\Insights\PerformanceSummary;
 use App\Domain\Insights\PostPerformance;
@@ -37,21 +37,12 @@ beforeEach(function () {
     };
 });
 
-describe('the comparable score', function () {
-    it('counts reactions, comments and shares by their weights, and neither clicks nor reach', function () {
-        expect(Performance::comparableScore(new MetricReading(reactions: 10, comments: 4, shares: 2, clicks: 700, reach: 5000)))->toBe(24.0)
-            ->and(Performance::comparableScore(new MetricReading(reactions: 10, comments: 4, shares: 2)))->toBe(24.0)
-            ->and(Performance::comparableScore(new MetricTotals(reactions: 0)))->toBe(0.0)
-            // A channel that only gave clicks or reach has nothing to compare by.
-            ->and(Performance::comparableScore(new MetricReading(clicks: 9, reach: 100)))->toBeNull()
-            ->and(Performance::comparableScore(new MetricReading))->toBeNull();
-    });
-
-    it('takes its weights from the configuration', function () {
+describe('the weights a page prints', function () {
+    it('are those of the comparable score, in the order of the formula, without clicks', function () {
         config(['noongun.insights.score' => ['reactions' => '0.5', 'comments' => 0, 'shares' => 4, 'clicks' => 100]]);
 
         expect(Performance::comparableWeights())->toBe(['reactions' => 0.5, 'comments' => 0.0, 'shares' => 4.0])
-            ->and(Performance::comparableScore(new MetricReading(reactions: 10, comments: 4, shares: 2, clicks: 7)))->toBe(13.0);
+            ->and(EngagementScore::comparable(new MetricReading(reactions: 10, comments: 4, shares: 2, clicks: 7)))->toBe(13.0);
     });
 });
 

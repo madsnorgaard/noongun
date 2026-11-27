@@ -25,7 +25,7 @@ final readonly class PerformanceSummary
      * @param  int  $measured  the variants that have any number and are old enough to be compared
      * @param  int  $scored  those of them that have a number the comparable score counts
      * @param  array<string, int>  $with  keyed by metric name: measured variants that have that number
-     * @param  float|null  $score  Performance::comparableScore() of the totals
+     * @param  float|null  $score  EngagementScore::comparable() of the totals
      */
     public function __construct(
         public ?int $id,

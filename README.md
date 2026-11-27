@@ -833,8 +833,9 @@ How to read them:
   says which numbers are missing.
 - **The score** on these pages is reactions x 1 + comments x 2 + shares x 3,
   with the weights from `NOONGUN_INSIGHTS_WEIGHT_*`. These are the numbers
-  every measured channel gives. Clicks are shown and not counted: a Page with
-  `read_insights` would otherwise outrank one without it for the same post.
+  every measured channel gives, and the same score drafting ranks its
+  examples by. Clicks are shown and not counted: a Page with `read_insights`
+  would otherwise outrank one without it for the same post.
 - **Reach is never added up.** It counts people, and the same person sees
   several posts and follows several Pages. Reach is shown for one post on one
   channel, or as the average for one post.
@@ -845,11 +846,11 @@ How to read them:
   Pages of different sizes are still mixed under "All channels": choose one
   channel to compare pillars like with like.
 - **Young posts are left out of comparisons.** A post competes in the pillar
-  averages, in the top posts and for "best post" once it is as old as
-  `noongun.insights.min_age_hours` in the configuration says (48 hours when
-  it is not set), because it is still collecting reactions before that.
+  averages, in the top posts and for "best post" once it is
+  `NOONGUN_INSIGHTS_MIN_AGE_HOURS` old (48 by default), because it is still
+  collecting reactions before that.
 - **No claim from a handful of posts.** Below
-  `noongun.insights.min_measured_posts` (5 when it is not set) the list is headed
+  `NOONGUN_INSIGHTS_MIN_MEASURED_POSTS` (5 by default) the list is headed
   "Measured posts" instead of "Top posts", a pillar is marked "Too few to
   compare" and listed after the others, and the dashboard names no best post.
 - A post that was just published says when its first reading is expected: by

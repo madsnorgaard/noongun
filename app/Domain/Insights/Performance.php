@@ -3,7 +3,6 @@
 namespace App\Domain\Insights;
 
 use App\Domain\Channels\Contracts\Metric;
-use App\Domain\Channels\Contracts\MetricReading;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Insights\Models\MetricSnapshot;
 use Carbon\CarbonImmutable;
@@ -23,21 +22,6 @@ use Illuminate\Database\Query\JoinClause;
  */
 final class Performance
 {
-    /**
-     * The numbers every channel that is measured gives. The comparable
-     * score is made of these and nothing else.
-     */
-    public const COMPARABLE = [Metric::Reactions, Metric::Comments, Metric::Shares];
-
-    /**
-     * comparableScore() over the columns of metric_snapshots, for ranking
-     * in the database. It takes the three weights as bindings, see
-     * comparableBindings().
-     */
-    private const COMPARABLE_SQL = '(case when coalesce(metric_snapshots.reactions, metric_snapshots.comments, metric_snapshots.shares) is null then null'
-        .' else round(coalesce(metric_snapshots.reactions, 0) * ?::numeric + coalesce(metric_snapshots.comments, 0) * ?::numeric'
-        .' + coalesce(metric_snapshots.shares, 0) * ?::numeric, 4) end)';
-
     private const SUMS = 'sum(metric_snapshots.reactions) as reactions, sum(metric_snapshots.comments) as comments, '
         .'sum(metric_snapshots.shares) as shares, sum(metric_snapshots.clicks) as clicks, sum(metric_snapshots.reach) as reach';
 
@@ -276,44 +260,18 @@ final class Performance
     }
 
     /**
-     * The score that pages rank by: reactions, comments and shares times
-     * their weights from the configuration, added up. Clicks and reach are
-     * left out, because a channel only has them with one more permission:
-     * counting them would let a channel with that permission outrank one
-     * without it for the same post. Null when none of the three was given.
-     *
-     * It is additive: the score of a post is the sum over its variants.
-     */
-    public static function comparableScore(MetricReading|MetricTotals $numbers): ?float
-    {
-        $score = null;
-
-        foreach (self::COMPARABLE as $metric) {
-            $value = $numbers->get($metric);
-
-            if ($value !== null) {
-                $score = ($score ?? 0.0) + $value * InsightsConfig::weight($metric);
-            }
-        }
-
-        return $score === null ? null : round($score, 4);
-    }
-
-    /**
-     * The weights of the comparable score, keyed by metric name, in the
-     * order of the formula.
+     * The weights of the comparable score (EngagementScore::comparable()),
+     * keyed by metric name in the order of the formula, for a page that
+     * prints the formula.
      *
      * @return array<string, float>
      */
     public static function comparableWeights(): array
     {
-        $weights = [];
-
-        foreach (self::COMPARABLE as $metric) {
-            $weights[$metric->value] = InsightsConfig::weight($metric);
-        }
-
-        return $weights;
+        return array_combine(
+            [Metric::Reactions->value, Metric::Comments->value, Metric::Shares->value],
+            EngagementScore::comparableBindings(),
+        );
     }
 
     /**
@@ -352,7 +310,7 @@ final class Performance
     /**
      * The posts with a variant published from $from up to, not including,
      * $until that did best, counting those variants: highest comparable
-     * score first, then the one published last, then the newest post. Only
+     * score (EngagementScore::comparable()) first, then the one published last, then the newest post. Only
      * posts with a score are listed, a score of 0 included. The score of
      * each entry is the comparable score.
      *
@@ -368,8 +326,8 @@ final class Performance
             return [];
         }
 
-        $weights = self::comparableBindings();
-        $score = 'sum('.self::COMPARABLE_SQL.')';
+        $weights = EngagementScore::comparableBindings();
+        $score = 'sum('.EngagementScore::COMPARABLE_SQL.')';
 
         $rows = MetricSnapshot::query()
             ->current()
@@ -401,20 +359,12 @@ final class Performance
                 postId: (int) $row->post_id,
                 totals: $totals,
                 measuredVariants: (int) $row->measured_variants,
-                score: self::comparableScore($totals),
+                score: EngagementScore::comparable($totals),
                 checkedAt: is_string($row->checked_at) ? CarbonImmutable::parse($row->checked_at, 'UTC') : null,
             );
         }
 
         return $posts;
-    }
-
-    /**
-     * @return list<float>
-     */
-    private static function comparableBindings(): array
-    {
-        return array_values(self::comparableWeights());
     }
 
     /**
@@ -486,7 +436,7 @@ final class Performance
                 scored: (int) $row->scored,
                 totals: $totals,
                 with: $with,
-                score: self::comparableScore($totals),
+                score: EngagementScore::comparable($totals),
             );
         }
 
