@@ -28,6 +28,7 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Routing\UrlGenerator;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use SensitiveParameter;
@@ -85,7 +86,10 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
      * digits joined by an underscore. An id of any other form is never put
      * into a request.
      */
-    private const POST_ID = '/^\d{1,32}(_\d{1,32})?$/';
+    private const POST_ID = '/\A\d{1,32}(_\d{1,32})?\z/';
+
+    /** A refusal of the insights of a Page is logged once in this time. */
+    private const REFUSAL_LOGGED_EVERY_SECONDS = 86400;
 
     /** Facebook allows 50 requests in one batch. `metrics.batch_size` in the settings can lower it. */
     private const BATCH_SIZE = 50;
@@ -182,6 +186,9 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
      * - A read was not finished or failed for a moment: no reading for that
      *   variant this time, so that a number is never replaced by "not given"
      *   because of an outage.
+     * - One post may not be read with this token: no reading for it. Every
+     *   post of the call answered that way: the call fails, as a missing
+     *   permission.
      * - The token was refused, or Facebook is limiting requests: the whole
      *   call fails, whatever else arrived.
      *
@@ -230,6 +237,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
         $firstFailure = null;
         $insightsRefused = null;
+        $notPermitted = [];
         $unfinished = false;
 
         $variantsPerBatch = max(1, intdiv(min($this->positive($this->metricSettings()['batch_size'] ?? null, self::BATCH_SIZE), self::BATCH_SIZE), $readsPerVariant));
@@ -272,10 +280,13 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
                     continue;
                 }
 
-                // Without the permission to read the post there is nothing
-                // to read for any post of this Page.
+                // One post that may not be read says nothing about the
+                // others: it gets no reading. Only when every post of the
+                // call was refused this way is it the Page, see below.
                 if ($post->outcome === GraphOutcome::PermissionMissing) {
-                    throw $post->failure ?? ChannelException::reconnectRequired(self::PLATFORM, 'A permission is missing. Connect the Page again.');
+                    $notPermitted[] = $post->failure;
+
+                    continue;
                 }
 
                 if (! $post->answered() || ! is_scalar($post->body['id'] ?? null)) {
@@ -310,9 +321,16 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
             }
         }
 
-        // Most likely a metric name that Meta has retired. The numbers of
-        // the post were stored; an operator has to see why two are missing.
-        if ($insightsRefused !== null) {
+        // Without the permission to read any of the posts there is nothing
+        // to read on this Page with this token.
+        if (count($notPermitted) === count($posts)) {
+            throw $notPermitted[0] ?? ChannelException::reconnectRequired(self::PLATFORM, 'A permission is missing. Connect the Page again.');
+        }
+
+        // Most likely a metric name that Meta has retired. An operator has
+        // to see why two numbers are missing, once a day for each Page and
+        // not on every reading.
+        if ($insightsRefused !== null && Cache::add("noongun:facebook:insights-refused:{$channel->id}", true, self::REFUSAL_LOGGED_EVERY_SECONDS)) {
             Log::warning('Facebook refused to give the insights of a post. Reach and clicks are left empty. Check the metric names in the settings.', [
                 'workspace_id' => $channel->workspace_id,
                 'channel_id' => $channel->id,
@@ -408,13 +426,16 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
         $pages = [];
 
         foreach ($granted as $page) {
+            // A new connection has to be proven: an answer that does not say
+            // the token is valid, or names no permissions, is refused.
             $inspection = $this->inspect($page['token']);
+            $inspection['scopes'] ??= [];
             $missing = array_values(array_diff($this->requiredScopes(), $inspection['scopes']));
 
-            if (! $inspection['valid'] || $missing !== []) {
+            if ($inspection['valid'] !== true || $missing !== []) {
                 throw ChannelException::permanent(
                     self::PLATFORM,
-                    ! $inspection['valid']
+                    $inspection['valid'] !== true
                         ? "Facebook gave a token for {$page['name']} that is not valid. Connect again."
                         : 'Facebook did not grant every permission that is needed ('.implode(', ', $missing).'). Connect again and allow all of them.',
                     ['page_id' => $page['id'], 'missing_scopes' => $missing],
@@ -477,11 +498,14 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
         $id = $response['id'] ?? null;
 
-        if (! is_string($id) || $id === '') {
+        // An id of another form is not stored: it would later become part
+        // of an address. The post may still be there, so this is an unknown
+        // outcome like a missing id, never a success.
+        if (! is_string($id) || preg_match(self::POST_ID, $id) !== 1) {
             // Not retryable: the post may be public, and a second call would duplicate it.
             throw PublishFailed::permanent(
                 self::PLATFORM,
-                'Facebook accepted the post but returned no id for it. Check the Page before trying again.',
+                'Facebook accepted the post but returned no usable id for it. Check the Page before trying again.',
                 ['endpoint' => 'POST /'.$channel->external_id.'/feed', 'outcome_unknown' => true],
             );
         }
@@ -497,6 +521,10 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
         if ($channel === null || blank($variant->external_id)) {
             throw ChannelException::permanent(self::PLATFORM, 'This post is not on Facebook, so there is nothing to delete.');
+        }
+
+        if (preg_match(self::POST_ID, (string) $variant->external_id) !== 1) {
+            throw ChannelException::permanent(self::PLATFORM, 'The id stored for this post is not one Facebook gives, so it cannot be deleted from here.');
         }
 
         if (blank($channel->access_token)) {
@@ -532,14 +560,27 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
         $inspection = $this->inspect((string) $channel->access_token);
 
-        if (! $inspection['valid']) {
+        // Marking a channel stops it from publishing, so it takes a definite
+        // answer. One that does not say whether the token is valid is a
+        // failed check, not a bad token.
+        if ($inspection['valid'] === null) {
+            throw ChannelException::retryable(
+                self::PLATFORM,
+                'Facebook answered the check of the token in a form that could not be read. The channel was left as it is.',
+                context: ['endpoint' => 'GET /debug_token'],
+            );
+        }
+
+        if ($inspection['valid'] === false) {
             return $channel->markNeedsReconnect();
         }
 
         $channel->token_expires_at = $inspection['expires_at'];
-        $channel->scopes = $inspection['scopes'];
+        // An answer that names no permissions proves nothing about them:
+        // the ones recorded at the connect stand.
+        $channel->scopes = $inspection['scopes'] ?? $channel->scopes;
 
-        if ($channel->tokenExpired() || array_diff($this->requiredScopes(), $inspection['scopes']) !== []) {
+        if ($channel->tokenExpired() || ($inspection['scopes'] !== null && array_diff($this->requiredScopes(), $inspection['scopes']) !== [])) {
             return $channel->markNeedsReconnect();
         }
 
@@ -608,9 +649,10 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
     /**
      * What debug_token reports about a token. An expires_at of 0 means the
-     * token does not expire.
+     * token does not expire. `valid` is null when the answer does not say,
+     * and `scopes` is null when it names none: neither is then known.
      *
-     * @return array{valid: bool, scopes: list<string>, expires_at: CarbonImmutable|null}
+     * @return array{valid: bool|null, scopes: list<string>|null, expires_at: CarbonImmutable|null}
      */
     private function inspect(#[SensitiveParameter] string $token): array
     {
@@ -621,11 +663,11 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
         $data = is_array($response['data'] ?? null) ? $response['data'] : [];
         $expiresAt = is_numeric($data['expires_at'] ?? null) ? (int) $data['expires_at'] : 0;
-        $scopes = is_array($data['scopes'] ?? null) ? $data['scopes'] : [];
+        $scopes = is_array($data['scopes'] ?? null) ? $data['scopes'] : null;
 
         return [
-            'valid' => ($data['is_valid'] ?? false) === true,
-            'scopes' => array_values(array_filter($scopes, is_string(...))),
+            'valid' => is_bool($data['is_valid'] ?? null) ? $data['is_valid'] : null,
+            'scopes' => $scopes === null ? null : array_values(array_filter($scopes, is_string(...))),
             'expires_at' => $expiresAt > 0 ? CarbonImmutable::createFromTimestampUTC($expiresAt) : null,
         ];
     }

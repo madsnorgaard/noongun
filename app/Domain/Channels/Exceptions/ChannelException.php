@@ -97,6 +97,18 @@ class ChannelException extends RuntimeException
     }
 
     /**
+     * True when the platform turned the call away because it is limiting
+     * requests: it named a time to wait, or the adapter said so with
+     * `rate_limited` in the context. A temporary problem of another kind
+     * (an outage, a timeout) is retryable too, but is not this.
+     */
+    public function rateLimited(): bool
+    {
+        return $this->retryable
+            && ($this->retryAfterSeconds !== null || ($this->context['rate_limited'] ?? false) === true);
+    }
+
+    /**
      * Picked up by Laravel's exception handler and added to the log entry.
      *
      * @return array<string, mixed>

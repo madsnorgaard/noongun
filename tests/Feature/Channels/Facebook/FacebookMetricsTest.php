@@ -4,6 +4,7 @@ use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Contracts\Metric;
 use App\Domain\Channels\Contracts\MetricReading;
 use App\Domain\Channels\Exceptions\ChannelException;
+use App\Domain\Channels\Exceptions\PublishFailed;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\Models\Workspace;
@@ -627,6 +628,142 @@ describe('the insights permission is optional', function () {
             ->and($checked->hasScope('read_insights'))->toBeFalse()
             ->and(facebookAdapter()->metricsFor($checked))->toBe([Metric::Reactions, Metric::Comments, Metric::Shares]);
     });
+});
+
+describe('one post that may not be read', function () {
+    it('gets no reading and does not fail the call for the others', function (string|array $fixture) {
+        fakeGraphMetrics(['100000000000001_900000000000002' => ['post' => $fixture]]);
+
+        $read = ($this->post)('100000000000001_900000000000001');
+        $refused = ($this->post)('100000000000001_900000000000002');
+
+        expect(($this->fetch)([$read, $refused]))->toBe([
+            $read->id => ['reactions' => 12, 'comments' => 3, 'shares' => 2, 'clicks' => null, 'reach' => null],
+        ]);
+    })->with([
+        'error 200' => ['error_permission'],
+        'error 10' => [[['error' => ['message' => '(#10) This endpoint requires the pages_read_engagement permission', 'type' => 'OAuthException', 'code' => 10]], 400]],
+    ]);
+
+    it('fails the call as a missing permission only when every post was refused that way', function () {
+        fakeGraphMetrics([
+            '100000000000001_900000000000001' => ['post' => 'error_permission'],
+            '100000000000001_900000000000002' => ['post' => 'error_permission'],
+            '100000000000001_900000000000003' => ['post' => FACEBOOK_UNFINISHED],
+        ]);
+
+        $posts = [($this->post)('100000000000001_900000000000001'), ($this->post)('100000000000001_900000000000002')];
+
+        expect(($this->failure)($posts)->requiresReconnect)->toBeTrue();
+
+        // One of three was only not finished: that is not the Page.
+        $exception = ($this->failure)([...$posts, ($this->post)('100000000000001_900000000000003')]);
+
+        expect($exception->requiresReconnect)->toBeFalse()
+            ->and($exception->retryable)->toBeTrue();
+    });
+});
+
+describe('text from Facebook', function () {
+    it('is cut to a length that fits a log line, in the message and in the context', function (Closure $fake) {
+        $fake(['error' => [
+            'message' => str_repeat('Long words from a platform. ', 400),
+            'type' => str_repeat('T', 5000),
+            'code' => 100,
+            'fbtrace_id' => str_repeat('A', 5000),
+        ]]);
+
+        $exception = ($this->failure)([($this->post)('100000000000001_900000000000001')]);
+
+        expect(mb_strlen($exception->getMessage()))->toBeLessThan(400)
+            ->and($exception->getMessage())->toContain('Long words from a platform.')
+            ->and(mb_strlen((string) $exception->context()['type']))->toBeLessThan(70)
+            ->and(mb_strlen((string) $exception->context()['fbtrace_id']))->toBeLessThan(70);
+    })->with([
+        'an error of the batch' => [fn (array $error) => Http::fake(fn () => Http::response($error, 400))],
+        'an error of one read' => [fn (array $error) => fakeGraphMetrics(['*' => ['post' => [$error, 400]]])],
+    ]);
+
+    it('is logged once a day for each Page when the insights are refused, not at every reading', function () {
+        ($this->grantInsights)();
+        fakeGraphMetrics(['*' => ['insights' => 'insights/error_invalid_metric']]);
+
+        $logged = 0;
+        Log::listen(function () use (&$logged) {
+            $logged++;
+        });
+
+        $variant = ($this->post)('100000000000001_900000000000001');
+
+        ($this->fetch)([$variant]);
+        ($this->fetch)([$variant]);
+        $this->travel(23)->hours();
+        ($this->fetch)([$variant]);
+
+        expect($logged)->toBe(1);
+
+        $this->travel(2)->hours();
+        ($this->fetch)([$variant]);
+
+        expect($logged)->toBe(2);
+    });
+});
+
+describe('the id of a post', function () {
+    it('is never sent with a line break at its end', function (string $id) {
+        fakeGraphMetrics();
+
+        $odd = ($this->post)($id);
+
+        expect(($this->fetch)([$odd]))->toBe([$odd->id => ['gone' => true]]);
+
+        Http::assertNothingSent();
+    })->with([
+        'a trailing line break' => ["100000000000001_900000000000001\n"],
+        'a line break and more' => ["100000000000001_900000000000001\n/insights"],
+        'a leading line break' => ["\n100000000000001_900000000000001"],
+    ]);
+
+    it('is not stored by publish when Facebook answers with something that is not a post id', function (mixed $id) {
+        fakeGraph(['feed' => Http::response(['id' => $id])]);
+
+        $variant = inWorkspace($this->workspace, fn () => PostVariant::factory()->for($this->channel)->create(['body' => 'Fresh beans arrive on Thursday.']));
+
+        expect(fn () => inWorkspace($this->workspace, fn () => facebookAdapter()->publish($variant)))->toThrow(
+            fn (PublishFailed $exception) => expect($exception->retryable)->toBeFalse()
+                // The post may be public: this is not a failure to send again.
+                ->and($exception->context()['outcome_unknown'])->toBeTrue(),
+        );
+    })->with([
+        'a trailing line break' => ["100000000000001_900000000000001\n"],
+        'a path' => ['100000000000001_900000000000001/insights'],
+        'a query' => ['100000000000001?fields=access_token'],
+        'text' => ['post-1'],
+        'empty' => [''],
+        'a number that is not text' => [900000000000001],
+    ]);
+
+    it('still stores the id Facebook really gives', function () {
+        fakeGraph();
+
+        $variant = inWorkspace($this->workspace, fn () => PostVariant::factory()->for($this->channel)->create(['body' => 'Fresh beans arrive on Thursday.']));
+
+        expect(inWorkspace($this->workspace, fn () => facebookAdapter()->publish($variant))->externalId)->toBe('100000000000001_900000000000001');
+    });
+
+    it('is not put into the address of a delete when it is not a post id', function (string $id) {
+        fakeGraph();
+        $variant = ($this->post)($id);
+        $variant->setRelation('channel', $this->channel);
+
+        expect(fn () => inWorkspace($this->workspace, fn () => facebookAdapter()->delete($variant)))->toThrow(ChannelException::class);
+
+        Http::assertNothingSent();
+    })->with([
+        'a trailing line break' => ["100000000000001_900000000000001\n"],
+        'a path' => ['../100000000000001'],
+        'a query' => ['100000000000001?method=post'],
+    ]);
 });
 
 it('takes the rate limit from the settings', function () {
