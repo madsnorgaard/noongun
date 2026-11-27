@@ -225,6 +225,35 @@ an upload that was abandoned does not stay. An image that is on a post is
 never deleted, and a published post keeps its images for as long as it
 exists.
 
+#### Images on LinkedIn
+
+A LinkedIn text takes up to 20 images, as JPEG or PNG, each of at most 5 MB
+and fewer than 36,152,320 pixels, with a description of up to 4086
+characters. The 5 MB is a careful assumption: LinkedIn documents no size, see
+`LINKEDIN_MAX_IMAGE_BYTES`.
+
+- A LinkedIn post shows images or a link card, never both. With images the
+  link goes out as the last line of the text, and the title and description
+  typed for the card are not sent.
+- A link card has no picture. LinkedIn would take one, but an image on a
+  text is always shown as an image, and there is no way yet to say "this one
+  is the picture of the card". See
+  `docs/adr/0015-linkedin-publishing-without-idempotency.md`.
+- Each image is sent to LinkedIn before the post is created. LinkedIn names
+  the address the file goes to. Noon Gun sends the file and the access token
+  there only when it is a plain HTTPS address on a host in
+  `LINKEDIN_UPLOAD_HOSTS`, and fails the post otherwise.
+- Noon Gun cannot ask LinkedIn whether it has finished with an image: the
+  permission a personal profile gives does not allow it. The post is created
+  straight after the upload. When LinkedIn refuses it and says an image is
+  not ready, the post waits and is tried again, as after a rate limit.
+- When a post with images fails and LinkedIn refused the images themselves,
+  return it to draft, take the images off and put them on again. They are
+  then sent afresh.
+
+None of this has been run against LinkedIn yet. `docs/platform-notes/linkedin.md`
+says what is documented and what is assumed.
+
 The limits, all of them settings (see "Environment and secrets"):
 
 | Limit | Default |
@@ -939,6 +968,12 @@ it there.
 | `LINKEDIN_API_VERSION` | `202611` | Value of the `Linkedin-Version` header on every LinkedIn API call, `YYYYMM`. LinkedIn refuses a version about a year after it came out. |
 | `LINKEDIN_SCOPES` | `openid,profile,w_member_social` | Permissions requested when a profile is connected, comma separated. |
 | `LINKEDIN_API_URL`, `LINKEDIN_WEB_URL` | `https://api.linkedin.com`, `https://www.linkedin.com` | Base addresses of the API and of the sign-in. Must be HTTPS. Change only for testing. |
+| `LINKEDIN_UPLOAD_HOSTS` | `linkedin.com` | Hosts an image may be uploaded to, comma separated. Each name allows itself and every name below it. LinkedIn names the upload address in a response; the image and the access token are sent only to an HTTPS address on one of these hosts. Add a host only when the log shows that LinkedIn uses it. |
+| `LINKEDIN_MAX_IMAGES` | `20` | Most images on one LinkedIn text. `NOONGUN_MEDIA_MAX_PER_VARIANT` applies as well. |
+| `LINKEDIN_MAX_IMAGE_BYTES` | `5242880` | Largest image a LinkedIn text may carry, in bytes. LinkedIn documents no size; 5 MB is a careful assumption. |
+| `LINKEDIN_MAX_IMAGE_PIXELS` | `36152319` | Most pixels of one image on a LinkedIn text. LinkedIn takes "less than 36,152,320". |
+| `LINKEDIN_ALT_TEXT_LENGTH` | `4086` | Longest description of an image on a LinkedIn text, in characters. |
+| `LINKEDIN_IMAGE_LIFETIME` | `86400` | Seconds an image that was sent to LinkedIn is used for a later attempt before it is sent again. LinkedIn does not say how long it keeps an image that is on no post. |
 | `NOONGUN_PUBLISH_MAX_ATTEMPTS` | `5` | How many times one variant is sent before the post is marked as failed. Only retryable errors are tried again. |
 | `NOONGUN_PUBLISH_BACKOFF` | `60,300,900,3600` | Seconds to wait before each retry, comma separated. The last value repeats. The largest value is also the longest wait a platform may ask for; a longer one fails the post. |
 | `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |

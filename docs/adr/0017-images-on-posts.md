@@ -299,6 +299,7 @@ suggestion and is not attached to anything.
 - An image library per workspace, to pick an earlier upload from.
 - Alternative text from the model: a member adds an image, and the model
   describes it, as its own kind of run with its own cost.
-- A thumbnail for the typed link card on LinkedIn (ADR 0015), which is now
-  possible: it is an uploaded image.
+- A thumbnail for the typed link card on LinkedIn. It is an uploaded image
+  and LinkedIn takes one, but an author must be able to say which image it
+  is. ADR 0015 records why that is not built and what it takes.
 - Video, which needs chunked uploads and processing off the web request.
