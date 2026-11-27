@@ -1,0 +1,12 @@
+{
+  "type": "InvariantAddedEvent",
+  "aggregateId": "e832e2b6-636a-410d-a9eb-e2efebe9e77a",
+  "version": 1,
+  "timestamp": "2026-11-27T21:35:48.761Z",
+  "payload": {
+    "title": "The vips process never inherits the application environment and never runs through a shell",
+    "description": "VipsCommand passes fixed arguments as a list and clears every inherited variable, so no key or password is in reach of an image decoder.",
+    "rationale": null
+  },
+  "seq": 1
+}

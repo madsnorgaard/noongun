@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "d1403c38-158f-45b7-a5ec-9b0219072948",
+  "version": 1,
+  "timestamp": "2026-11-27T21:35:48.185Z",
+  "payload": {
+    "title": "libvips opens an upload only with the loader the inspector named",
+    "context": "Images (#25): VIPS_BLOCK_UNTRUSTED alone still lets libvips load TIFF and GIF.",
+    "rationale": "The upload is opened with jpegload, pngload or webpload by name, never by sniffing. The environment variable is a second lock, and the optional loader packages are not installed.",
+    "alternatives": [],
+    "consequences": "A new accepted format needs an explicit loader entry."
+  },
+  "seq": 1
+}
