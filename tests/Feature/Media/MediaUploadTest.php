@@ -6,7 +6,9 @@ use App\Domain\Content\Models\Media;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
 use App\Models\User;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 require_once __DIR__.'/../../Support/publishing.php';
@@ -280,6 +282,33 @@ describe('what is refused', function () {
         expect($this->disk->allFiles())->toBe([]);
     });
 
+    it('says what went wrong when PHP itself did not take the file', function (int $error, string $message) {
+        Log::spy();
+
+        $path = tempnam(sys_get_temp_dir(), 'upload');
+        file_put_contents($path, jpegBytes());
+
+        $this->actingAs($this->editor)
+            ->postJson(route('media.store'), ['file' => new UploadedFile($path, 'photo.jpg', 'image/jpeg', $error, true)])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors(['file' => $message]);
+
+        expect($this->disk->allFiles())->toBe([]);
+
+        // What only the person who runs the instance can mend is logged for them.
+        in_array($error, [UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE, UPLOAD_ERR_EXTENSION], true)
+            ? Log::shouldHaveReceived('error')->once()
+            : Log::shouldNotHaveReceived('error');
+    })->with([
+        'larger than PHP accepts' => [UPLOAD_ERR_INI_SIZE, 'The file is too large. The limit is 20 MB.'],
+        'larger than the form allows' => [UPLOAD_ERR_FORM_SIZE, 'The file is too large. The limit is 20 MB.'],
+        'cut off on the way' => [UPLOAD_ERR_PARTIAL, 'The upload was interrupted before the whole file arrived. Try again.'],
+        'no file in the request' => [UPLOAD_ERR_NO_FILE, 'Choose one image to upload. The limit is 20 MB.'],
+        'no temporary directory' => [UPLOAD_ERR_NO_TMP_DIR, 'The server cannot take uploads right now: it has no room or no place to put them. Nothing is wrong with the image. Tell the person who runs this instance.'],
+        'the disk is full' => [UPLOAD_ERR_CANT_WRITE, 'The server cannot take uploads right now'],
+        'an extension stopped it' => [UPLOAD_ERR_EXTENSION, 'The server cannot take uploads right now'],
+    ]);
+
     it('refuses to store images on the public disk', function () {
         config(['noongun.media.disk' => 'public']);
 
@@ -366,6 +395,51 @@ describe('limits on how much', function () {
         $this->actingAs(userWithRole(Workspace::factory()->create(), Role::Owner))
             ->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])
             ->assertCreated();
+    });
+
+    it('says what a full workspace can do about it, and nothing that cannot be done', function () {
+        $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+
+        config(['noongun.media.quota_bytes' => 5 * 1024 * 1024]);
+        DB::table('media')->update(['byte_size' => 5 * 1024 * 1024]);
+
+        $message = $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertUnprocessable()->json('errors.file.0');
+
+        expect($message)->toBe('The workspace has used its 5 MB of storage for images, and images on posts are kept. If you run this instance, raise NOONGUN_MEDIA_QUOTA_BYTES in its settings, or set it to 0 for no limit. If you do not, ask the person who does.')
+            // Published posts cannot be deleted, so nobody is told to delete posts.
+            ->and($message)->not->toContain('delete');
+    });
+
+    it('has no quota on an instance its owner runs for themselves, and one on a hosted instance, unless a setting says otherwise', function () {
+        config(['noongun.media.quota_bytes' => null, 'noongun.mode' => 'self_hosted']);
+
+        expect(MediaConfig::quotaBytes())->toBeNull();
+
+        config(['noongun.mode' => 'saas']);
+
+        expect(MediaConfig::quotaBytes())->toBe(2 * 1024 ** 3);
+
+        config(['noongun.media.quota_bytes' => '1000000']);
+
+        expect(MediaConfig::quotaBytes())->toBe(1_000_000);
+
+        config(['noongun.media.quota_bytes' => '0']);
+
+        expect(MediaConfig::quotaBytes())->toBeNull();
+
+        config(['noongun.mode' => 'self_hosted', 'noongun.media.quota_bytes' => 3_000_000]);
+
+        expect(MediaConfig::quotaBytes())->toBe(3_000_000);
+    });
+
+    it('takes uploads without end on a self-hosted instance that sets no quota', function () {
+        expect(config('noongun.media.quota_bytes'))->toBeNull();
+
+        $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+
+        DB::table('media')->update(['byte_size' => 50 * 1024 ** 3]);
+
+        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
     });
 
     it('has no quota when it is set to zero', function () {

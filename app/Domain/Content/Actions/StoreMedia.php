@@ -2,10 +2,13 @@
 
 namespace App\Domain\Content\Actions;
 
+use App\Domain\Content\Exceptions\MediaBusy;
 use App\Domain\Content\Exceptions\MediaRefused;
 use App\Domain\Content\Exceptions\PostActionNotAllowed;
 use App\Domain\Content\Media\ImageProcessor;
 use App\Domain\Content\Media\MediaConfig;
+use App\Domain\Content\Media\ProcessedImage;
+use App\Domain\Content\Media\ProcessingSlots;
 use App\Domain\Content\Models\Media;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
@@ -30,6 +33,7 @@ final class StoreMedia
 {
     public function __construct(
         private readonly ImageProcessor $processor,
+        private readonly ProcessingSlots $slots,
         private readonly CurrentWorkspace $currentWorkspace,
     ) {}
 
@@ -38,6 +42,7 @@ final class StoreMedia
      *
      * @throws PostActionNotAllowed the actor is not an owner or editor of the workspace
      * @throws MediaRefused the file is not an image that can be stored, or the workspace is out of room
+     * @throws MediaBusy as many images as the instance decodes at once are being decoded; the file was not looked at
      */
     public function handle(User $actor, string $uploadedPath): Media
     {
@@ -57,7 +62,9 @@ final class StoreMedia
         // at once. The check that counts is made again below, under a lock.
         $this->assertRoom(0);
 
-        $image = $this->processor->process($uploadedPath);
+        // Decoding is the costly part, so only a few run at once. What
+        // comes back is two streams; the decoded image is gone by then.
+        $image = $this->slots->run((int) $actor->getKey(), fn (): ProcessedImage => $this->processor->process($uploadedPath));
 
         $diskName = MediaConfig::diskName();
         $disk = MediaConfig::disk($diskName);
