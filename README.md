@@ -230,6 +230,29 @@ On a platform that shows either pictures or a link preview, the pictures win:
 the link of such a text goes out as its last line, and the page says so. The
 text with that line must fit the limit of the platform.
 
+What a Facebook Page takes, with the defaults (each is a setting, see
+"Environment and secrets"):
+
+| | Facebook Page |
+|---|---|
+| Types | JPEG and PNG |
+| Images on one post | 10 |
+| Size of one file | 10 MB |
+| Description of an image | 1000 characters |
+| Image and link | The link is the last line of the text. No preview is shown. |
+
+The size of a file is what Meta documents. The number of images and the
+length of a description are not documented by Meta and are careful
+assumptions. Meta also says that a PNG above 1 MB "may appear pixelated", so
+a large photo is better uploaded as JPEG.
+
+Each image goes to Facebook as a photo that is not published, and one call
+then creates the post that shows them, in their order. Facebook keeps such a
+photo for about a day. A post that waits longer than 20 hours between its
+uploads and its publishing, which only happens after a failure, has its
+images sent again first. A photo that is uploaded and never used is deleted
+by Facebook after that day.
+
 An image that is on no post is deleted a day after that was first noticed, so
 an upload that was abandoned does not stay. An image that is on a post is
 never deleted, and a published post keeps its images for as long as it
@@ -945,6 +968,14 @@ it there.
 | `FACEBOOK_GRAPH_VERSION` | `v27.0` | Graph API version used for every Facebook call. |
 | `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
 | `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
+| `FACEBOOK_MEDIA_TYPES` | `image/jpeg,image/png` | Image types a Page post may carry, comma separated. Empty turns images off for Facebook. |
+| `FACEBOOK_MAX_MEDIA_ITEMS` | `10` | Most images on one Page post. Meta documents no number. `0` turns images off for Facebook. |
+| `FACEBOOK_MAX_MEDIA_BYTES` | `10000000` | Largest file of one image for Facebook, in bytes. Meta says 10 MB. |
+| `FACEBOOK_MAX_MEDIA_PIXELS` | empty | Most pixels (width x height) of one image for Facebook. Meta names no limit; empty means none. |
+| `FACEBOOK_ALT_TEXT_LENGTH` | `1000` | Longest description of an image for Facebook, in characters. Meta documents no number. |
+| `FACEBOOK_MEDIA_LINK_RULE` | `in_text` | What happens to the link of a Page post with images: `in_text` sends it as the last line of the text, `refused` holds such a post back. `both` sends the link beside the photos, which Meta does not document. |
+| `FACEBOOK_MEDIA_UPLOAD_LIFETIME` | `72000` | Seconds an uploaded photo may wait for its post before it is sent again. Facebook deletes an unpublished photo after about 24 hours. |
+| `FACEBOOK_MEDIA_UPLOAD_TRUSTED` | `900` | Seconds for which a fresh upload is taken as held by Facebook. When Facebook refuses a post, only photos older than this are sent again. |
 | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | empty | Credentials of the LinkedIn app this instance connects profiles with. |
 | `LINKEDIN_API_VERSION` | `202611` | Value of the `Linkedin-Version` header on every LinkedIn API call, `YYYYMM`. LinkedIn refuses a version about a year after it came out. |
 | `LINKEDIN_SCOPES` | `openid,profile,w_member_social` | Permissions requested when a profile is connected, comma separated. |

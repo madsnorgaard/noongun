@@ -84,3 +84,29 @@ nothing else.
   Facebook), does the login dialog return it again in `/me/accounts` without
   the user selecting it? The connect flow assumes it can, and asks before
   such a Page is connected again.
+
+## Photos (issue #25)
+
+Written by hand on 2026-11-26 from the Page Photos reference; see the entry of that
+date in `docs/platform-notes/meta.md`. `scripts/spike/07-upload-photo-post.sh` exists
+to record the real answers and has not been run.
+
+| File | Documented or assumed |
+|---|---|
+| `photo_upload.json` | **Documented:** `POST /{page-id}/photos` with `published=false` and a file as `multipart/form-data` answers with the photo id, a numeric string. **Assumed:** that the answer of an unpublished upload holds no `post_id` (the return type lists `id` and `post_id`). The adapter reads `id` only. |
+| `feed_post.json` (used again) | **Documented:** a feed post with `attached_media[n]={"media_fbid":"..."}` answers with the Page post id. **Assumed:** that one entry works like several, that the id has the form `{page-id}_{post-id}`, and that `https://www.facebook.com/{id}` is the address of a post with photos. |
+| `error_invalid_image.json` | **Documented:** code 324, "Missing or invalid image file", in the error list of the Page Photos reference. The message text is illustrative. |
+| `error_photo_expired.json` | **Assumed throughout.** Meta does not document what a feed post gets whose `media_fbid` has expired or is unknown. Code 100 is "Invalid parameter" in the documented list; the user title and message are invented. The adapter does not read the text: it goes by the code (100 or 324) and by the age of the uploads. |
+
+Not in a file, but assumed by the tests:
+
+- **The fields of the upload.** `published`, `alt_text_custom` and the file in
+  `source` are documented. That `access_token` and `appsecret_proof` are accepted as
+  fields of a multipart body is assumed from the documented form body of other POST
+  calls.
+- **`attached_media` in a form body** is written as `attached_media[0]=...`, as in the
+  documented curl example.
+- **The limits** (10 images, 1000 characters of description) are assumptions. The
+  tests use other numbers on purpose, so that nothing depends on the defaults.
+- **Errors of the upload** other than 324 use the fixtures of the feed call: the same
+  envelope is assumed for both edges.
