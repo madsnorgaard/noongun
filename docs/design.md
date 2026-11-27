@@ -204,6 +204,10 @@ square dot, so that it does not rest on colour alone.
   secondary text at `text-sm` and normal weight, `scope` on every heading, rows
   divided by `border-t border-border`, numbers right-aligned in `font-mono`. No
   zebra stripes, no coloured cells. Insights use it; nothing is drawn as a chart.
+  The wrapper is `ScrollTable`: it can be focused and scrolled with the
+  keyboard and names the table. In a wide table the first column is
+  `sticky left-0 bg-card`. A column that would hold only dashes is left out,
+  and one line under the table says which.
 - **A number that was not given.** A dash in secondary text, drawn by
   `MetricValue` (`resources/js/components/insights`), with the reason as text
   for a screen reader and on hover. Never a zero. The page says once, in a
@@ -212,7 +216,14 @@ square dot, so that it does not rest on colour alone.
 - **Where numbers stand.** One sentence from `resources/js/lib/insights.ts`:
   when they were last checked, when the first reading is expected, or why
   there are none and what to do. It is secondary text, not an alert: a number
-  that is missing is not a failure.
+  that is missing is not a failure. Someone who can act is told what to do;
+  everyone else is told whom to ask ("Ask an owner of this workspace",
+  "whoever runs this instance"). A setting or a permission is named only to
+  an owner, and a note about something optional is said once on a page, not
+  in every row.
+- **Claims about numbers.** A heading says what the numbers can carry: "Top
+  posts" only when enough posts compete, otherwise "Measured posts". What is
+  left out of a comparison, and why, is said in the line under the heading.
 
 ## Voice
 
