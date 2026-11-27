@@ -6,6 +6,7 @@ import {
     nextTick,
     onBeforeUnmount,
     onMounted,
+    reactive,
     ref,
     watch,
 } from 'vue';
@@ -27,6 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Spinner } from '@/components/ui/spinner';
 import { usePostActions } from '@/composables/usePostActions';
+import { imageCount } from '@/lib/media';
 import { formatDateTime, problemList, useWorkspaceTimezone } from '@/lib/posts';
 import { index as channelsIndex } from '@/routes/channels';
 import {
@@ -42,8 +44,16 @@ import {
     update,
 } from '@/routes/posts';
 import { index as queue } from '@/routes/queue';
+import type {
+    ChannelOption,
+    CopyKind,
+    MediaInput,
+    MediaItem,
+    Post,
+    PostOrigin,
+    UploadRules,
+} from '@/types/posts';
 import type { PostInsights, Reading } from '@/types/insights';
-import type { ChannelOption, Post, PostOrigin } from '@/types/posts';
 
 defineOptions({
     layout: {
@@ -104,6 +114,8 @@ const props = defineProps<{
     channels: ChannelOption[];
     /** A planned time to start a new post with, on the workspace clock. */
     planned: string | null;
+    /** Where an image is uploaded to and what this instance takes. */
+    uploads: UploadRules;
     /** How the texts that are on a platform did. Null before that. */
     insights: PostInsights | null;
     reading: Reading | null;
@@ -115,6 +127,8 @@ type VariantFields = {
     link: string;
     link_title: string;
     link_description: string;
+    /** The images in order. Always sent: an empty list takes them all off. */
+    media: MediaInput[];
 };
 
 const timezone = useWorkspaceTimezone();
@@ -165,6 +179,7 @@ function fieldsFromServer(): {
                               link: '',
                               link_title: '',
                               link_description: '',
+                              media: [],
                           },
                       ]
                     : [],
@@ -181,11 +196,47 @@ function fieldsFromServer(): {
                 link: variant.link ?? '',
                 link_title: variant.link_title ?? '',
                 link_description: variant.link_description ?? '',
+                media: variant.media.map((image) => ({
+                    id: image.id,
+                    alt_text: image.alt_text ?? '',
+                })),
             })),
     };
 }
 
 const form = useForm(fieldsFromServer());
+
+// Every image this page has seen, by id: those on the post and those
+// uploaded since. A text names its images by id, so that the same file can
+// be on several channels.
+const library = reactive<Record<number, MediaItem>>({});
+
+function rememberImage(image: MediaItem): void {
+    library[image.id] = {
+        id: image.id,
+        url: image.url,
+        thumb_url: image.thumb_url,
+        mime: image.mime,
+        byte_size: image.byte_size,
+        width: image.width,
+        height: image.height,
+    };
+}
+
+function rememberServerImages(): void {
+    props.post?.variants.forEach((variant) =>
+        variant.media.forEach(rememberImage),
+    );
+}
+
+rememberServerImages();
+
+// How many uploads are under way, by channel. A draft is not saved or
+// approved while a file is still on its way.
+const uploadsRunning = reactive<Record<number, number>>({});
+const uploading = computed(() =>
+    Object.values(uploadsRunning).some((count) => count > 0),
+);
 
 // What the server holds changed (saved, approved, edited by someone else):
 // show that. A refused save changes nothing there, so typing is kept.
@@ -198,6 +249,7 @@ const serverKey = computed(() =>
 const scheduleAt = ref(props.post?.scheduled_local ?? '');
 
 watch(serverKey, () => {
+    rememberServerImages();
     form.defaults(fieldsFromServer());
     form.reset();
     form.clearErrors();
@@ -236,13 +288,37 @@ function clearVariantErrors(): void {
     }
 }
 
+function maxImages(channelId: number): number {
+    return channel(channelId)?.media.max_items ?? 0;
+}
+
+// The images of another text as this channel can take them: the same
+// files, each with the description typed so far, as many as it takes.
+function imagesFor(channelId: number, images: MediaInput[]): MediaInput[] {
+    return images
+        .slice(0, maxImages(channelId))
+        .map((image) => ({ id: image.id, alt_text: image.alt_text }));
+}
+
+function sameImages(a: MediaInput[], b: MediaInput[]): boolean {
+    return (
+        a.length === b.length &&
+        a.every(
+            (image, index) =>
+                image.id === b[index].id &&
+                image.alt_text === b[index].alt_text,
+        )
+    );
+}
+
 function addChannel(id: number): void {
     if (isChosen(id)) {
         return;
     }
 
-    // A further channel starts from the first text, to be adjusted. The
-    // card of a link is only for a platform that shows one.
+    // A further channel starts from the first text and its images, to be
+    // adjusted. The card of a link is only for a platform that shows one,
+    // and the images only for one that takes them, as many as it takes.
     const first = form.variants[0];
     const card = (channel(id)?.link_title_length ?? null) !== null;
 
@@ -252,6 +328,7 @@ function addChannel(id: number): void {
         link: first?.link ?? '',
         link_title: card ? (first?.link_title ?? '') : '',
         link_description: card ? (first?.link_description ?? '') : '',
+        media: imagesFor(id, first?.media ?? []),
     });
 
     clearVariantErrors();
@@ -269,9 +346,24 @@ function removeChannel(id: number): void {
         (variant) => variant.channel_id !== id,
     );
 
+    delete uploadsRunning[id];
     clearVariantErrors();
     // The column is gone. Its tick box is where it can be brought back.
     focusElement(`channel-option-${id}`);
+}
+
+// The images of a column are lost with it when no other column has the
+// same ones with the same descriptions. The files stay stored for a day,
+// but this page has no list to pick them from again.
+function losesImages(variant: VariantFields): boolean {
+    return (
+        variant.media.length > 0 &&
+        !form.variants.some(
+            (other) =>
+                other.channel_id !== variant.channel_id &&
+                sameImages(other.media, variant.media),
+        )
+    );
 }
 
 // Taking a column off throws its text away. That is asked about when the
@@ -295,6 +387,8 @@ function losesText(variant: VariantFields): boolean {
 }
 
 const removing = ref<number | null>(null);
+// What goes with the column that is being taken off.
+const removingLoses = ref<CopyKind>('text');
 
 function requestRemoval(id: number): void {
     const variant = form.variants.find(
@@ -305,8 +399,13 @@ function requestRemoval(id: number): void {
         return;
     }
 
-    if (losesText(variant)) {
+    const text = losesText(variant);
+    const images = losesImages(variant);
+
+    if (text || images) {
         removing.value = id;
+        removingLoses.value =
+            text && images ? 'both' : text ? 'text' : 'images';
         confirming.value = 'remove-channel';
 
         return;
@@ -330,42 +429,106 @@ function onChannelTicked(id: number, event: Event): void {
     requestRemoval(id);
 }
 
-const copying = ref<{ from: number; into: number } | null>(null);
+const copying = ref<{ from: number; into: number; what: CopyKind } | null>(
+    null,
+);
 
-function copyText(into: number, from: number): void {
-    const target = form.variants.find(
-        (candidate) => candidate.channel_id === into,
+function variantFor(channelId: number): VariantFields | undefined {
+    return form.variants.find(
+        (candidate) => candidate.channel_id === channelId,
     );
-    const source = form.variants.find(
-        (candidate) => candidate.channel_id === from,
-    );
-
-    if (target && source) {
-        target.body = source.body;
-    }
 }
 
-function requestCopy(into: number, from: number): void {
-    const target = form.variants.find(
-        (candidate) => candidate.channel_id === into,
-    );
-    const source = form.variants.find(
-        (candidate) => candidate.channel_id === from,
-    );
+function copyInto(into: number, from: number, what: CopyKind): void {
+    const target = variantFor(into);
+    const source = variantFor(from);
 
-    if (!target || !source || target.body === source.body) {
+    if (!target || !source) {
         return;
     }
 
-    if (target.body.trim() !== '') {
-        copying.value = { from, into };
+    if (what !== 'images') {
+        target.body = source.body;
+    }
+
+    if (what !== 'text') {
+        target.media = imagesFor(into, source.media);
+    }
+}
+
+const copiedWords = computed(() => {
+    switch (copying.value?.what) {
+        case 'images':
+            return 'images';
+        case 'both':
+            return 'text and images';
+        default:
+            return 'text';
+    }
+});
+
+// Where the keyboard goes after a copy: to what was copied in.
+function copiedInto(into: number, what: CopyKind): string {
+    return what === 'images' ? `images-${into}` : `body-${into}`;
+}
+
+function requestCopy(into: number, from: number, what: CopyKind): void {
+    const target = variantFor(into);
+    const source = variantFor(from);
+
+    if (!target || !source) {
+        return;
+    }
+
+    const text = what !== 'images' && target.body !== source.body;
+    const images =
+        what !== 'text' &&
+        !sameImages(target.media, imagesFor(into, source.media));
+
+    if (!text && !images) {
+        return;
+    }
+
+    // Asked about when something typed or added would be replaced.
+    if (
+        (text && target.body.trim() !== '') ||
+        (images && target.media.length > 0)
+    ) {
+        copying.value = { from, into, what };
         confirming.value = 'copy-text';
 
         return;
     }
 
-    copyText(into, from);
-    focusElement(`body-${into}`);
+    copyInto(into, from, what);
+    focusElement(copiedInto(into, what));
+}
+
+// The same image on another channel is the same file: only its id is
+// added there, with the description typed so far as a start.
+function shareImage(from: number, mediaId: number, targets: number[]): void {
+    const image = variantFor(from)?.media.find(
+        (candidate) => candidate.id === mediaId,
+    );
+
+    if (!image) {
+        return;
+    }
+
+    targets.forEach((channelId) => {
+        const target = variantFor(channelId);
+
+        if (
+            target &&
+            target.media.length < maxImages(channelId) &&
+            !target.media.some((candidate) => candidate.id === mediaId)
+        ) {
+            target.media = [
+                ...target.media,
+                { id: mediaId, alt_text: image.alt_text },
+            ];
+        }
+    });
 }
 
 function channelName(id: number | null | undefined): string {
@@ -385,16 +548,201 @@ const columns = computed(() =>
     }),
 );
 
-function othersFor(
-    channelId: number,
-): { channel_id: number; name: string; body: string }[] {
+function othersFor(channelId: number): {
+    channel_id: number;
+    name: string;
+    body: string;
+    media: MediaInput[];
+    max_items: number;
+}[] {
     return columns.value
         .filter((column) => column.variant.channel_id !== channelId)
         .map((column) => ({
             channel_id: column.variant.channel_id,
             name: column.option.display_name,
             body: column.variant.body,
+            media: column.variant.media,
+            max_items: column.option.media.max_items,
         }));
+}
+
+// The text of a channel as it is saved, to tell what is new in its column.
+function savedVariant(channelId: number) {
+    return props.post?.variants.find(
+        (variant) => variant.channel_id === channelId && !variant.published,
+    );
+}
+
+function savedLinkFor(
+    channelId: number,
+): { typed: string; sent: string } | null {
+    const saved = savedVariant(channelId);
+
+    return saved?.link != null && saved.link_as_sent !== null
+        ? { typed: saved.link, sent: saved.link_as_sent }
+        : null;
+}
+
+// What the readiness check said about the images of a saved text, keyed
+// as VariantImages reads it. It was said about what is saved, so it is
+// left out while the draft has changes.
+function imageProblemsFor(channelId: number): Record<string, string> {
+    const saved = savedVariant(channelId);
+
+    if (!props.post || !saved || form.isDirty) {
+        return {};
+    }
+
+    const prefix = `variants.${saved.id}.media`;
+    const found: Record<string, string> = {};
+
+    Object.entries(props.post.problems).forEach(([key, messages]) => {
+        if (key === prefix) {
+            found[''] = messages.join(' ');
+        } else if (key.startsWith(`${prefix}.`)) {
+            found[key.slice(prefix.length + 1)] = messages.join(' ');
+        }
+    });
+
+    return found;
+}
+
+// One description for an image on several channels. What is typed in one
+// column is typed in every other column where the description of the same
+// image is still empty or still the same. A column whose description was
+// changed on its own keeps its own.
+function describeImage(from: number, mediaId: number, text: string): void {
+    const before = variantFor(from)?.media.find(
+        (image) => image.id === mediaId,
+    )?.alt_text;
+
+    if (before === undefined) {
+        return;
+    }
+
+    form.variants.forEach((variant) => {
+        variant.media = variant.media.map((image) =>
+            image.id === mediaId &&
+            (variant.channel_id === from ||
+                image.alt_text === '' ||
+                image.alt_text === before)
+                ? { id: image.id, alt_text: text }
+                : image,
+        );
+    });
+}
+
+// Brings every column back in step with the description of one.
+function describeImageEverywhere(from: number, mediaId: number): void {
+    const text = variantFor(from)?.media.find(
+        (image) => image.id === mediaId,
+    )?.alt_text;
+
+    if (text === undefined) {
+        return;
+    }
+
+    form.variants.forEach((variant) => {
+        variant.media = variant.media.map((image) =>
+            image.id === mediaId ? { id: image.id, alt_text: text } : image,
+        );
+    });
+}
+
+// The order is kept per channel. This puts the images the other channels
+// share with one channel in its order; what only they have keeps its place
+// after those.
+function orderImagesEverywhere(from: number): void {
+    const order = (variantFor(from)?.media ?? []).map((image) => image.id);
+
+    form.variants.forEach((variant) => {
+        if (variant.channel_id === from) {
+            return;
+        }
+
+        const place = (id: number, own: number): number =>
+            order.includes(id) ? order.indexOf(id) : order.length + own;
+
+        variant.media = variant.media
+            .map((image, own) => ({ image, at: place(image.id, own) }))
+            .sort((a, b) => a.at - b.at)
+            .map((entry) => entry.image);
+    });
+}
+
+// The images a refused save said no longer exist, by channel. An upload
+// that is on no saved post is removed after a day, so a draft left open
+// over a weekend can name images that are gone. The refusal names them by
+// their place in what was sent, which is read here before anything moves.
+const goneImages = ref<Record<number, number[]>>({});
+
+watch(
+    () => form.errors,
+    (errors) => {
+        const found: Record<number, number[]> = {};
+
+        Object.keys(errors).forEach((key) => {
+            const match = /^variants\.(\d+)\.media\.(\d+)\.id$/.exec(key);
+            const variant = match ? form.variants[Number(match[1])] : undefined;
+            const image = match ? variant?.media[Number(match[2])] : undefined;
+
+            if (variant && image) {
+                (found[variant.channel_id] ??= []).push(image.id);
+            }
+        });
+
+        goneImages.value = found;
+    },
+    { deep: true },
+);
+
+// A file dropped beside a column would be opened by the browser, and the
+// page with its draft would be gone. Nothing is dropped outside a column,
+// and while files are held over the page it says where they go.
+const filesOverPage = ref(0);
+
+function carriesFiles(event: DragEvent): boolean {
+    return Array.from(event.dataTransfer?.types ?? []).includes('Files');
+}
+
+function onPageDragEnter(event: DragEvent): void {
+    if (carriesFiles(event)) {
+        filesOverPage.value++;
+    }
+}
+
+function onPageDragLeave(event: DragEvent): void {
+    if (carriesFiles(event)) {
+        filesOverPage.value = Math.max(0, filesOverPage.value - 1);
+    }
+}
+
+function onPageDragOver(event: DragEvent): void {
+    // A column that takes the files has said so already.
+    if (carriesFiles(event) && !event.defaultPrevented) {
+        event.preventDefault();
+
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = 'none';
+        }
+    }
+}
+
+function onPageDrop(event: DragEvent): void {
+    filesOverPage.value = 0;
+
+    if (carriesFiles(event) && !event.defaultPrevented) {
+        event.preventDefault();
+    }
+}
+
+// What a refused save said about the images of the text at a position.
+function mediaErrors(position: number): string[] {
+    const prefix = `variants.${position}.media`;
+
+    return Object.entries(form.errors as Record<string, string>)
+        .filter(([key]) => key === prefix || key.startsWith(`${prefix}.`))
+        .map(([, message]) => message);
 }
 
 // With more than one text the columns take the width of the page, and the
@@ -407,7 +755,7 @@ const sideBySide = computed(
 );
 
 function save(): void {
-    if (!editable.value) {
+    if (!editable.value || uploading.value) {
         return;
     }
 
@@ -419,6 +767,9 @@ function save(): void {
 }
 
 const problems = computed(() => (props.post ? problemList(props.post) : []));
+const advice = computed(() =>
+    props.post ? Object.values(props.post.advice).flat() : [],
+);
 
 // A refusal about the time is shown at the time field. Every other refusal,
 // and the one about the time when the page has no time field, goes in the
@@ -468,6 +819,25 @@ const pending = computed(() =>
 );
 const pendingNames = computed(() =>
     pending.value.map((variant) => variant.channel_name).join(', '),
+);
+// Sending again can make a second copy only where a platform was called
+// and nothing says how that ended. Where the attempt stopped before a post
+// was made, for example on an image that could not be uploaded, nothing is
+// in doubt and nothing has to be looked at first.
+const unsure = computed(() =>
+    pending.value.filter((variant) => variant.outcome_unknown),
+);
+const unsureNames = computed(() =>
+    unsure.value.map((variant) => variant.channel_name).join(', '),
+);
+const certainNames = computed(() =>
+    pending.value
+        .filter((variant) => !variant.outcome_unknown)
+        .map((variant) => variant.channel_name)
+        .join(', '),
+);
+const pendingHasImages = computed(() =>
+    pending.value.some((variant) => variant.media.length > 0),
 );
 
 function act(
@@ -526,8 +896,15 @@ function confirm(): void {
 
     if (confirming.value === 'copy-text') {
         if (copying.value !== null) {
-            focusAfterDialog.value = `body-${copying.value.into}`;
-            copyText(copying.value.into, copying.value.from);
+            focusAfterDialog.value = copiedInto(
+                copying.value.into,
+                copying.value.what,
+            );
+            copyInto(
+                copying.value.into,
+                copying.value.from,
+                copying.value.what,
+            );
         }
 
         confirming.value = null;
@@ -547,14 +924,20 @@ function confirm(): void {
         act('publish-now', schedule.url({ post: props.post.id }), {
             now: true,
         });
-    } else if (confirming.value === 'retry' && checkedChannel.value) {
+    } else if (
+        confirming.value === 'retry' &&
+        (checkedChannel.value || unsure.value.length === 0)
+    ) {
         act('retry', retry.url({ post: props.post.id }));
     }
 }
 
-// Leaving with text that is not saved asks first. Saving and the state
+// Leaving with text or images that are not saved asks first, and so does
+// leaving while a file is still being uploaded. Saving and the state
 // changes are not GET requests and pass.
-const unsaved = computed(() => editable.value && form.isDirty);
+const unsaved = computed(
+    () => editable.value && (form.isDirty || uploading.value),
+);
 
 const stopGuard = router.on('before', (event) => {
     if (!unsaved.value || event.detail.visit.method !== 'get') {
@@ -572,11 +955,21 @@ function warnOnUnload(event: BeforeUnloadEvent): void {
     }
 }
 
-onMounted(() => window.addEventListener('beforeunload', warnOnUnload));
+onMounted(() => {
+    window.addEventListener('beforeunload', warnOnUnload);
+    window.addEventListener('dragenter', onPageDragEnter);
+    window.addEventListener('dragleave', onPageDragLeave);
+    window.addEventListener('dragover', onPageDragOver);
+    window.addEventListener('drop', onPageDrop);
+});
 
 onBeforeUnmount(() => {
     stopGuard();
     window.removeEventListener('beforeunload', warnOnUnload);
+    window.removeEventListener('dragenter', onPageDragEnter);
+    window.removeEventListener('dragleave', onPageDragLeave);
+    window.removeEventListener('dragover', onPageDragOver);
+    window.removeEventListener('drop', onPageDrop);
 });
 
 const status = computed(() => {
@@ -742,11 +1135,21 @@ const locked = computed(() => {
                             data-test="channels-hint"
                         >
                             One post, a text for each channel you tick. A
-                            channel you add starts from the first text, and each
-                            text is then changed by itself.
+                            channel you add starts from the first text and its
+                            images, and each is then changed by itself.
                         </p>
                         <InputError :message="fieldError('variants')" />
                     </fieldset>
+
+                    <p
+                        v-if="columns.length && filesOverPage > 0"
+                        class="rounded-lg bg-secondary px-4 py-3 text-base"
+                        role="status"
+                        data-test="drop-hint"
+                    >
+                        Drop images on the column of the channel they are for.
+                        Nothing is added outside a column.
+                    </p>
 
                     <div
                         v-if="columns.length"
@@ -762,9 +1165,32 @@ const locked = computed(() => {
                             v-model:link-description="
                                 column.variant.link_description
                             "
+                            v-model:media="column.variant.media"
                             :channel="column.option"
                             :others="othersFor(column.variant.channel_id)"
+                            :uploads="uploads"
+                            :library="library"
+                            :saved-media-ids="
+                                savedVariant(
+                                    column.variant.channel_id,
+                                )?.media.map((image) => image.id) ?? []
+                            "
+                            :saved-link="
+                                savedLinkFor(column.variant.channel_id)
+                            "
+                            :campaign="
+                                savedVariant(column.variant.channel_id)
+                                    ?.link_campaign ?? null
+                            "
+                            :gone-media-ids="
+                                goneImages[column.variant.channel_id] ?? []
+                            "
+                            :suggested-alt-text="post?.origin?.alt_text ?? null"
+                            :image-problems="
+                                imageProblemsFor(column.variant.channel_id)
+                            "
                             :errors="{
+                                media: mediaErrors(column.position),
                                 body: fieldError(
                                     `variants.${column.position}.body`,
                                 ),
@@ -785,8 +1211,44 @@ const locked = computed(() => {
                             :data-test="`text-${column.variant.channel_id}`"
                             @remove="requestRemoval(column.variant.channel_id)"
                             @copy="
-                                (from: number) =>
-                                    requestCopy(column.variant.channel_id, from)
+                                (from: number, what: CopyKind) =>
+                                    requestCopy(
+                                        column.variant.channel_id,
+                                        from,
+                                        what,
+                                    )
+                            "
+                            @uploaded="rememberImage"
+                            @share="
+                                (mediaId: number, targets: number[]) =>
+                                    shareImage(
+                                        column.variant.channel_id,
+                                        mediaId,
+                                        targets,
+                                    )
+                            "
+                            @describe="
+                                (mediaId: number, text: string) =>
+                                    describeImage(
+                                        column.variant.channel_id,
+                                        mediaId,
+                                        text,
+                                    )
+                            "
+                            @describe-all="
+                                (mediaId: number) =>
+                                    describeImageEverywhere(
+                                        column.variant.channel_id,
+                                        mediaId,
+                                    )
+                            "
+                            @order-all="
+                                orderImagesEverywhere(column.variant.channel_id)
+                            "
+                            @uploading="
+                                (count: number) =>
+                                    (uploadsRunning[column.variant.channel_id] =
+                                        count)
                             "
                         />
                     </div>
@@ -804,6 +1266,7 @@ const locked = computed(() => {
                         <PostTexts
                             :post="{ ...post, variants: lockedVariants }"
                             side-by-side
+                            describe-images
                         />
                     </section>
                 </template>
@@ -830,7 +1293,7 @@ const locked = computed(() => {
                     </section>
 
                     <section class="rounded-2xl bg-card p-5.5 shadow-xs">
-                        <PostTexts :post="post" side-by-side />
+                        <PostTexts :post="post" side-by-side describe-images />
                     </section>
                 </template>
 
@@ -1037,6 +1500,32 @@ const locked = computed(() => {
                             Nothing is missing. It is ready for approval.
                         </span>
                     </p>
+                    <!-- Advice is worth a look and holds nothing back. It
+                         carries the Check tag, a problem is a red sentence. -->
+                    <ul
+                        v-if="!form.isDirty && advice.length"
+                        class="grid gap-1.5"
+                        data-test="post-advice"
+                    >
+                        <li
+                            v-for="note in advice"
+                            :key="note"
+                            class="rounded-md bg-warning-surface px-3.5 py-2.5 text-sm"
+                        >
+                            <span
+                                class="mr-1.5 rounded-sm bg-warning-fill px-2 py-0.5 text-xs font-bold text-white"
+                            >
+                                Check
+                            </span>
+                            {{ note }}
+                        </li>
+                    </ul>
+                    <p
+                        v-if="!form.isDirty && advice.length"
+                        class="text-sm text-muted-foreground"
+                    >
+                        What is marked Check does not hold the post back.
+                    </p>
                 </section>
 
                 <section
@@ -1072,11 +1561,17 @@ const locked = computed(() => {
                     >
                         <p>
                             <template v-if="pending.length === 1">
-                                Approving covers the text for:
+                                {{
+                                    pendingHasImages
+                                        ? 'Approving covers the text and the images for:'
+                                        : 'Approving covers the text for:'
+                                }}
                             </template>
                             <template v-else>
                                 One approval covers all
-                                {{ pending.length }} texts of this post:
+                                {{ pending.length }} texts of this post{{
+                                    pendingHasImages ? ' and their images' : ''
+                                }}:
                             </template>
                         </p>
                         <ul class="grid gap-1">
@@ -1085,6 +1580,15 @@ const locked = computed(() => {
                                 <span class="text-muted-foreground">
                                     - {{ variant.platform_label }}
                                 </span>
+                                <template v-if="variant.media.length">
+                                    , with
+                                    <span class="font-mono">{{
+                                        imageCount(variant.media.length)
+                                    }}</span>
+                                </template>
+                                <template v-else-if="pendingHasImages">
+                                    , without images
+                                </template>
                             </li>
                         </ul>
                         <p v-if="post.scheduled_at">
@@ -1110,7 +1614,10 @@ const locked = computed(() => {
                         variant="signal"
                         size="lg"
                         :disabled="
-                            form.isDirty || problems.length > 0 || busy !== null
+                            form.isDirty ||
+                            uploading ||
+                            problems.length > 0 ||
+                            busy !== null
                         "
                         data-test="approve"
                         @click="approveNow"
@@ -1128,13 +1635,28 @@ const locked = computed(() => {
                         type="submit"
                         :variant="post && !form.isDirty ? 'outline' : 'default'"
                         :disabled="
-                            form.processing || form.variants.length === 0
+                            form.processing ||
+                            uploading ||
+                            form.variants.length === 0
+                        "
+                        :aria-describedby="
+                            uploading ? 'save-waits-for-upload' : undefined
                         "
                         data-test="save-draft"
                     >
                         <Spinner v-if="form.processing" />
                         Save draft
                     </Button>
+                    <p
+                        v-if="editable && uploading"
+                        id="save-waits-for-upload"
+                        class="text-sm"
+                        role="status"
+                        data-test="save-waits-for-upload"
+                    >
+                        An image is still being uploaded. The draft can be saved
+                        when it is done.
+                    </p>
 
                     <template v-if="post">
                         <Button
@@ -1189,13 +1711,29 @@ const locked = computed(() => {
                     </p>
 
                     <p
-                        v-if="post && post.state === 'failed' && post.can.retry"
+                        v-if="
+                            post &&
+                            post.state === 'failed' &&
+                            post.can.retry &&
+                            unsure.length
+                        "
                         class="text-sm text-muted-foreground"
+                        data-test="retry-caution"
                     >
-                        Before you send it again, look at the channel itself. If
-                        the post is there, leave this post as it is: sending it
-                        again publishes a second copy. If it is not there, send
-                        it again.
+                        Before you send it again, look at
+                        {{ unsureNames }} itself. If the post is there, leave
+                        this post as it is: sending it again publishes a second
+                        copy. If it is not there, send it again.
+                    </p>
+                    <p
+                        v-else-if="
+                            post && post.state === 'failed' && post.can.retry
+                        "
+                        class="text-sm text-muted-foreground"
+                        data-test="retry-certain"
+                    >
+                        Nothing was published: the attempt stopped before a post
+                        was made. Sending it again cannot make a second copy.
                     </p>
                 </section>
 
@@ -1375,7 +1913,8 @@ const locked = computed(() => {
                         Take {{ channelName(removing) }} off this post?
                     </template>
                     <template v-else-if="dialog === 'copy-text'">
-                        Replace the text for {{ channelName(copying?.into) }}?
+                        Replace the {{ copiedWords }} for
+                        {{ channelName(copying?.into) }}?
                     </template>
                     <template v-else>Return this post to draft?</template>
                 </DialogTitle>
@@ -1389,23 +1928,62 @@ const locked = computed(() => {
                         of the scheduler, which is within a minute. Once it is
                         out, it cannot be taken back from here.
                     </template>
+                    <template v-else-if="dialog === 'retry' && unsure.length">
+                        Look at {{ unsureNames }} first. Noon Gun cannot see
+                        whether the post arrived there. If the post is there,
+                        choose Cancel and leave this post as it is. It stays
+                        listed as failed here, and that is all right. If the
+                        post is not there, tick the box and send it again.
+                        <template v-if="certainNames">
+                            Nothing was published on {{ certainNames }}.
+                        </template>
+                    </template>
                     <template v-else-if="dialog === 'retry'">
-                        Look at {{ pendingNames }} first. Noon Gun cannot see
-                        whether the post arrived. If the post is there, choose
-                        Cancel and leave this post as it is. It stays listed as
-                        failed here, and that is all right. If the post is not
-                        there, tick the box and send it again.
+                        Nothing was published on {{ pendingNames }}: the attempt
+                        stopped before a post was made. Sending it again cannot
+                        make a second copy.
                     </template>
                     <template v-else-if="dialog === 'remove-channel'">
-                        The text for {{ channelName(removing) }} is not in any
-                        other column as it stands. It is removed from this post
-                        when you save. The other texts stay as they are.
+                        <template v-if="removingLoses === 'text'">
+                            The text for {{ channelName(removing) }} is not in
+                            any other column as it stands. It is removed from
+                            this post when you save. The other texts stay as
+                            they are.
+                        </template>
+                        <template v-else-if="removingLoses === 'images'">
+                            The images for {{ channelName(removing) }} and their
+                            descriptions are not in any other column as they
+                            stand. They are removed from this post when you
+                            save. The other texts stay as they are.
+                        </template>
+                        <template v-else>
+                            The text and the images for
+                            {{ channelName(removing) }} are not in any other
+                            column as they stand. They are removed from this
+                            post when you save. The other texts stay as they
+                            are.
+                        </template>
                     </template>
                     <template v-else-if="dialog === 'copy-text'">
-                        The text for {{ channelName(copying?.into) }} is
-                        replaced with the text for
-                        {{ channelName(copying?.from) }}. The link stays as it
-                        is.
+                        <template v-if="copying?.what === 'images'">
+                            The images for {{ channelName(copying?.into) }} are
+                            replaced with the images for
+                            {{ channelName(copying?.from) }} and their
+                            descriptions. The text and the link stay as they
+                            are.
+                        </template>
+                        <template v-else-if="copying?.what === 'both'">
+                            The text and the images for
+                            {{ channelName(copying?.into) }} are replaced with
+                            those for {{ channelName(copying?.from) }}. The link
+                            stays as it is.
+                        </template>
+                        <template v-else>
+                            The text for {{ channelName(copying?.into) }} is
+                            replaced with the text for
+                            {{ channelName(copying?.from) }}. The link and the
+                            images stay as they are.
+                        </template>
                     </template>
                     <template v-else-if="post?.state === 'failed'">
                         The approval is removed and the post must be approved
@@ -1429,7 +2007,10 @@ const locked = computed(() => {
                         </span>
                     </li>
                 </ul>
-                <label class="flex min-h-11 cursor-pointer items-start gap-3">
+                <label
+                    v-if="unsure.length"
+                    class="flex min-h-11 cursor-pointer items-start gap-3"
+                >
                     <input
                         v-model="checkedChannel"
                         type="checkbox"
@@ -1437,7 +2018,7 @@ const locked = computed(() => {
                         data-test="checked-channel"
                     />
                     <span>
-                        I have looked at {{ pendingNames }} and the post is not
+                        I have looked at {{ unsureNames }} and the post is not
                         there.
                     </span>
                 </label>
@@ -1459,7 +2040,10 @@ const locked = computed(() => {
                             : 'default'
                     "
                     :disabled="
-                        busy !== null || (dialog === 'retry' && !checkedChannel)
+                        busy !== null ||
+                        (dialog === 'retry' &&
+                            unsure.length > 0 &&
+                            !checkedChannel)
                     "
                     data-test="confirm"
                     @click="confirm"
@@ -1476,7 +2060,7 @@ const locked = computed(() => {
                         Take it off
                     </template>
                     <template v-else-if="dialog === 'copy-text'">
-                        Replace the text
+                        Replace the {{ copiedWords }}
                     </template>
                     <template v-else>Return to draft</template>
                 </Button>

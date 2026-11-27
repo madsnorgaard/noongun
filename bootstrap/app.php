@@ -12,17 +12,21 @@ use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
-        web: [__DIR__.'/../routes/web.php', __DIR__.'/../routes/channels.php', __DIR__.'/../routes/posts.php', __DIR__.'/../routes/brief.php', __DIR__.'/../routes/llm.php', __DIR__.'/../routes/proposals.php', __DIR__.'/../routes/insights.php'],
+        web: [__DIR__.'/../routes/web.php', __DIR__.'/../routes/channels.php', __DIR__.'/../routes/posts.php', __DIR__.'/../routes/media.php', __DIR__.'/../routes/brief.php', __DIR__.'/../routes/llm.php', __DIR__.'/../routes/proposals.php', __DIR__.'/../routes/insights.php'],
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
+        // Images are served outside the "web" group: see the file.
+        then: fn () => Route::group([], __DIR__.'/../routes/media-files.php'),
     )
     ->withCommands([
         __DIR__.'/../app/Domain/Scheduling/Console',
         __DIR__.'/../app/Domain/Channels/Console',
         __DIR__.'/../app/Domain/Drafting/Console',
+        __DIR__.'/../app/Domain/Content/Console',
         __DIR__.'/../app/Domain/Insights/Console',
     ])
     ->withMiddleware(function (Middleware $middleware): void {

@@ -306,9 +306,13 @@ decide. Until then the interface follows the system and borrows only the look.
   the post.
 - **Built in M4.** Brief, slots, idea and pillar, and "Why it was drafted this
   way".
-- **Not built yet.** Voice rule checks, photos and alt text, the platform
-  preview, the day strip, reject with undo, the one-card review on a phone,
-  channel status in the sidebar, the draft count in the navigation and Library.
+- **Built for issue 25.** Images in each channel column with a description
+  per channel, in the read-only texts, as small copies in the queue and on a
+  calendar entry (ADR 0017). A missing description is advice: a "Check" row,
+  never a red sentence.
+- **Not built yet.** Voice rule checks, the platform preview, the day strip,
+  reject with undo, the one-card review on a phone, channel status in the
+  sidebar, the draft count in the navigation and Library.
 - **Built in M6.** Insights, as tables of numbers and sentences, without
   charts. It is in the navigation between Ideas and Channels: what was written,
   how it did, then where it goes.

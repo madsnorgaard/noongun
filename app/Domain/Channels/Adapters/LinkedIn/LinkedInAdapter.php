@@ -6,12 +6,15 @@ use App\Domain\Channels\ChannelStatus;
 use App\Domain\Channels\Contracts\ChannelAdapter;
 use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Channels\Contracts\DescribesSetup;
+use App\Domain\Channels\Contracts\MediaLinkRule;
 use App\Domain\Channels\Contracts\PublishResult;
 use App\Domain\Channels\Contracts\RateLimit;
+use App\Domain\Channels\Contracts\UploadsMedia;
 use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Channels\Exceptions\PublishFailed;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Channels\Support\LinkWithUtm;
+use App\Domain\Content\Models\MediaAttachment;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
@@ -20,6 +23,7 @@ use Illuminate\Contracts\Config\Repository;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Routing\UrlGenerator;
 use Illuminate\Http\Client\Factory;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use SensitiveParameter;
@@ -37,8 +41,16 @@ use SensitiveParameter;
  * member's posts back, so after a publish whose outcome is unknown nothing
  * here can find out what happened. Such a failure is never retryable, and
  * the variant keeps its mark until a person has looked at the profile.
+ *
+ * An image is sent to LinkedIn before the post that shows it
+ * (uploadMedia()). That makes nothing public, so its failures are retryable
+ * freely. A token with only `w_member_social` may not read an image back,
+ * so nothing here asks whether LinkedIn has finished with one: the post is
+ * created, and a refusal that says an image is not ready yet is retryable.
+ * A refusal that says an image sent earlier is gone makes the job send the
+ * images again (PublishFailed::uploadsNoLongerValid()).
  */
-final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
+final class LinkedInAdapter implements ChannelAdapter, DescribesSetup, UploadsMedia
 {
     public const PLATFORM = 'linkedin';
 
@@ -63,6 +75,52 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
 
     private const RATE_LIMIT_SECONDS = 86400;
 
+    /** The types of a stored image (ADR 0017) that the Images API takes. */
+    private const IMAGE_TYPES = ['image/jpeg', 'image/png'];
+
+    /** A MultiImage post takes "minimum of 2 images and maximum of 20 images". */
+    private const MAX_IMAGES = 20;
+
+    /** "Images with less than 36,152,320 pixels." */
+    private const MAX_IMAGE_PIXELS = 36152319;
+
+    /** "Maximum length is 4,086 characters." */
+    private const ALT_TEXT_LENGTH = 4086;
+
+    /**
+     * Seconds an uploaded image is taken to be usable while it is on no
+     * post. The documentation does not say how long LinkedIn keeps one.
+     * `image_lifetime` replaces it.
+     */
+    private const IMAGE_LIFETIME = 86400;
+
+    private const IMAGE_URN = '/^urn:li:image:[A-Za-z0-9_-]{1,100}\z/';
+
+    /**
+     * How a refusal of a post reads when an image in it is not ready yet.
+     * No page documents that answer, so this is a guess at its words: the
+     * refusal must speak of an image and of waiting, and not of failing.
+     */
+    private const SPEAKS_OF_IMAGE = '/urn:li:(?:image|digitalmediaAsset)|IMAGE_ID|MEDIA_ASSET|\b(?:image|media|asset)s?\b/i';
+
+    private const SPEAKS_OF_WAITING = '/processing|waiting[ _]upload|not (?:yet )?(?:ready|available)|still being processed/i';
+
+    private const SPEAKS_OF_FAILING = '/fail/i';
+
+    /**
+     * How a refusal reads when LinkedIn no longer has an image, or never
+     * made it usable. `INVALID_IMAGE_ID` and `NOT_FOUND` are documented for
+     * the Images API; that the Posts API answers with them is assumed.
+     */
+    private const SPEAKS_OF_GONE = '/invalid|not[ _]found|does not exist|no longer|expired|fail/i';
+
+    /**
+     * Seconds after which an upload is no longer "made a moment ago". A
+     * refusal of images that were only just sent is about the files, and
+     * sending the same files again would be refused again.
+     */
+    private const IMAGE_SETTLED_AFTER = 600;
+
     /** The OAuth errors with which LinkedIn turns down a refresh token (HTTP 400). */
     private const REFRESH_REFUSED = ['invalid_request', 'invalid_grant'];
 
@@ -70,6 +128,9 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
     private const ID = '[A-Za-z0-9_-]{1,100}';
 
     private readonly LinkedInClient $client;
+
+    /** Seconds for sending one image, both calls together. */
+    private readonly int $mediaTimeout;
 
     /**
      * ChannelManager keeps this adapter for the life of the process, so it
@@ -86,6 +147,10 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
         private readonly Container $container,
     ) {
         $timeout = $this->config->get('noongun.publishing.timeout', 30);
+
+        $mediaTimeout = $this->config->get('noongun.publishing.media_timeout', 60);
+
+        $this->mediaTimeout = is_numeric($mediaTimeout) && (int) $mediaTimeout > 0 ? (int) $mediaTimeout : 60;
 
         $this->client = new LinkedInClient(
             $http,
@@ -107,15 +172,24 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
     {
         return new ChannelCapabilities(
             maxBodyLength: $this->positiveSetting('max_body_length') ?? self::MAX_BODY_LENGTH,
-            // Image posts wait for the media model (ADR 0003).
-            mediaTypes: [],
-            maxMediaItems: 0,
+            mediaTypes: self::IMAGE_TYPES,
+            maxMediaItems: $this->positiveSetting('max_images') ?? self::MAX_IMAGES,
             // The Posts API reads nothing from a linked page: the author
             // supplies the card.
             linkPreviews: false,
             rateLimit: new RateLimit($this->positiveSetting('rate_limit_per_day') ?? self::RATE_LIMIT_CALLS, self::RATE_LIMIT_SECONDS),
             linkTitleLength: self::LINK_TITLE_LENGTH,
             linkDescriptionLength: self::LINK_DESCRIPTION_LENGTH,
+            // LinkedIn documents no size in bytes, so none is enforced
+            // unless the instance sets one. LinkedIn is the judge: an
+            // upload it finds too large fails with words that say so.
+            maxMediaBytes: $this->positiveSetting('max_image_bytes'),
+            maxMediaPixels: $this->positiveSetting('max_image_pixels') ?? self::MAX_IMAGE_PIXELS,
+            altTextLength: $this->positiveSetting('alt_text_length') ?? self::ALT_TEXT_LENGTH,
+            // A post holds images or a link card, never both. The images
+            // win and the link goes out as the last line of the text.
+            mediaLinkRule: MediaLinkRule::InText,
+            mediaUploadLifetime: $this->positiveSetting('image_lifetime') ?? self::IMAGE_LIFETIME,
         );
     }
 
@@ -201,31 +275,103 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
         ));
     }
 
+    /**
+     * Two calls: one that asks LinkedIn where the image goes and what it
+     * will be called, and one that sends the bytes there. The second goes
+     * to an address out of the answer to the first, which is used only
+     * after UploadAddress has accepted it.
+     *
+     * Nothing is made public and nothing is waited for. Whether LinkedIn
+     * could process the file is not known when this returns: a token with
+     * only `w_member_social` may not read the image back.
+     */
+    public function uploadMedia(PostVariant $variant, MediaAttachment $attachment): string
+    {
+        $channel = $this->channelOf($variant);
+        $image = $attachment->image();
+        $number = $this->numberOf($variant, $attachment);
+
+        if (! UploadAddress::usable($this->uploadHosts())) {
+            throw PublishFailed::permanent(
+                self::PLATFORM,
+                'LinkedIn is not configured correctly on this instance: LINKEDIN_UPLOAD_HOSTS must be a list of host names of at least two parts, such as linkedin.com. No image was sent and nothing was posted.',
+            );
+        }
+
+        if (! in_array(strtolower($image->mime), self::IMAGE_TYPES, true)) {
+            throw PublishFailed::permanent(self::PLATFORM, 'LinkedIn takes JPEG and PNG images only. Return the post to draft and put another image on it.');
+        }
+
+        $started = microtime(true);
+
+        $answer = $this->client->api(
+            'POST',
+            'rest/images?action=initializeUpload',
+            (string) $channel->access_token,
+            ['initializeUploadRequest' => ['owner' => 'urn:li:person:'.$channel->external_id]],
+            failure: PublishFailed::class,
+            safeToRepeat: true,
+            timeout: max(1, intdiv($this->mediaTimeout, 3)),
+            refused: 'LinkedIn did not accept an image of this post. Nothing was posted. The reason LinkedIn gave is in the log of this instance.',
+        )['body'];
+
+        $value = is_array($answer['value'] ?? null) ? $answer['value'] : [];
+        $urn = $value['image'] ?? null;
+
+        if (! is_string($urn) || preg_match(self::IMAGE_URN, $urn) !== 1) {
+            throw PublishFailed::retryable(
+                self::PLATFORM,
+                'LinkedIn did not say what it will call an image of this post. Nothing was posted.',
+                context: ['endpoint' => 'POST /rest/images?action=initializeUpload'],
+            );
+        }
+
+        $address = UploadAddress::from($value['uploadUrl'] ?? null, $this->uploadHosts());
+
+        if (! $address->allowed()) {
+            // Not retryable: the next answer would name the same kind of
+            // address. The address itself is not kept, because it is signed.
+            throw PublishFailed::permanent(
+                self::PLATFORM,
+                'LinkedIn named an address for the image that is not an HTTPS address on one of its own hosts. Nothing was sent to it and nothing was posted. The person who runs this instance finds the host in the log and can allow it with LINKEDIN_UPLOAD_HOSTS if it belongs to LinkedIn.',
+                ['endpoint' => 'POST /rest/images?action=initializeUpload', 'upload_host' => $address->host, 'refused_because' => $address->refusal],
+            );
+        }
+
+        $stream = $attachment->readStream();
+
+        try {
+            $this->client->upload(
+                $address,
+                (string) $channel->access_token,
+                $stream,
+                $image->byte_size,
+                max(1, $this->mediaTimeout - (int) ceil(microtime(true) - $started)),
+                PublishFailed::class,
+                $number,
+            );
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+
+        return $urn;
+    }
+
     public function publish(PostVariant $variant): PublishResult
     {
-        $this->guardConfigured(PublishFailed::class);
+        $channel = $this->channelOf($variant);
+        $images = $variant->images();
+        $text = $variant->textFor($this->capabilities());
 
-        $channel = $variant->channel;
-
-        if ($channel === null || $channel->platform !== self::PLATFORM) {
-            throw PublishFailed::permanent(self::PLATFORM, 'This post is not addressed to a LinkedIn profile.');
-        }
-
-        if (blank($channel->access_token)) {
-            throw PublishFailed::reconnectRequired(self::PLATFORM, 'The profile is not connected. Connect it again.');
-        }
-
-        if (preg_match('/^'.self::ID.'\z/', $channel->external_id) !== 1) {
-            throw PublishFailed::permanent(self::PLATFORM, 'The connection to this profile is damaged. Disconnect it on the Channels page and connect it again.');
-        }
-
-        if (! mb_check_encoding($variant->body, 'UTF-8')) {
+        if (! mb_check_encoding($text, 'UTF-8')) {
             throw PublishFailed::permanent(self::PLATFORM, 'The text holds characters that cannot be read. Return the post to draft and type the text again.');
         }
 
         $post = [
             'author' => 'urn:li:person:'.$channel->external_id,
-            'commentary' => LittleText::escape($variant->body),
+            'commentary' => LittleText::escape($text),
             'visibility' => 'PUBLIC',
             'distribution' => [
                 'feedDistribution' => 'MAIN_FEED',
@@ -236,14 +382,30 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
             'isReshareDisabledByAuthor' => false,
         ];
 
-        if (filled($variant->link)) {
+        // A post holds one kind of content. With images the link is
+        // already the last line of the text, and no card is sent.
+        if ($images->isNotEmpty()) {
+            $post['content'] = $this->imageContent($images);
+        } elseif (filled($variant->link)) {
             $post['content'] = ['article' => $this->article($variant)];
         }
 
         // One call, no read-after-write. Creating a post is not safe to
         // repeat: a failure is retryable only when LinkedIn certainly made
         // no post.
-        $response = $this->client->api('POST', 'rest/posts', $channel->access_token, $post, failure: PublishFailed::class, safeToRepeat: false);
+        try {
+            $response = $this->client->api(
+                'POST',
+                'rest/posts',
+                (string) $channel->access_token,
+                $post,
+                failure: PublishFailed::class,
+                safeToRepeat: false,
+                refused: $images->isEmpty() ? null : 'LinkedIn did not accept this. Return the post to draft, check the text and the images, and try again. If it is refused again, take the images off and put them on again, so that they are sent to LinkedIn afresh. The reason LinkedIn gave is in the log of this instance.',
+            );
+        } catch (PublishFailed $refusal) {
+            throw $images->isEmpty() ? $refusal : $this->readForImages($refusal, $images);
+        }
 
         $urn = $response['id'];
 
@@ -468,6 +630,148 @@ final class LinkedInAdapter implements ChannelAdapter, DescribesSetup
         }
 
         return $article;
+    }
+
+    /**
+     * The channel a variant is sent to, after everything that can be
+     * checked without a call. Fails before anything is sent.
+     */
+    private function channelOf(PostVariant $variant): Channel
+    {
+        $this->guardConfigured(PublishFailed::class);
+
+        $channel = $variant->channel;
+
+        if ($channel === null || $channel->platform !== self::PLATFORM) {
+            throw PublishFailed::permanent(self::PLATFORM, 'This post is not addressed to a LinkedIn profile.');
+        }
+
+        if (blank($channel->access_token)) {
+            throw PublishFailed::reconnectRequired(self::PLATFORM, 'The profile is not connected. Connect it again.');
+        }
+
+        if (preg_match('/^'.self::ID.'\z/', $channel->external_id) !== 1) {
+            throw PublishFailed::permanent(self::PLATFORM, 'The connection to this profile is damaged. Disconnect it on the Channels page and connect it again.');
+        }
+
+        return $channel;
+    }
+
+    /**
+     * The place of an image among the images of its variant, counted from
+     * 1 as the editor shows them.
+     */
+    private function numberOf(PostVariant $variant, MediaAttachment $attachment): int
+    {
+        $index = $variant->images()->values()->search(fn (MediaAttachment $other): bool => $other->is($attachment));
+
+        return is_int($index) ? $index + 1 : max(1, $attachment->position);
+    }
+
+    /**
+     * One image is a post with media, several are a MultiImage post. Each
+     * image is named by what LinkedIn called it when it was uploaded, which
+     * the publishing job wrote on the attachment. Fails before anything is
+     * sent when an image has no such name.
+     *
+     * @param  Collection<int, MediaAttachment>  $images
+     * @return array{media: array{id: string, altText?: string}}|array{multiImage: array{images: list<array{id: string, altText?: string}>}}
+     */
+    private function imageContent(Collection $images): array
+    {
+        if ($images->count() > $this->capabilities()->maxMediaItems) {
+            throw PublishFailed::permanent(self::PLATFORM, 'This post has more images than LinkedIn takes. Return the post to draft and take some off.');
+        }
+
+        $items = [];
+
+        foreach ($images as $attachment) {
+            $urn = $attachment->external_id;
+
+            if ($urn === null || preg_match(self::IMAGE_URN, $urn) !== 1) {
+                throw PublishFailed::permanent(self::PLATFORM, 'An image of this post has not been sent to LinkedIn. Nothing was posted. Send the post again.');
+            }
+
+            $item = ['id' => $urn];
+            $altText = $this->text($attachment->alt_text);
+
+            if ($altText !== null) {
+                $item['altText'] = $altText;
+            }
+
+            $items[] = $item;
+        }
+
+        return count($items) === 1 ? ['media' => $items[0]] : ['multiImage' => ['images' => $items]];
+    }
+
+    /**
+     * What the failure of a post with images means for the images. Only a
+     * refusal in LinkedIn's own error format is read: LinkedIn certainly
+     * made no post then. An answer that leaves the outcome unknown, or one
+     * about the token, is passed on as it is, whatever it says.
+     *
+     * - An image is still being prepared: wait and create the post again.
+     * - LinkedIn no longer has an image that was sent some time ago: the
+     *   job forgets the uploads and sends the images again.
+     * - Anything else, and a complaint about images that were only just
+     *   sent: the refusal stands.
+     *
+     * @param  Collection<int, MediaAttachment>  $images
+     */
+    private function readForImages(PublishFailed $refusal, Collection $images): PublishFailed
+    {
+        $context = $refusal->context();
+
+        if ($refusal->retryable || $refusal->requiresReconnect || ($context['outcome_unknown'] ?? false) === true) {
+            return $refusal;
+        }
+
+        if (! in_array($context['http_status'] ?? null, [400, 404, 422], true)) {
+            return $refusal;
+        }
+
+        $said = implode(' ', array_filter([$context['code'] ?? null, $context['platform_message'] ?? null], is_string(...)));
+
+        if (preg_match(self::SPEAKS_OF_IMAGE, $said) !== 1) {
+            return $refusal;
+        }
+
+        $context = Arr::only($context, ['endpoint', 'http_status', 'code', 'service_error_code', 'platform_message']);
+
+        if (preg_match(self::SPEAKS_OF_WAITING, $said) === 1 && preg_match(self::SPEAKS_OF_FAILING, $said) !== 1) {
+            return PublishFailed::retryable(
+                self::PLATFORM,
+                'LinkedIn is still preparing an image of this post. Nothing was posted.',
+                context: [...$context, 'image_not_ready' => true],
+            );
+        }
+
+        $settled = now()->subSeconds(self::IMAGE_SETTLED_AFTER);
+        $sentEarlier = $images->contains(fn (MediaAttachment $attachment): bool => $attachment->uploaded_at?->lt($settled) ?? false);
+
+        if ($sentEarlier && preg_match(self::SPEAKS_OF_GONE, $said) === 1) {
+            return PublishFailed::uploadsNoLongerValid(
+                self::PLATFORM,
+                'LinkedIn no longer has an image that was sent for this post. Nothing was posted. The images are sent again.',
+                $context,
+            );
+        }
+
+        return $refusal;
+    }
+
+    /**
+     * The hosts an upload address may be on: each name and every name
+     * below it.
+     *
+     * @return list<mixed>
+     */
+    private function uploadHosts(): array
+    {
+        $hosts = $this->settings['upload_hosts'] ?? [];
+
+        return is_array($hosts) ? array_values($hosts) : [];
     }
 
     private function permalink(string $urn): string

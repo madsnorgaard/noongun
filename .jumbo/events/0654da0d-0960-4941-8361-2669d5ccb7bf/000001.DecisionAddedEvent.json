@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "0654da0d-0960-4941-8361-2669d5ccb7bf",
+  "version": 1,
+  "timestamp": "2026-11-27T12:25:29.038Z",
+  "payload": {
+    "title": "Images are served without touching the session and are always revalidated",
+    "context": "Images review (#25): a cached image opened for a day after sign-out, and image requests overwrote the session's previous URL.",
+    "rationale": "Media routes sit outside the web group behind a read-only session middleware, and answer with private, no-cache plus an ETag, so every view passes the access check and a 304 keeps it cheap.",
+    "alternatives": [],
+    "consequences": "No cookie is set and no session is written by an image request."
+  },
+  "seq": 1
+}

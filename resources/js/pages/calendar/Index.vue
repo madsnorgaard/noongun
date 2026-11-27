@@ -1,8 +1,14 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
-import { ChevronLeft, ChevronRight, Plus } from '@lucide/vue';
+import {
+    ChevronLeft,
+    ChevronRight,
+    Image as ImageIcon,
+    Plus,
+} from '@lucide/vue';
 import { computed } from 'vue';
 import { Button } from '@/components/ui/button';
+import { altFor, imageCount } from '@/lib/media';
 import { formatDate, stateLabels, useWorkspaceTimezone } from '@/lib/posts';
 import { stateDots } from '@/lib/postStates';
 import { index } from '@/routes/calendar';
@@ -272,6 +278,35 @@ function isPlan(entry: CalendarEntry): boolean {
                                     "
                                 >
                                     {{ entry.excerpt || 'No text yet' }}
+                                </span>
+                                <!-- The small copy in a week, where there
+                                     is room. A month shows the mark and the
+                                     count only. -->
+                                <span
+                                    v-if="entry.image_count > 0"
+                                    class="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"
+                                    :data-test="`entry-images-${entry.id}`"
+                                >
+                                    <img
+                                        v-if="
+                                            view === 'week' && entry.thumb_url
+                                        "
+                                        :src="entry.thumb_url"
+                                        :alt="altFor(entry.thumb_alt)"
+                                        width="36"
+                                        height="36"
+                                        loading="lazy"
+                                        decoding="async"
+                                        class="size-9 shrink-0 rounded-sm bg-accent object-cover"
+                                    />
+                                    <ImageIcon
+                                        v-else
+                                        class="size-4 shrink-0"
+                                        aria-hidden="true"
+                                    />
+                                    <span class="font-mono">
+                                        {{ imageCount(entry.image_count) }}
+                                    </span>
                                 </span>
                                 <span
                                     v-if="

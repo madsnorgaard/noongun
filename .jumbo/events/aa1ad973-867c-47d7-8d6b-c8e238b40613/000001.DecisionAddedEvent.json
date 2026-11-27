@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "aa1ad973-867c-47d7-8d6b-c8e238b40613",
+  "version": 1,
+  "timestamp": "2026-11-27T12:25:29.643Z",
+  "payload": {
+    "title": "No Graph request follows a redirect",
+    "context": "Images review (#25): Guzzle keeps method and body on 307 and 308, so a redirect could have re-sent the token and the file elsewhere.",
+    "rationale": "Every Facebook request turns redirects off. A 3xx is a failure: retryable where the call is safe to repeat, an unknown outcome for a post.",
+    "alternatives": [],
+    "consequences": "Applies to connect, publish, upload and delete."
+  },
+  "seq": 1
+}

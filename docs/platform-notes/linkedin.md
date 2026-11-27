@@ -531,6 +531,196 @@ with what was already known, and things that are still open.
   public, and there is no action yet to record that it is there. See
   `docs/adr/0015-linkedin-publishing-without-idempotency.md`.
 
+## 2026-11-26 - images, read before building them (#25)
+
+The pages were read on 2026-11-26, at the documentation version `li-lms-2026-11`,
+which is the configured `Linkedin-Version` (`202611`). Nothing below has been
+run against LinkedIn: the spike has still not been run. "Confirmed" means the
+documentation says it; "not documented" means the adapter rests on an
+assumption that is named.
+
+Sources, all under learn.microsoft.com/en-us/linkedin:
+
+- marketing/community-management/shares/images-api (updated 2026-06-24)
+- marketing/community-management/shares/vector-asset-api (updated 2026-01-28)
+- marketing/community-management/shares/multiimage-post-api (updated 2026-04-30)
+- marketing/community-management/shares/posts-api (updated 2026-05-13)
+- marketing/community-management/shares/post-api-schema (updated 2026-04-30)
+- marketing/integrations/ads/advertising-targeting/version/article-ads-integrations (updated 2025-10-16)
+- consumer/integrations/self-serve/share-on-linkedin (updated 2023-12-14)
+
+### Confirmed
+
+- **Initialising.** `POST /rest/images?action=initializeUpload` with
+  `{"initializeUploadRequest": {"owner": "urn:li:person:{id}"}}` and the
+  version headers. The owner "can be a person(urn:li:person:123), or
+  organization". The answer is `200` with `value.uploadUrl`,
+  `value.uploadUrlExpiresAt` (milliseconds) and `value.image`
+  (`urn:li:image:{id}`). `SYNCHRONOUS_UPLOAD` "is not supported in Images API".
+- **Permission.** `w_member_social` is among the permissions for
+  `rest/images`, and "for images with member URN owners, the caller must
+  match the image owner".
+- **The upload.** The Images API page points to the Assets API page: "Use a
+  PUT method to upload the image. The upload call requires a valid OAuth
+  token in the 'Authorization' header. This is different than the upload
+  video call which doesn't accept an OAuth token." The example is
+  `curl --upload-file` with `Authorization: Bearer`, answered with `201` and
+  no body. So the token **is** sent to the upload address.
+- **Where the upload goes.** The examples are on
+  `https://www.linkedin.com/dms-uploads/...` (Images and Assets pages) and
+  `https://api.linkedin.com/mediaUpload/...` (Share on LinkedIn page). Both
+  are below `linkedin.com`.
+- **The status of an image.** `GET /rest/images/{urn}` gives `status`:
+  `WAITING_UPLOAD`, `PROCESSING`, `AVAILABLE` or `PROCESSING_FAILED`
+  ("client error such as file size too large, unsupported file format,
+  internal error").
+- **A member token cannot read that status.** "`w_member_social` permission
+  are write-only and tokens with only `w_member_social` permissions would be
+  unable to perform a GET call for rest/images." A note adds that this "only
+  applies to versioned gateway calls" and that the permission is "sufficient
+  to make legacy GET calls to rest/images". What a legacy call is, is not
+  explained.
+- **One image.** `content.media` with `id` (the image URN) and `altText`.
+- **Several images.** `content.multiImage.images[]`, each with `id` and
+  `altText`. "Minimum of 2 images and maximum of 20 images." `w_member_social`
+  is in the permissions of the page. Organic posts only. "Please ensure that
+  all images being used are owned by the author."
+- **One kind of content.** `content` holds `media`, `multiImage`, `article`,
+  `poll` and others as separate fields, and every example sets exactly one.
+  No example combines an image with an article. This is read as "images or a
+  link card", which is `MediaLinkRule::InText`. No sentence says that two
+  are refused.
+- **Limits.** "Images with less than 36,152,320 pixels. JPG, GIF, and PNG
+  formats. GIF format supports up to 250 frames." Alternative text: "Maximum
+  length is 4,086 characters, recommended length is less than 120
+  characters."
+- **Reuse.** "Images uploaded with the Images API can now be reused across
+  different image and image ad formats."
+- **The thumbnail of a link card.** "To create an article post with
+  thumbnail image, please use Images API to upload thumbnail image and use
+  the ImageUrn on thumbnail field." `content.article.thumbnail` is optional,
+  with an optional `thumbnailAltText` ("less than 4,086 characters").
+- **Errors of the Images API.** `400` `INVALID_IMAGE_ID`, `INVALID_URN_ID`,
+  `INVALID_URN_TYPE`, `NOT_FOUND`; `403` with the message "Accessing this
+  image resource is forbidden. Please check your permissions for this
+  resource" and no `code`. The Assets API page lists `413`
+  `REQUEST_ENTITY_TOO_LARGE`, `415` `UNSUPPORTED_MEDIA_TYPE` and `422`
+  `UNPROCESSABLE_ENTITY` ("invalid image/video"), without saying which call
+  answers them.
+
+### Not documented
+
+- **A size in bytes for an image.** No page gives one. Third parties report
+  5 MB. The adapter first took that as a limit and no longer does, see
+  2026-11-27 below.
+- **How long processing takes.** The Assets page says of uploads in general
+  "it might take a few minutes for the upload to complete", which reads as
+  being about video.
+- **Whether a post may be created before the image is `AVAILABLE`,** and what
+  the Posts API answers if not. The Assets page says, for its own
+  asynchronous mode: "If the post is created before confirming image upload
+  success and the image upload fails to process, the post won't be visible to
+  members." The post schema has `PUBLISH_REQUESTED` ("will be published
+  asynchronously once the processing has successfully completed"), but
+  `PUBLISHED` "is the only accepted field during creation". This suggests the
+  post is accepted and held, not refused.
+- **How long an uploaded image that is on no post stays usable.** Only the
+  upload address has an expiry.
+- **Which hosts an upload address may be on.**
+- **Which headers the `PUT` needs** besides the token, and what it answers
+  when it fails.
+- **Whether the Posts API counts an image post differently** against the 150
+  calls a day. An image post is three calls for the first image and two more
+  for each further one, so a post with four images is nine calls.
+
+### What the adapter does
+
+- **Capabilities.** JPEG and PNG (what is stored; GIF is not), 20 images,
+  no limit in bytes (since 2026-11-27), 36,152,319 pixels, alternative text of 4086 characters, link rule
+  `in_text`, uploads used for a day. All from the `linkedin` block of
+  `config/noongun.php`.
+- **`uploadMedia()`** initialises, checks the address, and sends the file as
+  a stream with `PUT`, the token, `Content-Type: application/octet-stream`
+  and `Content-Length`. Both calls together stay within
+  `NOONGUN_PUBLISH_MEDIA_TIMEOUT`: initialising gets a third of it, the
+  upload what is left. The URN must be `urn:li:image:` and an id of letters,
+  digits, `_` and `-`.
+- **The upload address** is used only as a plain HTTPS address on a host in
+  `LINKEDIN_UPLOAD_HOSTS` (`linkedin.com` and below). A user name, a port
+  other than 443, an IP address, a fragment, a backslash and white space are
+  refused, and nothing is sent. Redirects are not followed. The address is
+  never logged; its host and the reason for a refusal are.
+- **No waiting and no status call,** because the token may not read the
+  status. The post is created straight after the uploads. A refusal in
+  LinkedIn's error format (`400`, `404`, `422`) that speaks of an image and
+  of processing, waiting for the upload or not being available, and not of
+  failing, is retryable as "not ready yet". Those words are a guess.
+- **An image LinkedIn no longer has.** A refusal of the same kind that
+  speaks of an image as invalid, not found or failed, for a post with an
+  image that was sent more than ten minutes ago, makes the job forget the
+  uploads and send the images again
+  (`PublishFailed::uploadsNoLongerValid()`). For images that were only just
+  sent the refusal stands. Those words are a guess as well.
+- **A post that is accepted and then not shown** because LinkedIn could not
+  process an image is not noticed. See ADR 0015.
+- **`publish()`** sends `content.media` for one image and
+  `content.multiImage` for several, in the order of the attachments, with
+  `altText` where there is one. With images no `article` is sent: the link
+  is the last line of the text, after an empty line. That text goes through
+  the same escaping as every text, so the underscores of `utm_source` are
+  sent as `\_`. Whether LinkedIn still shows such an address as a link is
+  the open point from 2026-11-25, and it now matters for every image post
+  with a link.
+- **No thumbnail on a link card.** See ADR 0015 for why and for what it
+  takes.
+- **Failures.** Uploads: every temporary failure is retryable, nothing is
+  ever "outcome unknown". The creating call: unchanged from ADR 0015.
+
+## 2026-11-27 - after the review of the images work (#25)
+
+The page on the commentary format was read again
+(marketing/community-management/shares/little-text-format, updated
+2025-10-16, version `li-lms-2026-11`). No other page was read again.
+
+- **A web address in the text.** The page does not mention addresses, links
+  or URLs at all. Its grammar knows text, mentions, hashtags and the hashtag
+  template, and nothing else. What it does say is general: "All reserved
+  characters need to be escaped with a backslash, even if those characters
+  are not used in one of the supported elements or templates." So the
+  address at the end of an image post stays escaped like the rest of the
+  text: `utm_source` is sent as `utm\_source`, and a `(`, `~` or `#` in an
+  address gets a backslash as well. By the grammar LinkedIn must read
+  `\_` as an underscore before it looks for an address, but no sentence
+  says that it does, and nobody has seen it. This is now the first question
+  of the spike: it posts an image with such an address and asks whether the
+  address is a link and opens with its parameters intact. If it is not,
+  the fix is in `LittleText`: an address recognised by a strict pattern is
+  left as it is.
+- **The upload address.** It must now have a path: a query straight after
+  the host or the port is refused, so that where the host ends does not rest
+  on how one parser reads `https://host?@other/`. A host name with an empty
+  part is refused. The list `LINKEDIN_UPLOAD_HOSTS` must hold host names of
+  at least two parts; a list that is empty or holds anything else allows
+  nothing, and uploads fail before any call with a message for the person
+  who runs the instance.
+- **No limit in bytes of our own.** `LINKEDIN_MAX_IMAGE_BYTES` is empty by
+  default. LinkedIn documents about 36 megapixels and no bytes, and stored
+  images of 6 to 10 MB are ordinary for detailed 4:3 and square pictures at
+  4096 pixels. An upload that LinkedIn answers with `413` fails for good,
+  naming the image and its size. That LinkedIn answers `413` at the upload,
+  and not later while processing, is assumed. See ADR 0015.
+- **The daily limit.** 150 calls a day for one member, and a post with n
+  images is 2n + 1 calls. The adapter declares the limit in calls, which is
+  still right. Nothing in the application counts calls or paces publishing
+  by it, for any platform, so a day of large image posts can reach the
+  limit. What happens then is safe: the throttled call is retryable, the
+  post waits, and images that were sent are not sent again. It is not
+  foreseen, and a post that waits past its attempts fails. Counting belongs
+  to the publishing job.
+- **The spike** now answers the open points of images in one run and prints
+  a summary without the token, ids or addresses, to paste below. See
+  `scripts/spike/linkedin/README.md`.
+
 ## Spike results
 
 To be filled in after running `scripts/spike/linkedin/publish-and-delete.sh`
@@ -553,3 +743,14 @@ and one real connect through the Channels page. Until then the fixtures under
 - Whether an address with an escaped character in it is still a link in the text:
 - Length limit of `commentary`, and whether backslashes count:
 - Link post without a thumbnail: how the card looks:
+- Link post with a thumbnail: how the card looks:
+- Largest image in bytes that was accepted, and what a larger one was answered with:
+
+Images: paste the summary the script prints here. It holds the host and
+validity of the upload address, the status of the `PUT` with and without the
+token and with `Content-Type`, what `GET /rest/images/{urn}` answers, whether
+a post is accepted straight after the upload, what LinkedIn answers for an
+image that is waiting for its upload and for one that does not exist, and
+the answers to: is the image shown at once, is the address at the end of an
+image post a link, are its underscores intact, is the alternative text
+there, are two images shown in order.

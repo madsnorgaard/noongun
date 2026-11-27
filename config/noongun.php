@@ -92,6 +92,37 @@ return [
             // gives no limit; this is the one Facebook has stated for posts.
             // See docs/platform-notes/meta.md.
             'max_body_length' => 63206,
+            // Images on a Page post. The types, the size of one file and the
+            // time an unpublished photo is kept are from the Page Photos
+            // reference; the count and the length of a description are not
+            // documented and are careful assumptions. An empty list of
+            // types, or a count of 0, turns images off for Facebook.
+            // See docs/platform-notes/meta.md, 2026-11-26.
+            'media_types' => array_values(array_filter(array_map(
+                fn (string $type): string => strtolower(trim($type)),
+                explode(',', (string) env('FACEBOOK_MEDIA_TYPES', 'image/jpeg,image/png')),
+            ))),
+            // An assumption, not a fact: Meta names no number. When
+            // Facebook refuses a post that may be over its real limit,
+            // the failure says so and names this setting.
+            'max_media_items' => (int) env('FACEBOOK_MAX_MEDIA_ITEMS', 10),
+            // "Files can not exceed 10MB."
+            'max_media_bytes' => (int) env('FACEBOOK_MAX_MEDIA_BYTES', 10_000_000),
+            // Meta names no limit in pixels. Empty means none.
+            'max_media_pixels' => env('FACEBOOK_MAX_MEDIA_PIXELS'),
+            // An assumption as well: Meta names no length for a description.
+            'alt_text_length' => (int) env('FACEBOOK_ALT_TEXT_LENGTH', 1000),
+            // in_text: the link of a post with images is sent as the last
+            // line of its text. Meta does not document "link" together
+            // with "attached_media", so the two are never sent together.
+            'media_link_rule' => env('FACEBOOK_MEDIA_LINK_RULE', 'in_text'),
+            // Seconds an uploaded photo may wait for its post. Facebook
+            // deletes an unpublished photo after "about 24 hours".
+            'media_upload_lifetime' => (int) env('FACEBOOK_MEDIA_UPLOAD_LIFETIME', 20 * 3600),
+            // An upload younger than this is taken as still held by
+            // Facebook: when Facebook refuses the post, its photos are
+            // not blamed and not sent again.
+            'media_upload_trusted' => (int) env('FACEBOOK_MEDIA_UPLOAD_TRUSTED', 900),
             // The permission that reach and clicks of a post need. It is not
             // requested unless it is added to FACEBOOK_SCOPES; a Page
             // connected without it gets reactions, comments and shares only.
@@ -141,6 +172,29 @@ return [
             'max_body_length' => 3000,
             // Requests per member per day that Share on LinkedIn allows.
             'rate_limit_per_day' => 150,
+            // Images. A stored image is a JPEG or a PNG, and LinkedIn takes
+            // both. The numbers are LinkedIn's where it documents one, see
+            // docs/platform-notes/linkedin.md. It names no size in bytes, so
+            // none is enforced unless LINKEDIN_MAX_IMAGE_BYTES is set: an
+            // image LinkedIn finds too large fails when it is uploaded.
+            'max_images' => (int) env('LINKEDIN_MAX_IMAGES', 20),
+            'max_image_bytes' => env('LINKEDIN_MAX_IMAGE_BYTES'),
+            'max_image_pixels' => (int) env('LINKEDIN_MAX_IMAGE_PIXELS', 36152319),
+            'alt_text_length' => (int) env('LINKEDIN_ALT_TEXT_LENGTH', 4086),
+            // Seconds an uploaded image is used for a later attempt before
+            // it is sent again. LinkedIn does not say how long it keeps an
+            // image that is on no post.
+            'image_lifetime' => (int) env('LINKEDIN_IMAGE_LIFETIME', 86400),
+            // Hosts an image may be uploaded to, comma separated. Each name
+            // allows itself and every name below it, and must have at least
+            // two parts (linkedin.com, not com). LinkedIn names the address
+            // in a response, and the image and the token are sent only to
+            // an https address on one of these. A list that is empty or
+            // holds anything else allows nothing.
+            'upload_hosts' => array_values(array_filter(array_map(
+                trim(...),
+                explode(',', (string) env('LINKEDIN_UPLOAD_HOSTS', 'linkedin.com')),
+            ))),
         ],
     ],
 
@@ -156,6 +210,11 @@ return [
     | "stuck_after_minutes" is how long a post may stay in the publishing
     | state without a sign of life from its job before it is treated as
     | failed. The largest backoff is added to it.
+    | "media_timeout" is the limit in seconds for sending one image to a
+    | platform, all calls for that image together. "media_uploads_per_job" is
+    | how many images one run of the job sends before it hands the rest to a
+    | successor. The time limit of a job grows by media_timeout x
+    | media_uploads_per_job when its post has images.
     */
 
     'publishing' => [
@@ -166,6 +225,79 @@ return [
         'calls_per_job' => (int) env('NOONGUN_PUBLISH_CALLS_PER_JOB', 3),
         'lock_seconds' => (int) env('NOONGUN_PUBLISH_LOCK_SECONDS', 120),
         'stuck_after_minutes' => (int) env('NOONGUN_PUBLISH_STUCK_AFTER_MINUTES', 30),
+        'media_timeout' => (int) env('NOONGUN_PUBLISH_MEDIA_TIMEOUT', 60),
+        'media_uploads_per_job' => (int) env('NOONGUN_PUBLISH_MEDIA_UPLOADS_PER_JOB', 2),
+    ],
+
+    /*
+    | Images on posts. See docs/adr/0017-images-on-posts.md.
+    |
+    | "disk" names a disk in config/filesystems.php. Files are private: they
+    | are read through the application and never through a public address,
+    | so the "public" disk is refused.
+    |
+    | "engine" is what decodes an upload and writes it again: "vips" runs
+    | the vips program of libvips and converts colours to sRGB with the
+    | profile of the file; "gd" is the GD extension of PHP, which cannot.
+    | Anything else is taken as "vips". "vips_concurrency" is how many
+    | threads one run of libvips works with.
+    |
+    | "max_bytes" is the largest file one upload may be. PHP must allow it as
+    | well: upload_max_filesize and post_max_size in docker/app/php.ini, and
+    | the request_body limit of the web server in docker-compose.yml. The
+    | smallest of them is what applies.
+    | "max_megapixels" and "max_side" are checked from the header of the
+    | file, before the image is decoded: decoding takes four bytes of memory
+    | for every pixel. "memory_limit" is the PHP memory limit while GD
+    | processes one image and must cover max_megapixels x 4 MB plus a margin
+    | of about 150 MB; libvips works outside the memory of PHP.
+    | An image with a longer side than "stored_side" is scaled down to it.
+    | "thumbnail_side" is the longest side of the small copy the lists show.
+    | "jpeg_quality" is the quality a JPEG is stored with at most: a JPEG
+    | that was sent at a lower quality and is not scaled down is stored at
+    | about the quality it came with, so that it does not grow.
+    | An image without transparency that was sent in a lossless format and
+    | has at most "lossless_choice_megapixels" is encoded as PNG and as JPEG,
+    | and the smaller file is kept: a screenshot stays a sharp PNG, a
+    | photograph becomes a JPEG. Above that it becomes a JPEG.
+    |
+    | Decoding is what costs memory, so only a few images are processed at
+    | once: "concurrent_uploads" on the whole instance, and one per user. A
+    | request waits up to "slot_wait_seconds" for its turn and is then
+    | answered with 429. A turn that is never given back, because the
+    | process died, ends by itself after "slot_lease_seconds".
+    |
+    | "quota_bytes" is the most all stored images of one workspace may take
+    | together; 0 means no limit. Left unset, a self-hosted instance has no
+    | limit and a saas instance has "saas_quota_bytes". "uploads_per_minute"
+    | is per user. "max_per_variant" is the most images one text may carry,
+    | whatever its platform would take.
+    | An image that no post uses is deleted "unused_grace_hours" after the
+    | clean-up first saw it unused. A file on the media disk that no row
+    | points to is deleted when it is older than "orphan_file_hours".
+    */
+
+    'media' => [
+        'engine' => env('NOONGUN_MEDIA_ENGINE', 'vips'),
+        'vips_concurrency' => (int) env('NOONGUN_MEDIA_VIPS_CONCURRENCY', 2),
+        'disk' => env('NOONGUN_MEDIA_DISK', 'media'),
+        'max_bytes' => (int) env('NOONGUN_MEDIA_MAX_BYTES', 20 * 1024 * 1024),
+        'max_megapixels' => (float) env('NOONGUN_MEDIA_MAX_MEGAPIXELS', 50),
+        'max_side' => (int) env('NOONGUN_MEDIA_MAX_SIDE', 16000),
+        'memory_limit' => env('NOONGUN_MEDIA_MEMORY_LIMIT', '512M'),
+        'stored_side' => (int) env('NOONGUN_MEDIA_STORED_SIDE', 4096),
+        'thumbnail_side' => (int) env('NOONGUN_MEDIA_THUMBNAIL_SIDE', 480),
+        'jpeg_quality' => (int) env('NOONGUN_MEDIA_JPEG_QUALITY', 90),
+        'lossless_choice_megapixels' => (float) env('NOONGUN_MEDIA_LOSSLESS_CHOICE_MEGAPIXELS', 9),
+        'concurrent_uploads' => (int) env('NOONGUN_MEDIA_CONCURRENT_UPLOADS', 2),
+        'slot_wait_seconds' => (int) env('NOONGUN_MEDIA_SLOT_WAIT_SECONDS', 5),
+        'slot_lease_seconds' => (int) env('NOONGUN_MEDIA_SLOT_LEASE_SECONDS', 120),
+        'quota_bytes' => env('NOONGUN_MEDIA_QUOTA_BYTES'),
+        'saas_quota_bytes' => 2 * 1024 * 1024 * 1024,
+        'uploads_per_minute' => (int) env('NOONGUN_MEDIA_UPLOADS_PER_MINUTE', 30),
+        'max_per_variant' => (int) env('NOONGUN_MEDIA_MAX_PER_VARIANT', 10),
+        'unused_grace_hours' => (int) env('NOONGUN_MEDIA_UNUSED_GRACE_HOURS', 24),
+        'orphan_file_hours' => (int) env('NOONGUN_MEDIA_ORPHAN_FILE_HOURS', 48),
     ],
 
     /*

@@ -5,17 +5,20 @@ namespace App\Http\Controllers\Posts;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Actions\DeletePost;
 use App\Domain\Content\Actions\SaveDraft;
+use App\Domain\Content\Exceptions\AttachedMediaMissing;
 use App\Domain\Content\Exceptions\PostNotDeletable;
 use App\Domain\Content\Exceptions\PostNotEditable;
 use App\Domain\Content\Models\Post;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Posts\Concerns\ActsOnPosts;
 use App\Http\Presenters\InsightsPresenter;
+use App\Http\Presenters\MediaPresenter;
 use App\Http\Presenters\PostPresenter;
 use App\Http\Requests\Posts\SavePostRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -43,6 +46,7 @@ class PostController extends Controller
             'post' => null,
             'channels' => $this->presenter->channelOptions(null),
             'planned' => $this->plannedFromQuery($request),
+            'uploads' => MediaPresenter::uploads(),
             'insights' => null,
             'reading' => null,
         ]);
@@ -50,7 +54,11 @@ class PostController extends Controller
 
     public function store(SavePostRequest $request, SaveDraft $save): RedirectResponse
     {
-        $post = $save->handle($this->actor($request), null, $request->plannedAt(), $request->variantInputs());
+        try {
+            $post = $save->handle($this->actor($request), null, $request->plannedAt(), $request->variantInputs());
+        } catch (AttachedMediaMissing $missing) {
+            throw ValidationException::withMessages($request->missingImageErrors($missing->ids));
+        }
 
         $this->toast('success', __('The draft is saved.'));
 
@@ -67,6 +75,7 @@ class PostController extends Controller
             'post' => $this->presenter->present($post, $this->mayChangePosts($request)),
             'channels' => $this->presenter->channelOptions($post),
             'planned' => null,
+            'uploads' => MediaPresenter::uploads(),
             // How the texts that are on a platform did, with the readings
             // over time. Null for a post that was never published.
             'insights' => $this->insights->forPosts([$post], withHistory: true)[$post->id] ?? null,
@@ -86,6 +95,8 @@ class PostController extends Controller
             $this->toast('success', __('The draft is saved.'));
         } catch (PostNotEditable) {
             $this->toast('error', __('The changes were not saved: the post is no longer a draft. Return it to draft to edit it.'));
+        } catch (AttachedMediaMissing $missing) {
+            throw ValidationException::withMessages($request->missingImageErrors($missing->ids));
         }
 
         return to_route('posts.show', $post->id);

@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "3355515f-c9e8-4aa5-9dc0-83f92b5c7478",
+  "version": 1,
+  "timestamp": "2026-11-27T21:35:47.258Z",
+  "payload": {
+    "title": "libvips is the image engine, GD the fallback",
+    "context": "Images (#25): GD drops colour profiles without converting, so wide-gamut photos were stored duller and CMYK came out wrong. The owner chose libvips on 2026-11-27.",
+    "rationale": "libvips converts with the embedded profile. GD is kept, selectable by NOONGUN_MEDIA_ENGINE, for an image without libvips. Both engines share EncodingRules and the same tests.",
+    "alternatives": [],
+    "consequences": "The app image grows by about 61 MB. The health check fails when the configured engine is missing. Images already stored are not reprocessed. The web container needs about 1 GB for images with two slots."
+  },
+  "seq": 1
+}

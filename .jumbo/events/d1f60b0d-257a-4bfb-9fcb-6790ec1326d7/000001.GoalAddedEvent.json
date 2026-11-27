@@ -1,0 +1,21 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "d1f60b0d-257a-4bfb-9fcb-6790ec1326d7",
+  "version": 1,
+  "timestamp": "2026-11-27T12:25:29.937Z",
+  "payload": {
+    "title": "Count platform calls before publishing (#26)",
+    "objective": "Publishing counts its own calls per channel, so a daily platform limit is seen coming and not hit unnoticed.",
+    "successCriteria": [
+      "Publishing counts calls in the window insights polling uses and keeps priority over polling",
+      "Approving or scheduling a post that cannot fit says so before it is due",
+      "A post held back by the limit goes out when the window allows, without a duplicate",
+      "The count is shared when one account is connected in several workspaces",
+      "Tests for both platforms"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined"
+  },
+  "seq": 1
+}

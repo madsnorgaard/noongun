@@ -8,18 +8,23 @@ use App\Domain\Channels\Contracts\ChannelCapabilities;
 use App\Domain\Channels\Contracts\ConnectedChannels;
 use App\Domain\Channels\Contracts\DescribesSetup;
 use App\Domain\Channels\Contracts\ExplainsMissingAccounts;
+use App\Domain\Channels\Contracts\MediaLinkRule;
 use App\Domain\Channels\Contracts\Metric;
 use App\Domain\Channels\Contracts\MetricReading;
 use App\Domain\Channels\Contracts\PublishResult;
 use App\Domain\Channels\Contracts\RateLimit;
 use App\Domain\Channels\Contracts\ReadsMetrics;
 use App\Domain\Channels\Contracts\SkippedAccount;
+use App\Domain\Channels\Contracts\UploadsMedia;
 use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Channels\Exceptions\NothingToConnect;
 use App\Domain\Channels\Exceptions\PublishFailed;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Channels\Support\LinkWithUtm;
+use App\Domain\Content\Exceptions\MediaFileMissing;
+use App\Domain\Content\Models\MediaAttachment;
 use App\Domain\Content\Models\PostVariant;
+use App\Domain\Scheduling\PublishingConfig;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
 use Carbon\CarbonImmutable;
@@ -40,7 +45,7 @@ use SensitiveParameter;
  * Only Page access tokens are stored. The user tokens met during connect()
  * are used for that one request and then dropped.
  */
-final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsMissingAccounts, ReadsMetrics
+final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsMissingAccounts, ReadsMetrics, UploadsMedia
 {
     public const PLATFORM = 'facebook';
 
@@ -97,6 +102,21 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
     /** Most result pages read from /me/accounts (100 Pages each). */
     private const MAX_ACCOUNT_PAGES = 10;
 
+    /** A Page id and a photo id are both a "numeric string". */
+    private const NUMERIC_ID = '/\A[0-9]{1,32}\z/';
+
+    /**
+     * "Invalid parameter" and "Missing or invalid image file". Meta does
+     * not document what a post gets whose photo has expired; these are the
+     * two documented codes that can mean it. See docs/platform-notes/meta.md.
+     */
+    private const PHOTO_PROBLEM_CODES = [100, 324];
+
+    /** The code Facebook gives for a parameter it does not take. */
+    private const INVALID_PARAMETER = 100;
+
+    private const FILE_EXTENSIONS = ['image/jpeg' => 'jpg', 'image/png' => 'png'];
+
     private readonly GraphClient $graph;
 
     /**
@@ -134,13 +154,23 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
     {
         $maxBodyLength = $this->settings['max_body_length'] ?? null;
 
+        // Every value for images is a setting. Without the settings
+        // Facebook takes no images.
+        $types = $this->mediaTypes();
+        $items = $this->positiveSetting('max_media_items') ?? 0;
+        $rule = $this->settings['media_link_rule'] ?? null;
+
         return new ChannelCapabilities(
             maxBodyLength: is_numeric($maxBodyLength) && (int) $maxBodyLength > 0 ? (int) $maxBodyLength : self::MAX_BODY_LENGTH,
-            // Photo and media posts are not built yet (M3 is text and link).
-            mediaTypes: [],
-            maxMediaItems: 0,
+            mediaTypes: $items > 0 ? $types : [],
+            maxMediaItems: $types !== [] ? $items : 0,
             linkPreviews: true,
             rateLimit: new RateLimit($this->positive($this->settings['rate_limit_calls_per_day'] ?? null, self::RATE_LIMIT_CALLS), self::RATE_LIMIT_SECONDS),
+            maxMediaBytes: $this->positiveSetting('max_media_bytes'),
+            maxMediaPixels: $this->positiveSetting('max_media_pixels'),
+            altTextLength: $this->positiveSetting('alt_text_length'),
+            mediaLinkRule: (is_string($rule) ? MediaLinkRule::tryFrom($rule) : null) ?? MediaLinkRule::InText,
+            mediaUploadLifetime: $this->positiveSetting('media_upload_lifetime'),
             metrics: [...self::METRICS_OF_THE_POST, ...self::METRICS_OF_INSIGHTS],
         );
     }
@@ -486,6 +516,12 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
             throw PublishFailed::reconnectRequired(self::PLATFORM, 'The Page is not connected. Connect it again.');
         }
 
+        $images = $variant->images()->values();
+
+        if ($images->isNotEmpty()) {
+            return $this->publishWithImages($variant, $images);
+        }
+
         $parameters = ['message' => $variant->body];
 
         if (filled($variant->link)) {
@@ -513,6 +549,75 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
         return new PublishResult($id, $this->permalink($id), now());
     }
 
+    /**
+     * Sends one image to the Page as a photo that is not published, with
+     * its description, and returns the photo id. The file is read from its
+     * stream and goes to the Graph API in the body of the request: Facebook
+     * is never given an address to fetch it from.
+     */
+    public function uploadMedia(PostVariant $variant, MediaAttachment $attachment): string
+    {
+        $this->guardConfigured(PublishFailed::class);
+
+        $channel = $this->pageFor($variant);
+        $number = $this->numberOf($variant, $attachment);
+        $endpoint = 'POST /'.$channel->external_id.'/photos';
+
+        // Unpublished: the photo is in no feed and on no timeline until a
+        // post names it. Facebook keeps it for about a day.
+        $parameters = ['published' => 'false'];
+
+        if (filled($attachment->alt_text)) {
+            $parameters['alt_text_custom'] = (string) $attachment->alt_text;
+        }
+
+        try {
+            $mimeType = $attachment->image()->mime;
+            $stream = $attachment->readStream();
+        } catch (MediaFileMissing) {
+            throw PublishFailed::permanent(
+                self::PLATFORM,
+                "The file of image {$number} is missing from the storage of this instance, so it was not sent to Facebook.",
+                ['endpoint' => $endpoint],
+            );
+        }
+
+        try {
+            $response = $this->graph->upload(
+                $channel->external_id.'/photos',
+                $parameters,
+                (string) $channel->access_token,
+                'source',
+                $stream,
+                'image-'.$number.'.'.(self::FILE_EXTENSIONS[$mimeType] ?? 'img'),
+                $mimeType,
+                PublishingConfig::mediaTimeout(),
+                PublishFailed::class,
+                "Facebook did not take image {$number} of this post.",
+            );
+        } catch (PublishFailed $refusal) {
+            throw $this->withDescriptionLimit($refusal, $attachment, $number);
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
+        }
+
+        $id = $response['id'] ?? null;
+        $id = is_int($id) ? (string) $id : $id;
+
+        if (! is_string($id) || $id === '' || preg_match(self::NUMERIC_ID, $id) !== 1) {
+            // Nothing public was made, so sending the file again is safe.
+            throw PublishFailed::retryable(
+                self::PLATFORM,
+                "Facebook took image {$number} but gave no usable id for it.",
+                context: ['endpoint' => $endpoint],
+            );
+        }
+
+        return $id;
+    }
+
     public function delete(PostVariant $variant): void
     {
         $this->guardConfigured();
@@ -536,6 +641,231 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
         if (($response['success'] ?? false) !== true) {
             throw ChannelException::permanent(self::PLATFORM, 'Facebook did not confirm that the post was deleted.');
         }
+    }
+
+    /**
+     * One call to the Page feed that names the photos uploadMedia() sent,
+     * in their order. One photo goes the same way as several, so that the
+     * text, the id and the permalink are those of a Page post either way.
+     *
+     * @param  Collection<int, MediaAttachment>  $images
+     */
+    private function publishWithImages(PostVariant $variant, Collection $images): PublishResult
+    {
+        $channel = $this->pageFor($variant);
+        $endpoint = 'POST /'.$channel->external_id.'/feed';
+        $capabilities = $this->capabilities();
+
+        // What was approved: the body, and the link as its last line when
+        // the images take the place of the preview.
+        $parameters = ['message' => $variant->textFor($capabilities)];
+
+        $link = $variant->linkToSend();
+
+        if ($link !== null && ! $capabilities->linkGoesInText($link, $images->count())) {
+            $parameters['link'] = $link;
+        }
+
+        foreach ($images as $index => $attachment) {
+            $photoId = $attachment->external_id;
+
+            if (! is_string($photoId) || preg_match(self::NUMERIC_ID, $photoId) !== 1) {
+                // No call was made. The job sends the images again.
+                throw PublishFailed::uploadsNoLongerValid(
+                    self::PLATFORM,
+                    'Image '.($index + 1).' of this post is not on Facebook yet. Nothing was published.',
+                    ['endpoint' => $endpoint],
+                );
+            }
+
+            $parameters["attached_media[{$index}]"] = (string) json_encode(['media_fbid' => $photoId]);
+        }
+
+        // As for a post without images: one call, not safe to repeat, and
+        // a failure is retryable only when Facebook certainly made no post.
+        try {
+            $response = $this->graph->send('POST', $channel->external_id.'/feed', $parameters, $channel->access_token, PublishFailed::class, safeToRepeat: false);
+        } catch (PublishFailed $refusal) {
+            throw $this->blamesUploads($refusal, $images)
+                ? $this->uploadsNoLongerValid($refusal)
+                : $this->withCountLimit($refusal, $images->count());
+        }
+
+        $id = $response['id'] ?? null;
+
+        if (! is_string($id) || $id === '') {
+            // Not retryable: the post may be public, and a second call would duplicate it.
+            throw PublishFailed::permanent(
+                self::PLATFORM,
+                'Facebook accepted the post but returned no id for it. Check the Page before trying again.',
+                ['endpoint' => $endpoint, 'outcome_unknown' => true],
+            );
+        }
+
+        return new PublishResult($id, $this->permalink($id), now());
+    }
+
+    /**
+     * True when Facebook refused the post outright, with an error that can
+     * be about its photos, and at least one of them was uploaded longer
+     * ago than "media_upload_trusted" seconds. Meta does not document the
+     * error for a photo that expired, and "about 24 hours" is not exact,
+     * so the age of the uploads is what tells an expired photo from a
+     * post Facebook will never take: photos sent a moment ago are not
+     * blamed. After one new upload a second refusal is therefore final.
+     *
+     * @param  Collection<int, MediaAttachment>  $images
+     */
+    private function blamesUploads(PublishFailed $refusal, Collection $images): bool
+    {
+        if (! $this->refusedOutright($refusal, self::PHOTO_PROBLEM_CODES)) {
+            return false;
+        }
+
+        $trusted = now()->subSeconds($this->positiveSetting('media_upload_trusted') ?? 0);
+
+        return $images->contains(
+            fn (MediaAttachment $attachment): bool => $attachment->uploaded_at === null || $attachment->uploaded_at->lte($trusted),
+        );
+    }
+
+    private function uploadsNoLongerValid(PublishFailed $refusal): PublishFailed
+    {
+        return PublishFailed::uploadsNoLongerValid(
+            self::PLATFORM,
+            $refusal->getMessage().' The images of this post were sent to Facebook some time ago and may no longer be kept there, so they are sent again.',
+            $this->contextOf($refusal),
+        );
+    }
+
+    /**
+     * Whether Facebook answered with an error of one of these codes that
+     * is a plain "no": not a limit on requests, not a token, and not an
+     * answer that leaves open what happened.
+     *
+     * @param  list<int>  $codes
+     */
+    private function refusedOutright(PublishFailed $refusal, array $codes): bool
+    {
+        $context = $refusal->context();
+
+        return ! $refusal->retryable
+            && ! $refusal->requiresReconnect
+            && ($context['outcome_unknown'] ?? false) !== true
+            && in_array($context['code'] ?? null, $codes, true);
+    }
+
+    /**
+     * How many images a post may carry is a setting that Meta gives no
+     * number for, so the number in use is a guess. When Facebook refuses
+     * a post with several images as an invalid parameter, the refusal is
+     * given back with that said, and with where the number is changed.
+     * It is certain only when Facebook's own words name the images;
+     * otherwise it is offered as a possible cause. The code Facebook
+     * gave stays in the context, which the job writes to the log.
+     */
+    private function withCountLimit(PublishFailed $refusal, int $count): PublishFailed
+    {
+        if ($count < 2 || ! $this->refusedOutright($refusal, [self::INVALID_PARAMETER])) {
+            return $refusal;
+        }
+
+        $allowed = $this->capabilities()->maxMediaItems;
+        $named = str_contains($refusal->getMessage(), 'attached_media');
+
+        return PublishFailed::permanent(
+            self::PLATFORM,
+            $refusal->getMessage().($named
+                ? " Facebook's answer is about the images of this post, and it has {$count}."
+                : " One possible cause is the number of images on this post, which is {$count}.")
+                ." Meta documents no limit for it, and the {$allowed} this instance allows for Facebook are an assumption. Take images off the post, or have the limit lowered in the configuration of the instance (FACEBOOK_MAX_MEDIA_ITEMS).",
+            [...$this->contextOf($refusal), 'suspected_limit' => 'max_media_items', 'limit_named_by_platform' => $named, 'images' => $count],
+        );
+    }
+
+    /**
+     * The same for the description of an image, whose longest length is
+     * also a guess.
+     */
+    private function withDescriptionLimit(PublishFailed $refusal, MediaAttachment $attachment, int $number): PublishFailed
+    {
+        $length = mb_strlen((string) $attachment->alt_text);
+
+        if ($length === 0 || ! $this->refusedOutright($refusal, [self::INVALID_PARAMETER])) {
+            return $refusal;
+        }
+
+        $allowed = $this->capabilities()->altTextLength;
+        $named = str_contains($refusal->getMessage(), 'alt_text_custom');
+
+        return PublishFailed::permanent(
+            self::PLATFORM,
+            $refusal->getMessage().($named
+                ? " Facebook's answer is about the description of image {$number}, which is {$length} characters long."
+                : " One possible cause is the description of image {$number}, which is {$length} characters long.")
+                ." Meta documents no limit for it, and the {$allowed} characters this instance allows for Facebook are an assumption. Shorten the description, or have the limit lowered in the configuration of the instance (FACEBOOK_ALT_TEXT_LENGTH).",
+            [...$this->contextOf($refusal), 'suspected_limit' => 'alt_text_length', 'limit_named_by_platform' => $named, 'description_length' => $length],
+        );
+    }
+
+    /**
+     * What a failure carries, without the fields every failure adds itself.
+     *
+     * @return array<string, mixed>
+     */
+    private function contextOf(PublishFailed $refusal): array
+    {
+        return array_diff_key($refusal->context(), array_flip(['platform', 'retryable', 'retry_after_seconds', 'requires_reconnect']));
+    }
+
+    /**
+     * The connected Page a variant with images goes to. Its id becomes
+     * part of the address a file is sent to, so it must be a Page id and
+     * nothing else.
+     */
+    private function pageFor(PostVariant $variant): Channel
+    {
+        $channel = $variant->channel;
+
+        if ($channel === null || $channel->platform !== self::PLATFORM || preg_match(self::NUMERIC_ID, $channel->external_id) !== 1) {
+            throw PublishFailed::permanent(self::PLATFORM, 'This post is not addressed to a Facebook Page.');
+        }
+
+        if (blank($channel->access_token)) {
+            throw PublishFailed::reconnectRequired(self::PLATFORM, 'The Page is not connected. Connect it again.');
+        }
+
+        return $channel;
+    }
+
+    /**
+     * The place of an image on its variant, from 1, as the editor shows it.
+     */
+    private function numberOf(PostVariant $variant, MediaAttachment $attachment): int
+    {
+        $index = $variant->images()->values()->search(fn (MediaAttachment $other): bool => $other->is($attachment));
+
+        return is_int($index) ? $index + 1 : max(1, $attachment->position);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function mediaTypes(): array
+    {
+        $types = $this->settings['media_types'] ?? [];
+
+        return array_values(array_filter(
+            array_map(fn (mixed $type): string => is_string($type) ? strtolower(trim($type)) : '', is_array($types) ? $types : []),
+            fn (string $type): bool => $type !== '',
+        ));
+    }
+
+    private function positiveSetting(string $key): ?int
+    {
+        $value = $this->settings[$key] ?? null;
+
+        return is_numeric($value) && (int) $value > 0 ? (int) $value : null;
     }
 
     /**

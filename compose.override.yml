@@ -12,7 +12,9 @@ x-dev: &dev
       GID: ${NOONGUN_GID:-1000}
   image: noongun-app:dev
   restart: "no"
-  volumes:
+  # Replaces the volumes of docker-compose.yml, so that in development
+  # images are plain files under ./storage/app/media in the checkout.
+  volumes: !override
     - .:/app
     - ./storage:/app/storage
 

@@ -63,12 +63,33 @@ final class PublishingConfig
     }
 
     /**
-     * The time limit of a job that may send $calls variants: the platform
-     * calls plus a margin for the job's own work.
+     * Seconds allowed for sending one image to a platform, all calls for
+     * that image together. An adapter keeps its upload within this.
      */
-    public static function jobSeconds(int $calls): int
+    public static function mediaTimeout(): int
     {
-        return self::timeout() * min(max($calls, 1), self::callsPerJob()) + self::JOB_SLACK_SECONDS;
+        return self::int('media_timeout', 60, 1);
+    }
+
+    /**
+     * How many images one run of the job sends before it hands the rest to
+     * a successor.
+     */
+    public static function uploadsPerJob(): int
+    {
+        return self::int('media_uploads_per_job', 2, 1);
+    }
+
+    /**
+     * The time limit of a job that may send $calls variants and upload
+     * $uploads images: the platform calls plus a margin for the job's own
+     * work.
+     */
+    public static function jobSeconds(int $calls, int $uploads = 0): int
+    {
+        return self::timeout() * min(max($calls, 1), self::callsPerJob())
+            + self::mediaTimeout() * min(max($uploads, 0), self::uploadsPerJob())
+            + self::JOB_SLACK_SECONDS;
     }
 
     /**
@@ -78,7 +99,7 @@ final class PublishingConfig
      */
     public static function longestJobSeconds(): int
     {
-        return self::jobSeconds(self::callsPerJob());
+        return self::jobSeconds(self::callsPerJob(), self::uploadsPerJob());
     }
 
     /**

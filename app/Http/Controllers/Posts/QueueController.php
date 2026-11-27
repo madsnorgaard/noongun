@@ -105,6 +105,6 @@ class QueueController extends Controller
      */
     private function posts(PostState ...$states): Builder
     {
-        return Post::query()->with(['variants.channel', 'approver', 'draftRun.pillar', 'draftRun.idea'])->inState(...$states);
+        return Post::query()->with(['variants.channel', 'variants.attachments.media', 'approver', 'draftRun.pillar', 'draftRun.idea'])->inState(...$states);
     }
 }

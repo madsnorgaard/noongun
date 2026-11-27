@@ -8,6 +8,7 @@ use App\Domain\Content\PostState;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Posts\Concerns\ActsOnPosts;
+use App\Http\Presenters\MediaPresenter;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Http\Request;
@@ -62,7 +63,7 @@ class CalendarController extends Controller
 
         // The bounds are local midnights; the column holds UTC.
         $byDay = Post::query()
-            ->with('variants.channel')
+            ->with(['variants.channel', 'variants.attachments.media'])
             ->inState(PostState::Draft, PostState::Approved, PostState::Scheduled, PostState::Publishing, PostState::Published, PostState::Failed)
             ->where('scheduled_at', '>=', $start->utc())
             ->where('scheduled_at', '<', $end->utc())
@@ -101,6 +102,8 @@ class CalendarController extends Controller
     private function entry(Post $post): array
     {
         $variants = $post->variants->sortBy('id')->values();
+        $attachment = $variants->first()?->images()->first();
+        $image = $attachment?->media;
 
         return [
             'id' => $post->id,
@@ -108,6 +111,13 @@ class CalendarController extends Controller
             'time' => $this->localTime($post)->format('H:i'),
             'channels' => $variants->map(fn (PostVariant $variant): string => $variant->channel->display_name ?? '')->filter()->values()->all(),
             'excerpt' => Str::limit(trim((string) $variants->first()?->body), self::EXCERPT_LENGTH),
+            // The small copy of the first image of the first text, and how
+            // many images that text has.
+            'thumb_url' => $image !== null ? MediaPresenter::present($image)['thumb_url'] : null,
+            // What that image shows, in the words typed for it, for a
+            // reader who does not see the small copy.
+            'thumb_alt' => $image !== null ? $attachment->alt_text : null,
+            'image_count' => $variants->first()?->attachments->count() ?? 0,
         ];
     }
 

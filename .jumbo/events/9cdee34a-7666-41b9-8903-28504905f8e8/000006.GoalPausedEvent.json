@@ -1,0 +1,11 @@
+{
+  "type": "GoalPausedEvent",
+  "aggregateId": "9cdee34a-7666-41b9-8903-28504905f8e8",
+  "version": 6,
+  "timestamp": "2026-11-27T13:19:44.935Z",
+  "payload": {
+    "status": "paused",
+    "reason": "WorkPaused"
+  },
+  "seq": 6
+}

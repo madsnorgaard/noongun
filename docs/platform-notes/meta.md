@@ -530,6 +530,216 @@ Still to confirm:
 2. Development mode visibility, as raised in the 2026-11-23 entry: whether posts made
    by an app in Development mode are visible to the public.
 
+## 2026-11-26 - photos on a Page post (issue #25)
+
+What was read in Meta's documentation before `FacebookAdapter` learned to publish
+images, and what was decided. Graph API v27.0. Nothing here was run against the real
+API: `scripts/spike/07-upload-photo-post.sh` is written for that and has not been run.
+
+Sources:
+developers.facebook.com/docs/graph-api/reference/page/photos (Page Photos),
+developers.facebook.com/docs/graph-api/reference/photo (Photo),
+developers.facebook.com/docs/graph-api/reference/page/feed (Page Feed),
+developers.facebook.com/docs/graph-api/reference/page-post (Page Post),
+developers.facebook.com/docs/pages-api/posts (posts guide).
+
+### Confirmed in the documentation
+
+**Uploading a photo without publishing it.** `POST /{page-id}/photos` with
+`published=false`. The file is attached as `multipart/form-data`: "The name of the
+object doesn't matter, but historically people have used `source` as the parameter
+name for the photo." The other way is `url`, "a photo that is already uploaded to the
+Internet", which Noon Gun never uses (ADR 0017: the instance may not be reachable).
+"On successful upload, the Graph API provides a response including the photo ID." The
+return type is `id` (numeric string) and `post_id` (string).
+
+**A post that shows uploaded photos.** "you can publish a multi-photo post using the
+returned ids by using the /page-id/feed endpoint", with `message` and one
+`attached_media[n]={"media_fbid":"{photo-id}"}` for each photo. The answer is the Page
+post id. This is on the Page Photos page only: the Page Feed reference does not list
+`attached_media` among its parameters.
+
+**How long an unpublished photo is kept.** "it will remain on Facebook servers for
+about 24 hours" and "If you do not publish these photos within 24 hours, we delete
+them."
+
+**`temporary`.** "This is a temporary photo. `published` must be false, and you can't
+set `scheduled_publish_time`", and "If the photo is used in a scheduled post,
+`temporary=true` must be used." The page ties no lifetime of its own to it. Noon Gun
+does not schedule on Facebook, so the adapter sends `published=false` and no
+`temporary`.
+
+**Types and size.** Page Photos: ".jpeg, .bmp, .png, .gif, .tiff", "Files can not
+exceed 10MB", and "For .png files, we recommend not exceeding 1MB or the image may
+appear pixelated." Photo: "a photo must be less than 10MB in size" and "Animated photos
+are not supported." No limit in pixels is given; Facebook "resizes images to different
+dimensions".
+
+**Alternative text.** `alt_text_custom` is a parameter of the upload: "Accessible
+alternative description for an image." It is on the photo, not on the post.
+
+**Permissions.** The Page Photos reference asks for the same as the feed: a Page token
+from someone with the `CREATE_CONTENT` task, `pages_manage_posts`,
+`pages_read_engagement`, `pages_show_list`. Nothing more is needed.
+
+**Errors of the upload.** The Page Photos reference lists 324 "Missing or invalid image
+file", 100 "Invalid parameter", 368 "The action attempted has been deemed abusive or is
+otherwise disallowed", 200 "Permissions error", 190 "Invalid OAuth 2.0 Access Token",
+240 and 283 (permissions).
+
+### Not documented
+
+1. **How many photos one post takes.** No number on any page read.
+2. **How long `alt_text_custom` may be.** No number. Accessibility guides report a
+   limit of 100 characters in the Facebook interface of some years ago, and a report
+   from 2021 says it was lifted; neither is about the API.
+3. **Whether `link` may be sent with `attached_media`.** The feed reference says only
+   "Either `link` or `message` must be supplied" and does not know `attached_media`.
+4. **Whether one photo may go through `attached_media`.** The example has two. Nothing
+   says one is refused.
+5. **The error for a `media_fbid` that has expired or is unknown,** and the one for too
+   many photos. The feed reference lists no error codes at all.
+6. **The permalink of a post with photos.** The posts guide gives
+   `https://www.facebook.com/{page_post_id}` for "a Page post" and says nothing about
+   photos.
+7. **Whether an unpublished photo upload answers with `post_id`.**
+8. **Whether "about 24 hours" is ever much shorter,** and whether a photo that is on a
+   published post is then kept for good (assumed: it is, it is the photo of the post).
+
+### Decisions
+
+1. **Two steps, as ADR 0017 has it.** `uploadMedia()` sends one file as multipart to
+   `POST /{page-id}/photos` with `published=false`, the file in `source` and
+   `alt_text_custom` when the image has a description, and returns the photo id.
+   `publish()` then makes one call to `POST /{page-id}/feed` with `message` and
+   `attached_media[n]` in the order of the images.
+2. **One photo goes the same way as several** (through `attached_media`, not as a
+   published photo). The text is then a `message` of a Page post in both cases, the id
+   is a Page post id, the permalink is built the same way, `delete()` works on the same
+   kind of id, and, most of all, only one call makes anything public. A published
+   photo upload would make the upload itself the public call.
+3. **The token travels in the multipart body** as the fields `access_token` and
+   `appsecret_proof`, as it does in the form body of the feed call. Nothing is in the
+   address.
+4. **The photo id is checked** before it is returned and again before it is put into
+   `attached_media`: digits only. An answer without such an id is retried.
+5. **Capabilities,** all from `config/noongun.php` and the environment:
+
+   | Capability | Default | Basis |
+   |---|---|---|
+   | Types | `image/jpeg`, `image/png` | documented (Noon Gun stores nothing else) |
+   | Images on one post | 10 | assumed, see "not documented" 1 |
+   | Bytes of one file | 10,000,000 | documented as "10MB"; the decimal reading is the careful one |
+   | Pixels of one image | none | no limit documented; stored images are 4096 pixels on the longer side at most |
+   | Description | 1000 characters | assumed, see 2 |
+   | Image and link | `in_text` | see 3: the two are never sent together |
+   | Lifetime of an upload | 72,000 seconds (20 hours) | "about 24 hours", with a margin |
+
+6. **Image and link.** The link is the last line of `message`
+   (`ChannelCapabilities::textFor()`), and no `link` parameter is sent. A link in the
+   text of a Page post is clickable; no preview is shown beside photos.
+7. **Failures of the upload.** An upload makes nothing public, so every temporary
+   failure is retryable: rate limit codes (with the wait Facebook gives), codes 1, 2
+   and 341, HTTP 429 and 5xx, timeouts, broken connections and an answer that cannot
+   be read. Token and permission errors ask for a reconnect. Everything else is
+   permanent and says which image: "Facebook did not take image 2 of this post.
+   Facebook said: ...". That covers 324, 100 and 368.
+8. **Failures of the post** are classified exactly as for a post without images
+   (2026-11-24, decision 10): retryable only when Facebook certainly made no post,
+   "outcome unknown" for everything that does not say.
+9. **A photo Facebook no longer holds.** The job sends an image again by itself when
+   its upload is older than the lifetime. For a photo that Facebook dropped earlier, or
+   does not know, the error is not documented (5). The adapter therefore goes by what
+   is documented and by time: when Facebook refuses the post outright with code 100 or
+   324, and at least one photo was uploaded more than `media_upload_trusted` seconds
+   ago (900), it throws `PublishFailed::uploadsNoLongerValid()`. The job forgets the
+   uploads of the variant and retries within its attempts, so the images go up again
+   and the post is tried once more. Photos that were sent a moment ago are not blamed,
+   so a second refusal after the new upload is final. A post that Facebook refuses for
+   another reason is therefore uploaded at most once more, and never in a loop.
+   `uploadsNoLongerValid()` is an addition to the contract of ADR 0017, in
+   `PublishFailed`, for any adapter.
+10. **Unused photos are left to Facebook.** An upload whose post is never made, or
+    that is replaced by a newer upload, is not deleted by Noon Gun. Facebook deletes it
+    after about a day.
+
+### For the spike (`scripts/spike/07-upload-photo-post.sh`)
+
+- Does a multipart upload with `published=false` and the token as a form field work,
+  and does the answer hold `id` only?
+- Does `alt_text_custom` come back on `GET /{photo-id}?fields=alt_text_custom`, and how
+  long may it be?
+- Does a post with one `attached_media` entry look like a normal photo post, with the
+  text above the picture and a clickable link in it?
+- Is `https://www.facebook.com/{page_post_id}` the address of that post, and does
+  `permalink_url` differ?
+- Does `DELETE /{page_post_id}` remove the post and its photo?
+- What does `POST /{page-id}/feed` answer for a `media_fbid` that does not exist? Use
+  an invented id. The code and subcode belong in `error_photo_expired.json`.
+- How many photos does one post take?
+
+## 2026-11-27 - review fixes for the image path
+
+Nothing new was read in Meta's documentation. Three things changed after review.
+
+**No redirect is followed.** `GraphClient` sends every request with redirects turned
+off: the sign-in exchanges, `/me/accounts`, `debug_token`, the feed post, the photo
+upload and the delete. There is no batch call. Before this the HTTP client would have
+repeated a request at whatever address a 3xx named, and on a 307 or 308 with its body,
+which for an upload is the Page token, its proof and the image. Meta documents no
+redirect for the Graph API, so a 3xx is treated as an answer that was not expected:
+retryable for a call that is safe to repeat, and "outcome unknown" for a post.
+
+**The assumed limits say that they are assumed.** Ten images and 1000 characters of
+description stay the defaults; neither is from Meta. When Facebook refuses a post with
+several images, or a photo with a description, outright with code 100, the failure now
+adds which of the two limits it may be, that the figure is an assumption, and the name
+of the setting (`FACEBOOK_MAX_MEDIA_ITEMS`, `FACEBOOK_ALT_TEXT_LENGTH`). It says "is
+about" only when Facebook's own message names `attached_media` or `alt_text_custom`,
+and "one possible cause" otherwise, because the real wording of these refusals is not
+known. The log entry "Publishing a variant failed" carries Facebook's `code`,
+`subcode`, `fbtrace_id` and `suspected_limit`. A refusal of uploads that are old is
+still answered with one new upload first (2026-11-26, decision 9); the sentence about
+the limit comes with the refusal after that.
+
+**The spike covers the whole path.** `scripts/spike/07-upload-photo-post.sh` now takes
+every open question of the 2026-11-26 entry in one run and prints a summary to paste
+below. It has not been run.
+
+### Spike results for the image path
+
+To be filled in from the summary the script prints.
+
+- Date run, Graph version, app mode:
+- Summary (the JSON block):
+- Posts visible from a logged-out browser (with `SPIKE_PAUSE=1`):
+- What was changed afterwards (fixtures, `FACEBOOK_MAX_MEDIA_ITEMS`,
+  `FACEBOOK_ALT_TEXT_LENGTH`, the codes in `FacebookAdapter::PHOTO_PROBLEM_CODES`):
+
+## 2026-11-27 - a post made in Development mode is not public
+
+Checked on the first real post, published by Noon Gun on 2026-11-26 while the Meta
+app was in Development mode, from a browser with a new profile and no Facebook
+session:
+
+- The permalink of the post answers "This content isn't available right now".
+- The Page itself opens signed out and shows posts, so the Page is public. Its newest
+  visible post is one made by hand the day before. The Noon Gun post, which is newer,
+  is not listed.
+
+This matches the app modes page quoted on 2026-11-23: data made in Development mode is
+seen only by people with a role on the app, and becomes visible to everyone once the
+app is switched to Live mode. Open question 2 of the first review and difference 3 are
+answered for Development mode: Phase 1 needs the app in Live mode.
+
+Still open: whether an app with the "Manage everything on your Page" use case in Live
+mode keeps `pages_manage_posts` for its own administrator without App Review, and what
+the dashboard asks for before it allows **Publish**. To be filled in when the owner
+switches the app:
+
+- What the dashboard required before Live mode:
+- Did the post of 2026-11-26 become visible signed out afterwards:
+- Did publishing still work for the administrator's Pages without App Review:
 ## 2026-11-26 - reading the numbers of a post (M6)
 
 What was read in Meta's documentation on 2026-11-26 before the metrics contract was

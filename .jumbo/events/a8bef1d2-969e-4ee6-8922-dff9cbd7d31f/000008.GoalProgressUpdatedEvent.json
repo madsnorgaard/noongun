@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "a8bef1d2-969e-4ee6-8922-dff9cbd7d31f",
+  "version": 8,
+  "timestamp": "2026-11-27T21:35:49.084Z",
+  "payload": {
+    "taskDescription": "libvips engine merged on feat/25-media on top of main with M6: colour conversion to sRGB, GD kept as fallback, 3558 tests on an image with libvips. Not verified: real platform calls, pages in a browser, CI without libvips."
+  },
+  "seq": 8
+}

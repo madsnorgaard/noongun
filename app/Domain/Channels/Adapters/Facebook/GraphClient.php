@@ -24,6 +24,15 @@ use SensitiveParameter;
  * Error codes are from developers.facebook.com/docs/graph-api/guides/error-handling
  * and developers.facebook.com/docs/graph-api/overview/rate-limiting, see
  * docs/platform-notes/meta.md.
+ *
+ * A file goes out with upload(), in the body of the request. This class
+ * never logs or dumps a request: the body of an upload holds the token.
+ *
+ * No redirect is followed, on any call. The HTTP client would send the
+ * same request again to whatever address the answer names, and on a 307 or
+ * 308 with its body: the token, its proof and the file. The Graph API has
+ * no reason to redirect, so a 3xx is a failure like any other answer that
+ * was not expected.
  */
 final class GraphClient
 {
@@ -302,6 +311,83 @@ final class GraphClient
     }
 
     /**
+     * Sends one file to the Graph API as multipart/form-data, read from a
+     * stream. The token and its proof travel as fields of the body, never
+     * in the address.
+     *
+     * Only for a call that makes nothing public, such as a photo that is
+     * uploaded unpublished: every temporary failure is reported as
+     * retryable, because sending the file again does no harm. The caller
+     * closes the stream.
+     *
+     * @param  array<string, string>  $parameters  the other fields of the form
+     * @param  resource  $file
+     * @param  string  $filename  made by the caller, never taken from a user
+     * @param  int  $timeout  seconds allowed for the whole call
+     * @param  class-string<ChannelException>  $failure
+     * @param  string  $refused  what to say when Facebook refuses the file itself
+     * @return array<string, mixed> the decoded JSON body
+     *
+     * @throws ChannelException
+     */
+    public function upload(
+        string $path,
+        #[SensitiveParameter] array $parameters,
+        #[SensitiveParameter] string $token,
+        string $field,
+        $file,
+        string $filename,
+        string $mimeType,
+        int $timeout,
+        string $failure,
+        string $refused,
+    ): array {
+        $parameters['access_token'] = $token;
+        $parameters['appsecret_proof'] = hash_hmac('sha256', $token, $this->appSecret);
+
+        $secrets = $this->secretsIn($parameters);
+        $endpoint = 'POST /'.ltrim($path, '/');
+
+        try {
+            $response = $this->http
+                ->baseUrl($this->baseUrl)
+                ->timeout($timeout)
+                ->connectTimeout(min(10, $timeout))
+                ->withoutRedirecting()
+                ->acceptJson()
+                ->attach($field, $file, $filename, ['Content-Type' => $mimeType])
+                ->post($path, $parameters);
+        } catch (ConnectionException|TransferException $exception) {
+            // Deliberately not chained, as in send().
+            unset($exception);
+
+            throw $failure::retryable(
+                $this->platform,
+                'Facebook could not be reached. The connection failed or timed out.',
+                context: ['endpoint' => $endpoint],
+            );
+        }
+
+        $body = $response->json();
+
+        if ($response->successful() && is_array($body) && ! isset($body['error'])) {
+            return $body;
+        }
+
+        // Cut short or mangled on the way back. Nothing public was made,
+        // so the file can simply be sent again.
+        if ($response->successful() && ! is_array($body)) {
+            throw $failure::retryable(
+                $this->platform,
+                "Facebook gave an answer that could not be read (HTTP {$response->status()}).",
+                context: ['endpoint' => $endpoint, 'http_status' => $response->status()],
+            );
+        }
+
+        throw $this->failure($response, $failure, $endpoint, $secrets, true, $refused);
+    }
+
+    /**
      * A failure of a call that is not safe to repeat, where Facebook may
      * have done what was asked. Never retryable.
      *
@@ -321,8 +407,14 @@ final class GraphClient
      * @param  class-string<ChannelException>  $failure
      * @param  list<string>  $secrets
      */
-    private function failure(Response $response, string $failure, string $endpoint, #[SensitiveParameter] array $secrets, bool $safeToRepeat): ChannelException
-    {
+    private function failure(
+        Response $response,
+        string $failure,
+        string $endpoint,
+        #[SensitiveParameter] array $secrets,
+        bool $safeToRepeat,
+        string $refused = 'Facebook refused the request.',
+    ): ChannelException {
         $error = $response->json('error');
         $error = is_array($error) ? $error : [];
 
@@ -342,6 +434,17 @@ final class GraphClient
         ];
 
         $detail = $said === null ? '' : ' Facebook said: '.$said;
+
+        // Not followed, see the class comment. The address it names is
+        // not repeated either. For a call that creates something the
+        // outcome is unknown, as for every answer that was not expected.
+        if ($response->redirect()) {
+            $what = "Facebook answered with a redirect (HTTP {$response->status()}), which is not followed.";
+
+            return $safeToRepeat
+                ? $failure::retryable($this->platform, $what, context: $context)
+                : $this->outcomeUnknown($failure, $what, $context);
+        }
 
         if ($this->tokenOrPermissionProblem($code, $subcode)) {
             return $failure::reconnectRequired(
@@ -397,7 +500,7 @@ final class GraphClient
             );
         }
 
-        return $failure::permanent($this->platform, 'Facebook refused the request.'.$detail, $context);
+        return $failure::permanent($this->platform, $refused.$detail, $context);
     }
 
     /**

@@ -5,6 +5,9 @@ namespace App\Providers;
 use App\Domain\Channels\ChannelManager;
 use App\Domain\Channels\Events\ChannelConnected;
 use App\Domain\Channels\Events\ChannelTokenVerified;
+use App\Domain\Content\Media\ImageProcessor;
+use App\Domain\Content\Media\MediaConfig;
+use App\Domain\Content\Media\VipsCommand;
 use App\Domain\Drafting\DraftGenerators;
 use App\Domain\Drafting\Generators\ProviderReplies;
 use App\Domain\Drafting\PromptRenderer;
@@ -12,6 +15,7 @@ use App\Domain\Insights\ChannelPolling;
 use App\Domain\Insights\ResumePollingOfConnectedChannel;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Support\Health\CheckBackingServices;
+use App\Support\Health\CheckImageEngine;
 use App\Support\PasswordConfirmation;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -40,6 +44,10 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton(ChannelManager::class);
         $this->app->scoped(DraftGenerators::class);
         $this->app->singleton(ProviderReplies::class);
+        $this->app->singleton(VipsCommand::class);
+
+        // The engine that processes uploaded images is a setting.
+        $this->app->bind(ImageProcessor::class, fn (Application $app): ImageProcessor => $app->make(MediaConfig::engine()->processor()));
 
         // Built the way the framework builds RequirePassword, from the same
         // setting, so that a page says what the middleware will decide.
@@ -62,6 +70,7 @@ class AppServiceProvider extends ServiceProvider
         // The platform has just confirmed the token: a pause of reading
         // that was about the token is over. Posts reported as gone stay so.
         Event::listen(ChannelTokenVerified::class, fn (ChannelTokenVerified $event) => ChannelPolling::connectedAgain($event->channelId));
+        Event::listen(DiagnosingHealth::class, CheckImageEngine::class);
 
         View::addNamespace(PromptRenderer::NAMESPACE, resource_path('prompts'));
 
@@ -84,6 +93,19 @@ class AppServiceProvider extends ServiceProvider
                 Inertia::flash('toast', ['type' => 'warning', 'message' => $message]);
 
                 return back(fallback: route('queue.index'))->withErrors(['proposal' => $message]);
+            }));
+
+        // "media-uploads": each upload is decoded and written again, which
+        // costs memory and time. The page that uploads reads the 429: how
+        // long to wait is in Retry-After, and "reason" tells this limit
+        // ("throttled", up to a minute) from the one on images that are
+        // processed at once ("busy", a few seconds, see MediaController).
+        RateLimiter::for('media-uploads', fn (Request $request): Limit => Limit::perMinute(MediaConfig::uploadsPerMinute())
+            ->by('media|'.($request->user()?->getAuthIdentifier() ?? $request->ip()))
+            ->response(function (Request $request, array $headers) {
+                $message = (string) __('That is more uploads than one person may make in a minute. Wait a moment, then try again.');
+
+                return response()->json(['message' => $message, 'reason' => 'throttled', 'errors' => ['file' => [$message]]], 429, $headers);
             }));
     }
 

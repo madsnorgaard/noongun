@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "485ef9e3-5be5-485f-ad9e-5d5f7ecc41d2",
+  "version": 1,
+  "timestamp": "2026-11-27T12:25:28.741Z",
+  "payload": {
+    "title": "The stored image type is decided from the pixels, and nothing is stored twice",
+    "context": "Images review (#25): a photo saved as PNG was stored as a larger PNG that no platform takes, web-sized uploads grew, and the same file could be stored several times.",
+    "rationale": "Any transparent pixel means PNG. An opaque image from a lossless format up to 9 megapixels is encoded both ways and the smaller kept. Everything else is JPEG, never at a higher quality than its source. Animated PNG and WebP are refused like GIF. An upload whose stored bytes the workspace already holds returns the existing image.",
+    "alternatives": [],
+    "consequences": "Screenshots stay sharp, photos fit the platforms, and a duplicate costs no quota. The quota is unlimited by default on a self-hosted instance."
+  },
+  "seq": 1
+}

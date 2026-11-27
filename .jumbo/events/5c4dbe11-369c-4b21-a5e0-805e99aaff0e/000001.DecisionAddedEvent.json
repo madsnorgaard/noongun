@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "5c4dbe11-369c-4b21-a5e0-805e99aaff0e",
+  "version": 1,
+  "timestamp": "2026-11-27T21:35:47.563Z",
+  "payload": {
+    "title": "PHP reaches libvips through the vips program, not FFI or the PECL extension",
+    "context": "Images (#25): FFI needs ffi.enable globally and the stack check off, and loads the decoder into the one FrankenPHP process. The PECL extension is deprecated.",
+    "rationale": "Each step is a short process with fixed arguments, no shell, a time limit and none of the application environment, so a decoder crash fails one upload and no key is in reach of it.",
+    "alternatives": [],
+    "consequences": "Five to eleven short processes per upload, about 0.1 s. Intermediate files go to a temporary folder per upload, up to about 600 MB for the largest allowed image."
+  },
+  "seq": 1
+}

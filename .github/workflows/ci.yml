@@ -54,10 +54,14 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Install libvips
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvips-tools
+
       - uses: shivammathur/setup-php@v2
         with:
           php-version: "8.5"
-          extensions: pdo_pgsql, pgsql, redis, pcntl, intl, zip, bcmath
+          extensions: pdo_pgsql, pgsql, redis, pcntl, intl, zip, bcmath, gd
+          ini-values: upload_max_filesize=32M, post_max_size=32M
           coverage: none
           tools: composer:v2
 

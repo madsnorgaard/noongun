@@ -10,8 +10,8 @@ FROM ${PHP_IMAGE} AS base
 ARG UID=1000
 ARG GID=1000
 
-RUN install-php-extensions pdo_pgsql pgsql redis pcntl intl zip bcmath opcache \
-    && apk add --no-cache nodejs npm \
+RUN install-php-extensions pdo_pgsql pgsql redis pcntl intl zip bcmath opcache gd \
+    && apk add --no-cache nodejs npm vips-tools \
     && (getent group "${GID}" > /dev/null || addgroup -g "${GID}" noongun) \
     && adduser -D -u "${UID}" -G "$(getent group "${GID}" | cut -d: -f1)" -h /home/noongun noongun \
     && setcap -r /usr/local/bin/frankenphp \

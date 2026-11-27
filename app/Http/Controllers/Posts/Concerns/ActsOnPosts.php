@@ -16,7 +16,7 @@ trait ActsOnPosts
      */
     protected function findPost(int $id): Post
     {
-        return Post::query()->with(['variants.channel', 'approver'])->findOrFail($id);
+        return Post::query()->with(['variants.channel', 'variants.attachments.media', 'approver'])->findOrFail($id);
     }
 
     protected function actor(Request $request): User

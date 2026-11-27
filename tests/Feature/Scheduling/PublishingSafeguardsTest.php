@@ -38,10 +38,21 @@ describe('the queue settings', function () {
     it('bound the time limit of a job by the calls it may make', function () {
         config(['noongun.publishing.timeout' => 30, 'noongun.publishing.calls_per_job' => 3]);
 
-        expect(PublishingConfig::longestJobSeconds())->toBe(105)
+        config(['noongun.publishing.media_timeout' => 60, 'noongun.publishing.media_uploads_per_job' => 2]);
+
+        // Three variants and two images at most: 3 x 30 + 2 x 60 + 15.
+        expect(PublishingConfig::longestJobSeconds())->toBe(225)
             ->and(PublishingConfig::jobSeconds(1))->toBe(45)
             ->and(PublishingConfig::jobSeconds(0))->toBe(45)
-            ->and(PublishingConfig::jobSeconds(50))->toBe(105);
+            ->and(PublishingConfig::jobSeconds(50))->toBe(105)
+            ->and(PublishingConfig::jobSeconds(1, 1))->toBe(105)
+            ->and(PublishingConfig::jobSeconds(1, 50))->toBe(165)
+            ->and(PublishingConfig::jobSeconds(50, 50))->toBe(225);
+
+        config(['noongun.publishing.media_uploads_per_job' => 0, 'noongun.publishing.media_timeout' => 0]);
+
+        expect(PublishingConfig::uploadsPerJob())->toBe(1)
+            ->and(PublishingConfig::mediaTimeout())->toBe(1);
 
         config(['noongun.publishing.calls_per_job' => 0]);
 

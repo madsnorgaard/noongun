@@ -19,7 +19,10 @@ function postVersion(Post $post): string
 {
     $fresh = Post::query()
         ->withoutGlobalScopes()
-        ->with(['variants' => fn ($variants) => $variants->withoutGlobalScopes()])
+        ->with([
+            'variants' => fn ($variants) => $variants->withoutGlobalScopes(),
+            'variants.attachments' => fn ($attachments) => $attachments->withoutGlobalScopes(),
+        ])
         ->findOrFail($post->id);
 
     return app(PostPresenter::class)->version($fresh);

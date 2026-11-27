@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "64a5100c-dd47-44a0-8de8-f861e920ddf7",
+  "version": 1,
+  "timestamp": "2026-11-27T21:35:47.885Z",
+  "payload": {
+    "title": "Colours are converted relative colorimetric with black point compensation, and the stored file carries no profile",
+    "context": "Images (#25): an intent and a tagging policy had to be chosen for uploads with an embedded profile.",
+    "rationale": "In-gamut colours stay exact and CMYK blacks stay black, as measured. Untagged means sRGB, the file stays pixels only, and the same picture stays the same bytes for deduplication. A broken profile falls back to treating the pixels as sRGB.",
+    "alternatives": [],
+    "consequences": "Out-of-gamut colours are clipped. How Facebook and LinkedIn treat an untagged file is not verified. Firefox on a wide-gamut screen may show the preview oversaturated."
+  },
+  "seq": 1
+}

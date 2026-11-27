@@ -52,8 +52,8 @@ it('describes what a LinkedIn post accepts', function () {
         ->and($capabilities->needsLinkCard())->toBeTrue()
         ->and($capabilities->linkTitleLength)->toBe(399)
         ->and($capabilities->linkDescriptionLength)->toBe(4085)
-        ->and($capabilities->maxMediaItems)->toBe(0)
-        ->and($capabilities->mediaTypes)->toBe([])
+        ->and($capabilities->maxMediaItems)->toBe(20)
+        ->and($capabilities->mediaTypes)->toBe(['image/jpeg', 'image/png'])
         ->and($capabilities->rateLimit?->toArray())->toBe(['max_calls' => 150, 'per_seconds' => 86400]);
 });
 

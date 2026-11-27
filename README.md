@@ -82,6 +82,7 @@ Run `./dev help` for the full list.
 | `redis` | Redis for cache, sessions and queues, only reachable inside the compose network |
 
 `app`, `horizon` and `scheduler` use the same image; only the command differs.
+All three mount the `media` volume, which holds the images on posts.
 `compose.override.yml` is picked up automatically in development: it builds the
 `dev` image target and mounts the source code. To run the production image
 without the override:
@@ -180,6 +181,167 @@ in Noon Gun never deletes anything from a platform. See
 `docs/adr/0010-post-editing-and-deletion.md`.
 
 Owners and editors write, approve, schedule and delete. Viewers can look.
+
+### Images on posts
+
+A text can carry images. An owner or editor uploads one image at a time; it
+then belongs to the workspace and can be put on any text, also on several
+texts of one post without a second upload.
+
+In the editor each channel has its own images under its text. Add them with
+"Add images", by dropping files on the column, or by pasting an image into
+the text. Each image gets a description for that channel, can be moved
+earlier or later and can be taken off. "Also add to" and "Add to all
+channels" put the same file on other channels without a second upload, and
+"Copy from another channel" copies the text, the images or both. A channel
+whose platform takes no images says so and offers no upload.
+
+An image on several channels normally needs one description. What is typed
+for it in one column is typed in every other column where its description is
+still empty or still the same. A column whose description was changed on its
+own keeps its own, and "Use this description on all channels" brings them
+back in step. The order of the images is kept per channel; "Use this order on
+all channels" makes the others follow.
+
+A file is stored the moment it is uploaded, but it is on the post only once
+the draft is saved. An upload that is on no saved post is removed after a
+day. One file is uploaded at a time for the whole page, and the same file is
+not sent twice from one page. The limit for an upload is the limit of this
+instance; what a platform takes is held against the stored image, which is
+resized and encoded again and is usually much smaller than the file that was
+sent. A post with images still needs a text.
+
+What happens to an upload:
+
+- JPEG, PNG and WebP are accepted. What a file is, is read from its content,
+  not from its name. SVG, GIF, HEIC and everything else are refused, and so
+  is an animated PNG or WebP, because only its first frame would be kept.
+- The image is decoded and written again, and only that new file is kept. It
+  holds pixels and nothing else: the place a photo was taken, the camera and
+  every other piece of metadata are gone, and so is anything hidden in the
+  file. A photo is turned upright first.
+- It is stored as a JPEG or a PNG, the types both platforms take, and which
+  of the two is decided from the picture, not from the file it came as. An
+  image with transparency stays a PNG. A screenshot or a drawing stays a
+  PNG as long as that is the smaller file, so its text stays sharp. A
+  photograph becomes a JPEG, also when it was saved as PNG.
+- Colours are converted to sRGB. A photo in a wide colour space (Display P3
+  from a phone, Adobe RGB or ProPhoto from a camera) keeps its colours as
+  far as sRGB can show them, a CMYK file comes out as the picture it was,
+  and the colour profile itself is not kept. This is done by libvips, the
+  default image engine; with `NOONGUN_MEDIA_ENGINE=gd` the profile is
+  dropped without conversion and such a photo is stored a little duller.
+- An image with a longer side above 4096 pixels is scaled down to that.
+- A JPEG is stored at quality 90 at most, and at the quality it came with
+  when that is lower, so a picture that was already made small for the web
+  does not grow.
+- The same picture uploaded twice in a workspace is stored once.
+
+Images are private. They are shown to the members of their workspace through
+the app, at `/media/{id}`, and there is no address that reaches a file
+without signing in. A platform gets an image by upload from the server when
+the post is published; it is never given an address to fetch from, so this
+works on an instance that only a tailnet can reach.
+
+The images of a text, their order and their descriptions are part of the
+post like the text itself. They can only be changed while the post is a
+draft, and an approval covers them: approving is refused when an image was
+added, removed, moved or described differently after the page was opened.
+
+Before a post can be approved, each text is checked against what its platform
+takes: how many images, which types, how large. An image without a
+description does not hold a post back, but the page points it out, because a
+person who uses a screen reader gets nothing from such an image.
+
+On a platform that shows either pictures or a link preview, the pictures win:
+the link of such a text goes out as its last line, and the page says so. The
+text with that line must fit the limit of the platform.
+
+What a Facebook Page takes, with the defaults (each is a setting, see
+"Environment and secrets"):
+
+| | Facebook Page |
+|---|---|
+| Types | JPEG and PNG |
+| Images on one post | 10 (assumed) |
+| Size of one file | 10 MB |
+| Description of an image | 1000 characters (assumed) |
+| Image and link | The link is the last line of the text. No preview is shown. |
+
+The size of a file is what Meta documents. The number of images and the
+length of a description are not documented by Meta: the two figures are
+assumptions, and nobody has tried them against Facebook yet. If Facebook
+refuses a post that may be over its real limit, the post fails with a
+message that says which of the two it may be and names the setting
+(`FACEBOOK_MAX_MEDIA_ITEMS` or `FACEBOOK_ALT_TEXT_LENGTH`). The code Facebook
+gave is in the application log, in the entry "Publishing a variant failed".
+Lower the setting to what Facebook turned out to take. Meta also says that a PNG above 1 MB "may appear pixelated", so
+a large photo is better uploaded as JPEG.
+
+Each image goes to Facebook as a photo that is not published, and one call
+then creates the post that shows them, in their order. Facebook keeps such a
+photo for about a day. A post that waits longer than 20 hours between its
+uploads and its publishing, which only happens after a failure, has its
+images sent again first. A photo that is uploaded and never used is deleted
+by Facebook after that day.
+
+An image that is on no post is deleted a day after that was first noticed, so
+an upload that was abandoned does not stay. An image that is on a post is
+never deleted, and a published post keeps its images for as long as it
+exists.
+
+#### Images on LinkedIn
+
+A LinkedIn text takes up to 20 images, as JPEG or PNG, each of fewer than
+36,152,320 pixels, with a description of up to 4086 characters. LinkedIn
+documents no size in bytes, so Noon Gun holds no image back for its size:
+when LinkedIn finds a file too large, the post fails with a message that
+names the image and says to put a smaller copy on. Set
+`LINKEDIN_MAX_IMAGE_BYTES` to refuse large images before approval instead.
+
+- A LinkedIn post shows images or a link card, never both. With images the
+  link goes out as the last line of the text, and the title and description
+  typed for the card are not sent.
+- A link card has no picture. LinkedIn would take one, but an image on a
+  text is always shown as an image, and there is no way yet to say "this one
+  is the picture of the card". See
+  `docs/adr/0015-linkedin-publishing-without-idempotency.md`.
+- Each image is sent to LinkedIn before the post is created. LinkedIn names
+  the address the file goes to. Noon Gun sends the file and the access token
+  there only when it is a plain HTTPS address on a host in
+  `LINKEDIN_UPLOAD_HOSTS`, and fails the post otherwise.
+- LinkedIn allows 150 calls a day for one member. A text post is one call.
+  An image costs two more, so a post with four images is nine calls and a
+  post with twenty is 41. Noon Gun does not count the calls. When LinkedIn
+  turns one away, the post waits and is tried again like after any rate
+  limit, and what was already sent is not sent again.
+- Noon Gun cannot ask LinkedIn whether it has finished with an image: the
+  permission a personal profile gives does not allow it. The post is created
+  straight after the upload. When LinkedIn refuses it and says an image is
+  not ready, the post waits and is tried again, as after a rate limit.
+- An image that was sent to LinkedIn is used for later attempts for a day
+  (`LINKEDIN_IMAGE_LIFETIME`). When LinkedIn says it no longer has an image
+  that was sent earlier, the images are sent again and the post is tried
+  again. When LinkedIn refuses images that were only just sent, the post
+  fails: return it to draft, take the images off and put them on again.
+
+None of this has been run against LinkedIn yet. `docs/platform-notes/linkedin.md`
+says what is documented and what is assumed.
+
+The limits, all of them settings (see "Environment and secrets"):
+
+| Limit | Default |
+|---|---|
+| Size of one file | 20 MB |
+| Size of one image | 50 megapixels, 16000 pixels on a side |
+| Images of one workspace together | No limit on a self-hosted instance |
+| Uploads by one person | 30 a minute |
+| Images processed at once | 2 on the instance, 1 for each person |
+| Images on one text | 10, or fewer where the platform takes fewer |
+
+See `docs/adr/0017-images-on-posts.md` for the reasons, and "Images, the
+media volume and backups" below for what the person who runs the instance
+needs to know.
 
 ## Brief, pillars and slots
 
@@ -982,6 +1144,138 @@ git pull
 docker compose up -d --build --wait
 ```
 
+### Images, the media volume and backups
+
+The app keeps its data in three Docker volumes:
+
+| Volume | Holds | Lost without a backup |
+|---|---|---|
+| `noongun_postgres` | The database | Everything |
+| `noongun_media` | The uploaded images, mounted at `/app/storage/app/media` in `app`, `horizon` and `scheduler` | The pictures of every post, also of published ones |
+| `noongun_storage` | Logs and caches of the framework | Nothing that cannot be made again |
+
+`noongun_redis` holds queues, sessions and the cache.
+
+**The first start after the update that brings images.** The `media` volume
+is new and is mounted inside the folder of the `storage` volume. Docker
+creates it on the first `docker compose up`, empty and owned by the user the
+containers run as; nothing has to be moved, because no image existed before.
+Rebuild on that update, because processing images needs libvips and the GD
+extension of PHP, which the image now installs:
+`docker compose up -d --build --wait`. An instance without its image engine
+is reported unhealthy by `/up`, with a line in the log that says what is
+missing, and refuses every upload with a sentence that says why. To see
+that the volume is in place and can be written:
+
+```sh
+docker compose exec app sh -c 'touch storage/app/media/.probe && rm storage/app/media/.probe && echo writable'
+```
+
+A backup is the database, the media volume and `.env`, taken together. A
+database without the media volume shows posts whose images are missing, and
+the media volume without the database is a folder of files with random names.
+To copy the images out while the stack runs:
+
+```sh
+mkdir -p backup
+docker compose run --rm --no-deps -T --entrypoint "" app \
+  tar -czf - -C /app/storage/app media > backup/media-$(date +%F).tar.gz
+```
+
+and to put them back into an empty volume:
+
+```sh
+docker compose run --rm --no-deps -T --entrypoint "" app \
+  tar -xzf - -C /app/storage/app < backup/media-2026-11-26.tar.gz
+```
+
+The archive comes out of the container as a stream and is written by your
+own user, so this works whatever `NOONGUN_UID` and `NOONGUN_GID` are. Files
+are only ever added and removed, never changed, so a copy taken while the
+app runs is consistent with a database dump taken just before it.
+
+**How much disk images take.** A stored photograph of 4096 pixels is about
+2.5 to 3.5 MB, with its small copy. Three photos a day are roughly 3 to 4 GB
+a year, and nothing that is on a post is ever removed. A self-hosted
+instance has no quota: the disk is yours to watch. Two settings help:
+
+- `NOONGUN_MEDIA_STORED_SIDE=2048` stores images at half the side, which is
+  roughly a quarter of the bytes. It applies
+  to uploads from then on.
+- `NOONGUN_MEDIA_QUOTA_BYTES` sets a limit per workspace. An upload over it
+  is refused with a sentence that names this setting.
+
+**The image engine.** Uploads are processed by libvips
+(`NOONGUN_MEDIA_ENGINE=vips`, the default), which converts colours to sRGB
+with the profile of the upload. PHP does not load libvips: it runs the
+`vips` program for each step, in a short process that gets none of the
+settings of the app. `NOONGUN_MEDIA_ENGINE=gd` uses the GD extension of PHP
+instead. It does everything else the same way but cannot convert colours;
+it is there for an image built without libvips. Changing the engine changes
+uploads from then on and leaves stored images as they are.
+
+**How much memory images take.** Decoding an image takes memory for every
+pixel, whatever the size of the file. Measured for one image of 50
+megapixels, as the peak of resident memory: with libvips 88 MB for a JPEG,
+192 MB for a PNG, 336 MB for a PNG with sixteen bits a channel and 476 MB
+for a lossless WebP, in the `vips` process and not in PHP. With GD the same
+files take 303 MB, 401 MB, 401 MB and 704 MB in the PHP process. So that a
+handful of small files cannot take all the memory of the machine, only two
+images are processed at once on the whole instance
+(`NOONGUN_MEDIA_CONCURRENT_UPLOADS`) and one for each person. The web app
+therefore needs up to about 1 GB for images on top of its ordinary use
+(1.4 GB with GD), and about 200 MB when the uploads are photos from a
+camera. On a small machine set `NOONGUN_MEDIA_CONCURRENT_UPLOADS=1`. An
+upload that finds no free place waits five seconds and is then asked to
+come back; the editor does that by itself.
+
+libvips also writes temporary files while it works, in `/tmp` of the `app`
+container: about 75 MB for a photo, and in the worst case twelve bytes for
+each pixel (600 MB for a 50 megapixel PNG with sixteen bits a channel and
+an alpha channel). They are removed when the upload ends.
+
+No memory limit is set on the `app` container. If you want one, give it in a
+compose file of your own that `COMPOSE_FILE` names after `docker-compose.yml`
+(`services: app: mem_limit: 3g`). Publishing runs in the `horizon`
+container and is not touched by a limit on `app`. A limit that is too low
+restarts the web app in the middle of an upload.
+
+Once a week `noongun:sweep-orphaned-media-files` removes files on the media
+disk that no image points to and that are older than two days: what an
+upload leaves when it is killed between writing its file and its row. Run
+it with `--dry-run` to see what it would remove.
+
+**Raising the size of an upload.** Three settings bound it, and the smallest
+one applies:
+
+1. `NOONGUN_MEDIA_MAX_BYTES` in `.env`, 20 MB by default.
+2. PHP: `upload_max_filesize` and `post_max_size` in `docker/app/php.ini`,
+   both 32 MB. Changing them means rebuilding the image.
+3. The web server: `NOONGUN_MAX_REQUEST_SIZE` in `.env`, `32MiB` by default.
+   A larger request is answered with 413 before PHP sees it.
+
+Up to 30 MB only the first needs changing. Above that, raise all three and
+keep the second and third a little above the first, because a request is
+larger than the file in it. A reverse proxy in front of the app may have a
+limit of its own.
+
+**Larger images.** The default of 50 megapixels takes a 45 megapixel camera
+file as it is. For a 61 megapixel body set `NOONGUN_MEDIA_MAX_MEGAPIXELS=62`.
+With libvips nothing else changes. With GD, `NOONGUN_MEDIA_MEMORY_LIMIT`
+must hold the megapixels times four megabytes plus a margin of about
+150 MB: the measured margin is 100 to 115 MB for a JPEG (282 MB of PHP
+memory for 45 megapixels, 314 MB for 50). By that rule 62 megapixels need
+about 400 MB and fit the default of 512 MB; that figure is worked out and
+not measured.
+
+**Another disk.** `NOONGUN_MEDIA_DISK` names a disk in
+`config/filesystems.php`. The default is the local disk `media`. An
+S3-compatible disk works without a change to the code; it needs the
+`league/flysystem-aws-s3-v3` package and a private bucket. An image
+remembers the disk it was stored on, so images stored before the change are
+still read from the old disk and must be kept there or copied over with
+their rows updated. The `public` disk is refused.
+
 ### Troubleshooting: "Facebook could not be reached"
 
 If connecting a channel says "Facebook could not be reached", the containers
@@ -1051,18 +1345,54 @@ it there.
 | `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. A Page must be granted all of them, except `read_insights`, which only adds the reach and clicks of posts (see "Insights"). |
 | `FACEBOOK_METRIC_CLICKS`, `FACEBOOK_METRIC_REACH` | `post_clicks`, `post_total_media_view_unique` | Names of the post insights that are read as clicks and reach. Change them when Meta renames a metric. An empty name means the number is not asked for. |
 | `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
+| `FACEBOOK_MEDIA_TYPES` | `image/jpeg,image/png` | Image types a Page post may carry, comma separated. Empty turns images off for Facebook. |
+| `FACEBOOK_MAX_MEDIA_ITEMS` | `10` | Most images on one Page post. An assumption: Meta documents no number, and it has not been tried against Facebook. `0` turns images off for Facebook. |
+| `FACEBOOK_MAX_MEDIA_BYTES` | `10000000` | Largest file of one image for Facebook, in bytes. Meta says 10 MB. |
+| `FACEBOOK_MAX_MEDIA_PIXELS` | empty | Most pixels (width x height) of one image for Facebook. Meta names no limit; empty means none. |
+| `FACEBOOK_ALT_TEXT_LENGTH` | `1000` | Longest description of an image for Facebook, in characters. An assumption: Meta documents no number, and it has not been tried against Facebook. |
+| `FACEBOOK_MEDIA_LINK_RULE` | `in_text` | What happens to the link of a Page post with images: `in_text` sends it as the last line of the text, `refused` holds such a post back. `both` sends the link beside the photos, which Meta does not document. |
+| `FACEBOOK_MEDIA_UPLOAD_LIFETIME` | `72000` | Seconds an uploaded photo may wait for its post before it is sent again. Facebook deletes an unpublished photo after about 24 hours. |
+| `FACEBOOK_MEDIA_UPLOAD_TRUSTED` | `900` | Seconds for which a fresh upload is taken as held by Facebook. When Facebook refuses a post, only photos older than this are sent again. |
 | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | empty | Credentials of the LinkedIn app this instance connects profiles with. |
 | `LINKEDIN_API_VERSION` | `202611` | Value of the `Linkedin-Version` header on every LinkedIn API call, `YYYYMM`. LinkedIn refuses a version about a year after it came out. |
 | `LINKEDIN_SCOPES` | `openid,profile,w_member_social` | Permissions requested when a profile is connected, comma separated. |
 | `LINKEDIN_API_URL`, `LINKEDIN_WEB_URL` | `https://api.linkedin.com`, `https://www.linkedin.com` | Base addresses of the API and of the sign-in. Must be HTTPS. Change only for testing. |
+| `LINKEDIN_UPLOAD_HOSTS` | `linkedin.com` | Hosts an image may be uploaded to, comma separated. Each name allows itself and every name below it, and must have at least two parts (`linkedin.com`, never `com`). LinkedIn names the upload address in a response; the image and the access token are sent only to an HTTPS address on one of these hosts. A list that is empty or holds anything else allows nothing, and uploads fail with a message that names this setting. Add a host only when the log shows that LinkedIn uses it. |
+| `LINKEDIN_MAX_IMAGES` | `20` | Most images on one LinkedIn text. `NOONGUN_MEDIA_MAX_PER_VARIANT` applies as well. |
+| `LINKEDIN_MAX_IMAGE_BYTES` | empty | Largest image a LinkedIn text may carry, in bytes. Empty: no limit, because LinkedIn documents none; an image LinkedIn finds too large then fails when it is uploaded. Set it to hold such images back before approval. |
+| `LINKEDIN_MAX_IMAGE_PIXELS` | `36152319` | Most pixels of one image on a LinkedIn text. LinkedIn takes "less than 36,152,320". |
+| `LINKEDIN_ALT_TEXT_LENGTH` | `4086` | Longest description of an image on a LinkedIn text, in characters. |
+| `LINKEDIN_IMAGE_LIFETIME` | `86400` | Seconds an image that was sent to LinkedIn is used for a later attempt before it is sent again. LinkedIn does not say how long it keeps an image that is on no post. |
 | `NOONGUN_PUBLISH_MAX_ATTEMPTS` | `5` | How many times one variant is sent before the post is marked as failed. Only retryable errors are tried again. |
 | `NOONGUN_PUBLISH_BACKOFF` | `60,300,900,3600` | Seconds to wait before each retry, comma separated. The last value repeats. The largest value is also the longest wait a platform may ask for; a longer one fails the post. |
 | `NOONGUN_PUBLISH_TIMEOUT` | `30` | Seconds allowed for one platform call. The time limit of a publishing job is this value for each variant it sends, plus 15 seconds. |
 | `NOONGUN_PUBLISH_CALLS_PER_JOB` | `3` | How many variants one run of the publishing job sends before it hands the rest to a successor. Bounds the time limit of a job; see "Publishing" for what the queue needs. |
 | `NOONGUN_PUBLISH_LOCK_SECONDS` | `120` | Shortest lifetime of the lock on one variant. The lock always lives at least 30 seconds longer than the longest job. |
-| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `300` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of any job: 255 seconds for a drafting job with the defaults, 105 for a publishing job. Raise it when you raise `NOONGUN_DRAFT_TIMEOUT`. |
+| `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `300` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of any job: 255 seconds for a drafting job with the defaults, 225 for a publishing job that uploads images. Raise it when you raise `NOONGUN_DRAFT_TIMEOUT`, `NOONGUN_PUBLISH_MEDIA_TIMEOUT` or `NOONGUN_PUBLISH_MEDIA_UPLOADS_PER_JOB`. |
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
+| `NOONGUN_PUBLISH_MEDIA_TIMEOUT` | `60` | Seconds allowed for sending one image to a platform, all calls for that image together. |
+| `NOONGUN_PUBLISH_MEDIA_UPLOADS_PER_JOB` | `2` | How many images one run of the publishing job sends before it hands the rest to a successor. The time limit of a job grows by this times `NOONGUN_PUBLISH_MEDIA_TIMEOUT` when its post has images. |
+| `NOONGUN_MEDIA_ENGINE` | `vips` | What processes an uploaded image: `vips` (libvips, converts colours to sRGB) or `gd` (the GD extension of PHP, no colour conversion). If the engine is not in the container, `/up` fails and says so in the log. |
+| `NOONGUN_MEDIA_VIPS_CONCURRENCY` | `2` | Threads one run of libvips works with, 1 to 16. More is a little faster on a large image and takes a little more memory. |
+| `NOONGUN_MEDIA_DISK` | `media` | The disk in `config/filesystems.php` that new images are written to. Must be private. See "Images, the media volume and backups". |
+| `NOONGUN_MEDIA_MAX_BYTES` | `20971520` | Largest file of one upload, in bytes. PHP and the web server must allow it as well; the smallest limit applies. |
+| `NOONGUN_MAX_REQUEST_SIZE` | `32MiB` | Largest request the web server passes on to the app. Read by `docker-compose.yml`. Keep it in step with `upload_max_filesize` and `post_max_size` in `docker/app/php.ini`. |
+| `NOONGUN_MEDIA_MAX_MEGAPIXELS` | `50` | Most pixels of one uploaded image, in millions. Checked from the header of the file before it is decoded. |
+| `NOONGUN_MEDIA_MAX_SIDE` | `16000` | Longest side of an uploaded image, in pixels. |
+| `NOONGUN_MEDIA_MEMORY_LIMIT` | `512M` | Only with the GD engine: PHP memory limit while one image is processed, the megapixels times 4 MB, plus about 150 MB. libvips does not use the memory of PHP. |
+| `NOONGUN_MEDIA_STORED_SIDE` | `4096` | An image with a longer side than this is scaled down to it before it is stored. |
+| `NOONGUN_MEDIA_THUMBNAIL_SIDE` | `480` | Longest side of the small copy the lists show. |
+| `NOONGUN_MEDIA_JPEG_QUALITY` | `90` | Highest quality of stored JPEG files, 50 to 100. A JPEG that came at a lower quality and is not scaled down keeps about that quality, never under 60. |
+| `NOONGUN_MEDIA_LOSSLESS_CHOICE_MEGAPIXELS` | `9` | Up to this size an opaque image from a lossless format is written as PNG and as JPEG and the smaller file is kept. Above it, it becomes a JPEG. |
+| `NOONGUN_MEDIA_CONCURRENT_UPLOADS` | `2` | How many images the whole instance processes at once. Each can take 90 to 480 MB for a moment (300 to 700 MB with GD). One person always has one at a time. |
+| `NOONGUN_MEDIA_SLOT_WAIT_SECONDS` | `5` | How long an upload waits for its turn before it is answered with 429 and `Retry-After`. |
+| `NOONGUN_MEDIA_SLOT_LEASE_SECONDS` | `120` | After this long a turn that was never given back, because its process died, is free again. |
+| `NOONGUN_MEDIA_QUOTA_BYTES` | unset | Most bytes all stored images of one workspace may take together. Unset: no limit on a self-hosted instance, 2 GB in `saas` mode. `0`: no limit. |
+| `NOONGUN_MEDIA_UPLOADS_PER_MINUTE` | `30` | Most uploads one person may make in a minute. |
+| `NOONGUN_MEDIA_MAX_PER_VARIANT` | `10` | Most images on one text, whatever its platform would take. |
+| `NOONGUN_MEDIA_UNUSED_GRACE_HOURS` | `24` | How long an image that is on no post is kept after the clean-up first saw it unused. |
+| `NOONGUN_MEDIA_ORPHAN_FILE_HOURS` | `48` | How old a file on the media disk that no image points to must be before the weekly sweep removes it. |
 | `NOONGUN_INSIGHTS_ENABLED` | `true` | Whether the numbers of published posts are read at all. `false` stops the scheduler command and the job. |
 | `NOONGUN_INSIGHTS_CADENCE` | `24:60,504:1440` | How often a published post is read, by its age, as `hours:minutes` pairs: until the post is that many hours old, read it every that many minutes. A post older than the last pair is not read any more. When any pair cannot be read, the whole default is used and the log says so. |
 | `NOONGUN_INSIGHTS_BACKFILL_DAYS` | `365` | A published post that was never read is read once when it is older than the cadence reaches and at most this many days old. `0` turns that off. |
@@ -1295,6 +1625,9 @@ not your email address, your connections or your posts.
 
 The Pest suite runs against the `noongun_testing` database, which the
 PostgreSQL container creates on first start. Tests never call external APIs.
+The tests of what a stored image is run once with each image engine
+(the dataset `image engines`); those for an engine the machine does not have
+are skipped, so the suite also runs where libvips is not installed.
 GitHub Actions runs Pint, Larastan, the migration check and Pest on every pull
 request (`.github/workflows/ci.yml`).
 

@@ -13,6 +13,10 @@ x-app: &app
   restart: unless-stopped
   volumes:
     - storage:/app/storage
+    # Images on posts, on a volume of their own so that they can be backed
+    # up and moved by themselves. The web app writes them, the queue workers
+    # read them when a post is published, the scheduler removes unused ones.
+    - media:/app/storage/app/media
   depends_on:
     postgres:
       condition: service_healthy
@@ -24,6 +28,13 @@ services:
     <<: *app
     environment:
       NOONGUN_ROLE: app
+      # The largest request the web server passes on. Keep it in step with
+      # upload_max_filesize and post_max_size in docker/app/php.ini, and
+      # above NOONGUN_MEDIA_MAX_BYTES.
+      CADDY_SERVER_EXTRA_DIRECTIVES: |
+        request_body {
+          max_size ${NOONGUN_MAX_REQUEST_SIZE:-32MiB}
+        }
     ports:
       - "${NOONGUN_HTTP_PORT:-127.0.0.1:8080}:8080"
     healthcheck:
@@ -89,5 +100,6 @@ services:
 
 volumes:
   storage:
+  media:
   postgres:
   redis:
