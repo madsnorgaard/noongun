@@ -36,7 +36,7 @@ function storedPath(int $workspaceId, string $ending = '.jpg'): string
 function uploadedImage(Workspace $workspace): Media
 {
     test()->actingAs(userWithRole($workspace, Role::Editor))
-        ->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])
+        ->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(40 + random_int(1, 400), 20))])
         ->assertCreated();
 
     return Media::query()->withoutGlobalScopes()->latest('id')->firstOrFail();

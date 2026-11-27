@@ -28,6 +28,14 @@ function onlyMedia(): Media
     return Media::query()->withoutGlobalScopes()->sole();
 }
 
+/**
+ * The bytes of every stored image together.
+ */
+function onlyMediaBytes(): int
+{
+    return (int) Media::query()->withoutGlobalScopes()->sum('byte_size');
+}
+
 it('has an image library that reads and writes WebP, JPEG and PNG', function () {
     $support = gd_info();
 
@@ -360,14 +368,14 @@ describe('limits on how much', function () {
     it('holds a workspace to its storage quota', function () {
         $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
 
-        $used = onlyMedia()->byte_size;
+        $second = $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(44, 20))])->assertCreated()->json('byte_size');
 
-        // Room for exactly one more of the same.
-        config(['noongun.media.quota_bytes' => $used * 2]);
+        // Full to the byte with these two.
+        config(['noongun.media.quota_bytes' => onlyMediaBytes()]);
 
-        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+        expect($second)->toBeGreaterThan(0);
 
-        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])
+        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(48, 20))])
             ->assertUnprocessable()
             ->assertJsonValidationErrors(['file' => 'has used its']);
 
@@ -380,7 +388,7 @@ describe('limits on how much', function () {
 
         config(['noongun.media.quota_bytes' => onlyMedia()->byte_size + 10]);
 
-        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertUnprocessable();
+        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(44, 20))])->assertUnprocessable();
 
         expect($this->disk->allFiles())->toHaveCount(2);
     });
@@ -462,12 +470,108 @@ describe('limits on how much', function () {
 
         // Another user has their own count.
         $this->actingAs(userWithRole($this->workspace, Role::Owner))
-            ->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])
+            ->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(44, 20))])
             ->assertCreated();
 
         $this->travel(61)->seconds();
 
+        $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(48, 20))])->assertCreated();
+    });
+
+    it('says how long to wait and that it is the limit per minute, in a form a page can read', function () {
+        config(['noongun.media.uploads_per_minute' => 1]);
+
         $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+
+        $response = $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(44, 20))])->assertTooManyRequests();
+
+        $response->assertExactJson([
+            'message' => 'That is more uploads than one person may make in a minute. Wait a moment, then try again.',
+            'reason' => 'throttled',
+            'errors' => ['file' => ['That is more uploads than one person may make in a minute. Wait a moment, then try again.']],
+        ]);
+
+        expect((int) $response->headers->get('Retry-After'))->toBeGreaterThan(0)->toBeLessThanOrEqual(60);
+    });
+});
+
+describe('the same image twice', function () {
+    it('is stored once in a workspace, and the second upload is given the first image', function () {
+        $first = $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(withLocation: true), 'harbour.jpg')])->assertCreated();
+
+        // The same picture, sent by somebody else under another name and
+        // without the metadata: what is stored is the same.
+        $second = $this->actingAs(userWithRole($this->workspace, Role::Owner))
+            ->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(), 'IMG_0042.JPG')])
+            ->assertOk();
+
+        expect($second->json())->toBe($first->json())
+            ->and(Media::query()->withoutGlobalScopes()->count())->toBe(1)
+            ->and($this->disk->allFiles())->toHaveCount(2)
+            ->and(onlyMedia()->uploaded_by)->toBe($this->editor->id);
+    });
+
+    it('does not count twice against the quota', function () {
+        $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+
+        config(['noongun.media.quota_bytes' => onlyMedia()->byte_size + 10]);
+
+        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertOk();
+        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(44, 20))])->assertUnprocessable();
+    });
+
+    it('is never found across workspaces', function () {
+        $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+
+        $other = Workspace::factory()->create();
+
+        $response = $this->actingAs(userWithRole($other, Role::Owner))
+            ->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])
+            // Stored anew: nothing says that somebody else has this picture.
+            ->assertCreated();
+
+        $rows = Media::query()->withoutGlobalScopes()->orderBy('id')->get();
+
+        expect($rows)->toHaveCount(2)
+            ->and($rows[1]->workspace_id)->toBe($other->id)
+            ->and($rows[1]->content_hash)->toBe($rows[0]->content_hash)
+            ->and($response->json('id'))->toBe($rows[1]->id)
+            ->and($this->disk->allFiles())->toHaveCount(4);
+    });
+
+    it('gives the image its full grace again when the clean-up had noted it as unused', function () {
+        $this->travelTo('2026-11-27 09:00:00');
+
+        $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+
+        $this->artisan('noongun:prune-unused-media');
+        $this->travel(23)->hours();
+
+        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertOk();
+
+        expect(onlyMedia()->unreferenced_since)->toBeNull();
+
+        $this->travel(2)->hours();
+        $this->artisan('noongun:prune-unused-media');
+
+        expect(Media::query()->withoutGlobalScopes()->count())->toBe(1);
+    });
+
+    it('stores the image again when the file of the first one is gone', function () {
+        $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+
+        $this->disk->delete(onlyMedia()->path);
+
+        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+
+        expect(Media::query()->withoutGlobalScopes()->count())->toBe(2);
+    });
+
+    it('keeps two different pictures apart', function () {
+        $this->actingAs($this->editor)->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+        $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(orientation: 3))])->assertCreated();
+
+        expect(Media::query()->withoutGlobalScopes()->count())->toBe(2);
     });
 });
 

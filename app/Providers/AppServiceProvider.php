@@ -80,9 +80,17 @@ class AppServiceProvider extends ServiceProvider
             }));
 
         // "media-uploads": each upload is decoded and written again, which
-        // costs memory and time. The page that uploads reads the 429.
+        // costs memory and time. The page that uploads reads the 429: how
+        // long to wait is in Retry-After, and "reason" tells this limit
+        // ("throttled", up to a minute) from the one on images that are
+        // processed at once ("busy", a few seconds, see MediaController).
         RateLimiter::for('media-uploads', fn (Request $request): Limit => Limit::perMinute(MediaConfig::uploadsPerMinute())
-            ->by('media|'.($request->user()?->getAuthIdentifier() ?? $request->ip())));
+            ->by('media|'.($request->user()?->getAuthIdentifier() ?? $request->ip()))
+            ->response(function (Request $request, array $headers) {
+                $message = (string) __('That is more uploads than one person may make in a minute. Wait a moment, then try again.');
+
+                return response()->json(['message' => $message, 'reason' => 'throttled', 'errors' => ['file' => [$message]]], 429, $headers);
+            }));
     }
 
     /**

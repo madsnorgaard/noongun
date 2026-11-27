@@ -48,13 +48,14 @@ class MediaController extends Controller
             // later. The sentence is where a refusal has its sentence, so
             // that a page can show either the same way.
             return response()->json(
-                ['message' => $e->getMessage(), 'errors' => ['file' => [$e->getMessage()]]],
+                ['message' => $e->getMessage(), 'reason' => 'busy', 'errors' => ['file' => [$e->getMessage()]]],
                 429,
                 ['Retry-After' => (string) $e->retryAfterSeconds],
             );
         }
 
-        return response()->json(MediaPresenter::present($media), 201);
+        // 200 for an image the workspace already had: nothing new was stored.
+        return response()->json(MediaPresenter::present($media), $media->wasRecentlyCreated ? 201 : 200);
     }
 
     /**

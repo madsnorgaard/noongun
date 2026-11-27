@@ -50,6 +50,7 @@ it('answers 429 with a sentence and a time to wait when every place is taken', f
         ->assertHeader('Retry-After', '3')
         ->assertExactJson([
             'message' => 'The server is processing as many images as it can at once. This one was not looked at. Try it again in a moment.',
+            'reason' => 'busy',
             'errors' => ['file' => ['The server is processing as many images as it can at once. This one was not looked at. Try it again in a moment.']],
         ]);
 
@@ -108,7 +109,7 @@ it('gives its places back after an upload, however it ended', function (Closure 
     $this->actingAs($this->editor);
 
     $this->postJson(route('media.store'), ['file' => uploadOf($bytes())])->assertStatus($status);
-    $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes())])->assertCreated();
+    $this->postJson(route('media.store'), ['file' => uploadOf(jpegBytes(44, 20))])->assertCreated();
 
     expect(Cache::lock('noongun:media:place:0', 1)->get())->toBeTrue()
         ->and(Cache::lock("noongun:media:user:{$this->editor->id}", 1)->get())->toBeTrue();

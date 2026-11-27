@@ -26,6 +26,9 @@ use Throwable;
  * original name, of the type the browser claimed or of the metadata in the
  * file is stored anywhere.
  *
+ * The same picture is stored once in a workspace: an upload whose result
+ * the workspace already holds gives that image back, see alreadyStored().
+ *
  * The image belongs to no post yet. The editor names it when a draft is
  * saved; an image that never gets onto a post is removed by the clean-up.
  */
@@ -65,6 +68,14 @@ final class StoreMedia
         // Decoding is the costly part, so only a few run at once. What
         // comes back is two streams; the decoded image is gone by then.
         $image = $this->slots->run((int) $actor->getKey(), fn (): ProcessedImage => $this->processor->process($uploadedPath));
+
+        $existing = $this->alreadyStored($image);
+
+        if ($existing !== null) {
+            $image->close();
+
+            return $existing;
+        }
 
         $diskName = MediaConfig::diskName();
         $disk = MediaConfig::disk($diskName);
@@ -110,6 +121,47 @@ final class StoreMedia
         } finally {
             $image->close();
         }
+    }
+
+    /**
+     * The image this workspace already holds with exactly these bytes, if
+     * there is one. Encoding is the same every time, so the same picture
+     * sent twice gives the same stored file, and the second one is not kept:
+     * no second file and nothing more on the quota.
+     *
+     * Only ever within the workspace. Every member of a workspace can see
+     * every image of it, so being handed an image that was already there
+     * tells nobody anything they could not see anyway; across workspaces it
+     * would say that somebody else has this picture, so that is never asked.
+     *
+     * The clean-up may have noted the image as unused. The note is cleared,
+     * so that it has its full grace again before the person who was just
+     * given it has saved the draft.
+     */
+    private function alreadyStored(ProcessedImage $image): ?Media
+    {
+        return DB::transaction(function () use ($image): ?Media {
+            // The lock the clean-up takes before it removes an image: it
+            // either removed this one already, or waits and finds the note
+            // gone.
+            $existing = Media::query()
+                ->where('content_hash', $image->hash)
+                ->where('mime', $image->mime)
+                ->where('byte_size', $image->byteSize)
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->first();
+
+            if ($existing === null || ! $existing->fileExists()) {
+                return null;
+            }
+
+            if ($existing->unreferenced_since !== null) {
+                Media::query()->whereKey($existing->id)->update(['unreferenced_since' => null]);
+            }
+
+            return $existing->refresh();
+        });
     }
 
     /**
