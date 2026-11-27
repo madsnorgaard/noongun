@@ -1,6 +1,8 @@
 <?php
 
+use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Actions\DeletePost;
+use App\Domain\Content\Actions\SaveDraft;
 use App\Domain\Content\Models\Media;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\PostState;
@@ -76,6 +78,45 @@ it('gives an image a full day again after it was taken off a post', function () 
     DB::table('post_variant_media')->where('id', $attachment->id)->delete();
 
     $this->artisan('noongun:prune-unused-media');
+    $this->travel(23)->hours();
+    $this->artisan('noongun:prune-unused-media');
+
+    expect(mediaExists($media))->toBeTrue();
+
+    $this->travel(2)->hours();
+    $this->artisan('noongun:prune-unused-media');
+
+    expect(mediaExists($media))->toBeFalse();
+});
+
+it('gives an image a full day again when it was put on a post and taken off between two runs', function () {
+    $owner = userWithRole($this->workspace, Role::Owner);
+    $media = storedImage($this->workspace);
+    $channel = inWorkspace($this->workspace, fn () => Channel::factory()->create());
+    $save = fn (array $images) => inWorkspace($this->workspace, fn () => app(SaveDraft::class)->handle(
+        $owner,
+        Post::query()->first(),
+        null,
+        [['channel_id' => $channel->id, 'body' => 'Text.', 'link' => null, 'media' => $images]],
+    ));
+
+    // Seen unused, and nearly a day goes by.
+    $this->artisan('noongun:prune-unused-media');
+    $this->travel(23)->hours();
+
+    // Put on a post and taken off again before the clean-up runs.
+    $save([['id' => $media->id]]);
+
+    expect(DB::table('media')->where('id', $media->id)->value('unreferenced_since'))->toBeNull();
+
+    $save([]);
+
+    $this->travel(2)->hours();
+    $this->artisan('noongun:prune-unused-media');
+
+    // The old note is gone, so the day starts with this run.
+    expect(mediaExists($media))->toBeTrue();
+
     $this->travel(23)->hours();
     $this->artisan('noongun:prune-unused-media');
 

@@ -159,6 +159,11 @@ final class SaveDraft
             throw AttachedMediaMissing::for($missing);
         }
 
+        // In use again from this moment. Without this an image that the
+        // clean-up once saw unused would keep that old note, and would be
+        // removed at the next run if it were taken off again before then.
+        Media::query()->whereKey($found)->whereNotNull('unreferenced_since')->update(['unreferenced_since' => null]);
+
         $existing = $variant->attachments()->get()->keyBy('media_id');
 
         foreach ($existing as $mediaId => $attachment) {
