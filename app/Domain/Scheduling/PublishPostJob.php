@@ -8,6 +8,7 @@ use App\Domain\Channels\Contracts\PublishResult;
 use App\Domain\Channels\Contracts\UploadsMedia;
 use App\Domain\Channels\Exceptions\ChannelAdapterNotAvailable;
 use App\Domain\Channels\Exceptions\ChannelException;
+use App\Domain\Channels\Exceptions\PublishFailed;
 use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Exceptions\IllegalPostTransition;
 use App\Domain\Content\Exceptions\VariantAlreadyPublished;
@@ -536,6 +537,13 @@ final class PublishPostJob implements ShouldQueue
         }
 
         $message = $e->getMessage();
+
+        // The platform no longer holds the images that were sent for this
+        // variant. They are forgotten, so that whatever sends the variant
+        // next, the retry below or a person, uploads them again first.
+        if (! $uploading && $e instanceof PublishFailed && $e->invalidatesUploads()) {
+            $variant->images()->each(fn (MediaAttachment $attachment) => $attachment->forgetUpload());
+        }
 
         // The adapter does not know whether the platform made the post.
         // The mark stays, and nothing sends this variant again by itself.
