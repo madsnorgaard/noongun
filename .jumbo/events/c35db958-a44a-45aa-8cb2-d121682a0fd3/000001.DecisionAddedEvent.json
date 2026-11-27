@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "c35db958-a44a-45aa-8cb2-d121682a0fd3",
+  "version": 1,
+  "timestamp": "2026-11-27T12:25:28.443Z",
+  "payload": {
+    "title": "Image processing is capped and its engine is swappable",
+    "context": "Images review (#25): a few kilobytes of upload could make the web container allocate gigabytes, because the throttle counted requests and not concurrency; and GD cannot convert colour profiles.",
+    "rationale": "Decoding runs inside processing slots: two on the instance and one per user, held as leases that expire, answering 429 with a short Retry-After when full. ImageProcessor is an interface with GD as its one implementation, and header checks, limits and the JPEG readers are plain PHP, so another engine is one class.",
+    "alternatives": [],
+    "consequences": "The web container needs about 1.3 GB for images with the default of two slots. Colour profiles are dropped until an engine that converts them is chosen."
+  },
+  "seq": 1
+}
