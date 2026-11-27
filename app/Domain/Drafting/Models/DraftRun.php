@@ -245,12 +245,20 @@ class DraftRun extends Model
      * kept; the texts and the numbers stay where they are. Returns false
      * when the run is no longer pending.
      *
+     * Two more things are noted so that what is said later is exactly
+     * true: whether the prompt of this run told the model which examples
+     * did well (a version from before the mark sends them unmarked), and
+     * how many texts were chosen for how they did and then left out for
+     * the limit on characters.
+     *
      * @param  list<int>  $postIds
      * @param  list<int>  $performancePostIds  those of $postIds chosen for how they did
+     * @param  bool  $marked  RenderedPrompt::$marksPerformance of the prompt this run is sent
+     * @param  int  $performanceLeftOut  ExampleSelection::$performanceLeftOut
      */
-    public function noteExamples(array $postIds, array $performancePostIds = []): bool
+    public function noteExamples(array $postIds, array $performancePostIds = [], bool $marked = false, int $performanceLeftOut = 0): bool
     {
-        if ($postIds === [] && ! array_key_exists('example_post_ids', $this->request)) {
+        if ($postIds === [] && $performanceLeftOut === 0 && ! array_key_exists('example_post_ids', $this->request)) {
             return $this->status === DraftRunStatus::Pending;
         }
 
@@ -259,6 +267,8 @@ class DraftRun extends Model
                 ...$this->request,
                 'example_post_ids' => $postIds,
                 'performance_example_post_ids' => array_values(array_intersect($performancePostIds, $postIds)),
+                'performance_examples_marked' => $marked,
+                'performance_examples_left_out' => max(0, $performanceLeftOut),
             ]),
         ]);
     }
@@ -274,14 +284,37 @@ class DraftRun extends Model
     }
 
     /**
-     * How many of those were chosen because they did well with readers.
-     * 0 for a run from before that was noted.
+     * How many of those were chosen because they did well with readers:
+     * of the texts that were sent, not of those that were chosen and then
+     * left out for the limit. 0 for a run from before that was noted.
      */
     public function performanceExampleCount(): int
     {
         $ids = $this->request['performance_example_post_ids'] ?? null;
 
         return is_array($ids) ? min(count($ids), $this->exampleCount()) : 0;
+    }
+
+    /**
+     * Whether the prompt of this run told the model which of its examples
+     * did well. False when none was chosen that way, and when the prompt
+     * version of the run does not print the mark: then the same texts
+     * were sent as plain examples.
+     */
+    public function performanceExamplesMarked(): bool
+    {
+        return $this->performanceExampleCount() > 0 && ($this->request['performance_examples_marked'] ?? null) === true;
+    }
+
+    /**
+     * How many texts were chosen because they did well and were not sent,
+     * because the examples would have held more characters than allowed.
+     */
+    public function performanceExamplesLeftOut(): int
+    {
+        $count = $this->request['performance_examples_left_out'] ?? null;
+
+        return is_int($count) ? max(0, $count) : 0;
     }
 
     /**

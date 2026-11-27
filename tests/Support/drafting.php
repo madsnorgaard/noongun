@@ -206,7 +206,8 @@ function plainDraftRequest(int $channels = 1, int $maxBodyLength = 500, string $
 function largestPromptBytes(DraftRequest $request, string $version): int
 {
     $perChannel = (int) config('noongun.drafting.examples.per_channel');
-    $characters = $perChannel > 0 ? (int) config('noongun.drafting.examples.max_characters') : 0;
+    $channels = count($request->channels);
+    $characters = $perChannel > 0 ? min($channels * (int) config('noongun.drafting.examples.max_characters'), 40000) : 0;
     $widest = str_repeat("\u{1F600}", 60);
     $examples = [];
 

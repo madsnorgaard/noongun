@@ -192,6 +192,12 @@ return [
     | "score" holds the weights of the engagement score, the one number
     | posts are compared by: each count times its weight, added up. Reach is
     | not part of it, so the score also works where reach is not available.
+    |
+    | "min_age_hours" is how long a post must have been out before it is
+    | compared with other posts, and "min_measured_posts" is how many
+    | measured posts of that age a channel needs before any of them is said
+    | to have done well. Below either, drafting takes its examples by
+    | recency alone. See docs/adr/0011-drafting-contract.md.
     */
 
     'insights' => [
@@ -203,6 +209,8 @@ return [
         'pause_minutes' => (int) env('NOONGUN_INSIGHTS_PAUSE_MINUTES', 60),
         'timeout' => (int) env('NOONGUN_INSIGHTS_TIMEOUT', 45),
         'gone_after' => (int) env('NOONGUN_INSIGHTS_GONE_AFTER', 3),
+        'min_age_hours' => env('NOONGUN_INSIGHTS_MIN_AGE_HOURS', 48),
+        'min_measured_posts' => env('NOONGUN_INSIGHTS_MIN_MEASURED_POSTS', 5),
 
         'score' => [
             'reactions' => env('NOONGUN_INSIGHTS_WEIGHT_REACTIONS', 1),
@@ -264,8 +272,8 @@ return [
     | "examples" sends texts the workspace approved along with a draft
     | request, so that a draft matches the voice and does not repeat what
     | was said. "per_channel" is how many for each target channel, at most
-    | 10; 0 sends none. "max_characters" is the most characters all examples
-    | of one request may hold together; a text is never cut. "top_share" is
+    | 10; 0 sends none. "max_characters" is the most characters the examples
+    | of one target channel may hold together; a text is never cut. "top_share" is
     | the share of the examples of a channel, in percent, that goes to the
     | approved posts that did best instead of the most recent ones; 0 takes
     | only the most recent. "top_days" is how many days back a post may have

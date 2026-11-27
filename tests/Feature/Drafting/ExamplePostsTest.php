@@ -267,17 +267,34 @@ describe('the limit on characters', function () {
         expect(examplesFor($this->workspace, [$this->page])->examples)->toHaveCount(1);
     });
 
-    it('holds for all channels of a request together, oldest approval first', function () {
+    it('holds for each target channel on its own, oldest approval first: one channel does not use up the room of another', function () {
         $profile = channelIn($this->workspace, ['platform' => 'linkedin']);
 
         approvedText($this->workspace, $this->page, str_repeat('a', 400), '2026-11-01 08:00:00');
         approvedText($this->workspace, $profile, str_repeat('b', 400), '2026-11-02 08:00:00');
         approvedText($this->workspace, $this->page, str_repeat('c', 400), '2026-11-03 08:00:00');
+        approvedText($this->workspace, $this->page, str_repeat('d', 400), '2026-11-04 08:00:00');
 
         config(['noongun.drafting.examples.max_characters' => 800]);
 
-        expect(exampleTexts(examplesFor($this->workspace, [$this->page, $profile])))->toBe([str_repeat('c', 400), str_repeat('b', 400)]);
+        expect(exampleTexts(examplesFor($this->workspace, [$this->page, $profile])))
+            ->toBe([str_repeat('d', 400), str_repeat('c', 400), str_repeat('b', 400)]);
     });
+
+    it('gives each channel less when many channels together would hold more than a request may', function (int $configured, int $channels, int $each) {
+        config(['noongun.drafting.examples.max_characters' => $configured]);
+
+        expect(DraftingConfig::exampleCharactersFor($channels))->toBe($each)
+            ->and($channels * $each)->toBeLessThanOrEqual(DraftingConfig::MAX_EXAMPLE_CHARACTERS);
+    })->with([
+        'one channel' => [6000, 1, 6000],
+        'two channels' => [6000, 2, 6000],
+        'six channels' => [6000, 6, 6000],
+        'seven channels' => [6000, 7, 5714],
+        'the most for one channel' => [40000, 1, 40000],
+        'the most, for two' => [40000, 2, 20000],
+        'none' => [0, 3, 0],
+    ]);
 
     it('sends none when the limit is 0', function () {
         approvedText($this->workspace, $this->page, 'An approved text.', '2026-11-01 08:00:00');
