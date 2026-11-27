@@ -3,6 +3,9 @@
 namespace App\Domain\Insights;
 
 use App\Domain\Channels\Contracts\Metric;
+use App\Domain\Scheduling\PublishingConfig;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Typed access to config('noongun.insights'), with values that make no
@@ -25,6 +28,12 @@ final class InsightsConfig
 
     /** How long a channel is left alone when the platform no longer accepts its token for reading. */
     public const RECONNECT_PAUSE_SECONDS = 21600;
+
+    /** A setting that cannot be read is reported in the log once in this time. */
+    private const WARNING_EVERY_SECONDS = 86400;
+
+    /** Seconds a run keeps free at its end for storing what it read. */
+    public const RUN_SLACK_SECONDS = 5;
 
     /**
      * How long a queued job keeps a second one for the same channel from
@@ -67,18 +76,31 @@ final class InsightsConfig
     public static function cadence(): array
     {
         $configured = config('noongun.insights.cadence');
+        $configured = is_string($configured) ? trim($configured) : '';
         $steps = [];
+        $valid = true;
 
-        foreach (is_string($configured) ? explode(',', $configured) : [] as $pair) {
+        foreach ($configured === '' ? [] : explode(',', $configured) as $pair) {
             $parts = array_map(trim(...), explode(':', $pair));
 
             if (count($parts) === 2 && ctype_digit($parts[0]) && ctype_digit($parts[1]) && (int) $parts[0] > 0 && (int) $parts[1] > 0) {
                 $steps[(int) $parts[0]] = (int) $parts[1];
+            } else {
+                $valid = false;
             }
         }
 
-        if ($steps === []) {
+        // One pair that cannot be read spoils the whole setting. Using the
+        // pairs that can would quietly read posts for a shorter time than
+        // was meant, so the default is used and the log says so.
+        if (! $valid || $steps === []) {
             $steps = array_column(self::DEFAULT_CADENCE, 1, 0);
+
+            if (! $valid && Cache::add('noongun:insights:cadence-invalid:'.md5($configured), true, self::WARNING_EVERY_SECONDS)) {
+                Log::warning('NOONGUN_INSIGHTS_CADENCE cannot be read, so the default cadence is used. Write it as hours:minutes pairs separated by commas, for example 24:60,504:1440.', [
+                    'configured' => mb_substr($configured, 0, 200),
+                ]);
+            }
         }
 
         ksort($steps);
@@ -100,6 +122,35 @@ final class InsightsConfig
         $cadence = self::cadence();
 
         return $cadence[count($cadence) - 1]['until_hours'];
+    }
+
+    /**
+     * The most variants the job hands to an adapter in one call. After each
+     * call what came back is stored, so a run that is cut short keeps what
+     * it read. With the default one call is one request to Facebook.
+     */
+    public static function variantsPerCall(): int
+    {
+        return min(self::int('variants_per_call', 25, 1), 250);
+    }
+
+    /**
+     * Seconds one call to a platform may take: the time limit the adapters
+     * give their requests.
+     */
+    public static function callSeconds(): int
+    {
+        return PublishingConfig::timeout();
+    }
+
+    /**
+     * A published post that was never read is read once even when it is
+     * older than the cadence reaches, as long as it is not older than this
+     * many days. Zero turns that off.
+     */
+    public static function backfillDays(): int
+    {
+        return min(self::int('backfill_days', 365, 0), 3650);
     }
 
     /**

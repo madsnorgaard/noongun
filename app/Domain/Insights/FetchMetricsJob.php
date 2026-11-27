@@ -13,6 +13,7 @@ use App\Domain\Content\Models\PostVariant;
 use App\Domain\Insights\Models\MetricSnapshot;
 use App\Domain\Workspaces\CurrentWorkspace;
 use App\Domain\Workspaces\Models\Workspace;
+use DateTimeInterface;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
@@ -141,52 +142,38 @@ final class FetchMetricsJob implements ShouldBeUnique, ShouldQueue
                 return;
             }
 
-            ChannelPolling::spend($channel->id, $limit, count($variants) * $callsPerVariant);
+            $started = hrtime(true);
 
-            $readings = $this->ask($reader, $channel, $variants);
+            // One call to the adapter for each part, and what came back is
+            // stored before the next: a run that fails or is cut short
+            // keeps what it read, and has spent calls only for what it
+            // asked.
+            foreach (array_chunk($variants, max(1, InsightsConfig::variantsPerCall())) as $index => $part) {
+                $elapsed = (hrtime(true) - $started) / 1_000_000_000;
 
-            if ($readings === null) {
-                return;
-            }
-
-            $now = now();
-            $gone = [];
-            $back = [];
-
-            foreach ($variants as $variant) {
-                $reading = $readings[$variant->id] ?? null;
-
-                if ($reading === null) {
-                    continue;
+                // Another call might not finish inside the time limit of
+                // the job. The rest stays due for the next run.
+                if ($index > 0 && $elapsed + InsightsConfig::callSeconds() > InsightsConfig::jobSeconds() - InsightsConfig::RUN_SLACK_SECONDS) {
+                    break;
                 }
 
-                if ($reading->gone) {
-                    $gone[] = $variant->id;
+                ChannelPolling::spend($channel->id, $limit, count($part) * $callsPerVariant);
 
-                    continue;
+                $skipThese = false;
+                $readings = $this->ask($reader, $channel, $part, $skipThese);
+
+                if ($readings === null) {
+                    // A refusal that waiting does not cure may be about one
+                    // of these posts. They move to the back of the line, so
+                    // the same ones do not head every run that follows.
+                    if ($skipThese) {
+                        $this->markAsked($part, now());
+                    }
+
+                    break;
                 }
 
-                MetricSnapshot::record($variant, $reading->only($metrics), $now);
-
-                if ($variant->metrics_gone_count > 0) {
-                    $back[] = $variant->id;
-                }
-            }
-
-            // Asked, with or without an answer: due again after the step of
-            // the cadence. Written without the model, so nothing else on the
-            // row moves, not even updated_at.
-            PostVariant::query()
-                ->whereKey(array_map(fn (PostVariant $variant): int => $variant->id, $variants))
-                ->toBase()
-                ->update(['metrics_checked_at' => $now]);
-
-            if ($gone !== []) {
-                PostVariant::query()->whereKey($gone)->toBase()->increment('metrics_gone_count');
-            }
-
-            if ($back !== []) {
-                PostVariant::query()->whereKey($back)->toBase()->update(['metrics_gone_count' => 0]);
+                $this->store($part, $readings, $metrics);
             }
         } finally {
             $lock->release();
@@ -194,22 +181,88 @@ final class FetchMetricsJob implements ShouldBeUnique, ShouldQueue
     }
 
     /**
+     * @param  list<PostVariant>  $variants
+     * @param  array<int, MetricReading>  $readings
+     * @param  list<Metric>  $metrics  what the channel can read
+     */
+    private function store(array $variants, array $readings, array $metrics): void
+    {
+        $now = now();
+        $gone = [];
+        $back = [];
+
+        foreach ($variants as $variant) {
+            $reading = $readings[$variant->id] ?? null;
+
+            if ($reading === null) {
+                continue;
+            }
+
+            if ($reading->gone) {
+                $gone[] = $variant->id;
+
+                continue;
+            }
+
+            // A number the variant has is kept when the platform leaves it
+            // out while the channel can still read that metric.
+            MetricSnapshot::record($variant, $reading->only($metrics), $now, $metrics);
+
+            if ($variant->metrics_gone_count > 0) {
+                $back[] = $variant->id;
+            }
+        }
+
+        $this->markAsked($variants, $now);
+
+        if ($gone !== []) {
+            PostVariant::query()->whereKey($gone)->toBase()->increment('metrics_gone_count');
+        }
+
+        if ($back !== []) {
+            PostVariant::query()->whereKey($back)->toBase()->update(['metrics_gone_count' => 0]);
+        }
+    }
+
+    /**
+     * Asked, with or without an answer: due again after the step of the
+     * cadence. Written without the model, so nothing else on the row moves,
+     * not even updated_at.
+     *
+     * @param  list<PostVariant>  $variants
+     */
+    private function markAsked(array $variants, DateTimeInterface $at): void
+    {
+        PostVariant::query()
+            ->whereKey(array_map(fn (PostVariant $variant): int => $variant->id, $variants))
+            ->toBase()
+            ->update(['metrics_checked_at' => $at]);
+    }
+
+    /**
      * One call to the adapter. Null when it failed: the failure is logged
      * and the channel is paused, and that is all that happens.
+     *
+     * $skipThese is set when the failure is not the platform limiting
+     * requests: then it may be about these variants, and the caller moves
+     * them to the back of the line.
      *
      * @param  list<PostVariant>  $variants
      * @return array<int, MetricReading>|null
      */
-    private function ask(ChannelAdapter&ReadsMetrics $reader, Channel $channel, array $variants): ?array
+    private function ask(ChannelAdapter&ReadsMetrics $reader, Channel $channel, array $variants, bool &$skipThese): ?array
     {
         try {
             return $reader->fetchMetrics($channel, $variants);
         } catch (ChannelException $e) {
+            $skipThese = ! $e->rateLimited();
+
             $pause = match (true) {
                 // The token is not accepted for reading. Whether the channel
-                // needs a reconnect is for publishing and the token check to
-                // decide: a missing permission for metrics must never stop
-                // a channel from publishing.
+                // needs a reconnect is for publishing and the token check
+                // (noongun:check-channel-tokens) to decide: a missing
+                // permission for metrics must never stop a channel from
+                // publishing.
                 $e->requiresReconnect => InsightsConfig::RECONNECT_PAUSE_SECONDS,
                 default => max(InsightsConfig::pauseSeconds(), $e->retryAfterSeconds ?? 0),
             };
@@ -217,7 +270,7 @@ final class FetchMetricsJob implements ShouldBeUnique, ShouldQueue
             if ($e->requiresReconnect) {
                 ChannelPolling::pauseUntilConnectedAgain($channel->id, $pause);
             } else {
-                ChannelPolling::pause($channel->id, $pause);
+                ChannelPolling::pause($channel->id, $pause, $e->rateLimited() ? ChannelPolling::PAUSE_RATE_LIMIT : ChannelPolling::PAUSE_OTHER);
             }
 
             Log::warning('Reading the metrics of a channel failed. The channel is left alone for a while.', [
@@ -231,6 +284,7 @@ final class FetchMetricsJob implements ShouldBeUnique, ShouldQueue
         } catch (Throwable $e) {
             // Not an answer from the platform. The exception itself is not
             // logged: HTTP client exceptions can carry tokens.
+            $skipThese = true;
             ChannelPolling::pause($channel->id, InsightsConfig::pauseSeconds());
 
             Log::error('A channel adapter threw an unexpected exception while reading metrics.', [

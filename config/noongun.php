@@ -169,6 +169,23 @@ return [
     ],
 
     /*
+    | Asking each platform whether the token of a connected channel is still
+    | good, and recording the permissions and the expiry it reports. Every
+    | active channel is checked once in "every_hours"; the scheduler queues
+    | at most "channels_per_run" checks each hour. A channel is marked as
+    | needing a reconnect only when the platform says so in so many words.
+    | "queue" is the queue of the checks: the one for reading metrics, which
+    | has a worker of its own, so a check never stands in front of a post.
+    */
+
+    'token_check' => [
+        'enabled' => filter_var(env('NOONGUN_TOKEN_CHECK_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'every_hours' => (int) env('NOONGUN_TOKEN_CHECK_EVERY_HOURS', 24),
+        'channels_per_run' => 50,
+        'queue' => env('NOONGUN_INSIGHTS_QUEUE', 'insights'),
+    ],
+
+    /*
     | Reading the numbers of published posts (reactions, comments, shares,
     | clicks, reach). Only platforms whose adapter reads metrics are asked;
     | see docs/adr/0016-insights.md.
@@ -199,6 +216,12 @@ return [
         'queue' => env('NOONGUN_INSIGHTS_QUEUE', 'insights'),
         'cadence' => env('NOONGUN_INSIGHTS_CADENCE', '24:60,504:1440'),
         'variants_per_run' => (int) env('NOONGUN_INSIGHTS_VARIANTS_PER_RUN', 25),
+        // The most posts handed to a platform in one call; what came back
+        // is stored after each call. A post that was never read is read
+        // once when it is older than the cadence reaches but not older than
+        // "backfill_days"; 0 turns that off.
+        'variants_per_call' => 25,
+        'backfill_days' => (int) env('NOONGUN_INSIGHTS_BACKFILL_DAYS', 365),
         'rate_limit_percent' => (int) env('NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT', 20),
         'pause_minutes' => (int) env('NOONGUN_INSIGHTS_PAUSE_MINUTES', 60),
         'timeout' => (int) env('NOONGUN_INSIGHTS_TIMEOUT', 45),
