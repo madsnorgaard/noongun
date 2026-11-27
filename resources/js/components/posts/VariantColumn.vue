@@ -364,9 +364,10 @@ function describedBy(...ids: (string | false)[]): string | undefined {
         @dragleave="onDragLeave"
         @drop="onDrop"
     >
-        <header
-            class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3"
-        >
+        <!-- The copy control always has its own row under the name, so that
+             it is in the same place in every column, whatever the length
+             of the names. -->
+        <header class="grid gap-3">
             <div class="grid min-w-0 gap-1.5">
                 <h2
                     :id="`column-${channel.id}`"
@@ -386,6 +387,7 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                 variant="outline"
                 :disabled="copyChoices[0].same"
                 :aria-label="`Copy the ${copyChoices[0].label} into the column for ${channel.display_name}`"
+                class="w-fit max-w-full"
                 :data-test="`copy-into-${channel.id}`"
                 @click="emit('copy', copyChoices[0].from, copyChoices[0].what)"
             >

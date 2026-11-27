@@ -1,0 +1,11 @@
+{
+  "type": "GoalClosedEvent",
+  "aggregateId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+  "version": 11,
+  "timestamp": "2026-11-26T21:10:46.730Z",
+  "payload": {
+    "status": "done",
+    "closedAt": "2026-11-26T21:10:46.730Z"
+  },
+  "seq": 11
+}

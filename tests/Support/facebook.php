@@ -271,3 +271,125 @@ function facebookCalls(): array
 {
     return facebookOptionsLog();
 }
+
+/** A read inside a batch that Facebook did not finish: `null` in the answer. */
+const FACEBOOK_UNFINISHED = '(unfinished)';
+
+/**
+ * One entry of a batch answer, in the documented envelope: `code`, `headers`
+ * as a list of name and value, and `body` as a JSON string.
+ *
+ * $answer is FACEBOOK_UNFINISHED, the name of a fixture (answered with 200,
+ * or with 400 when the name holds "error"), a body as an array, or
+ * [fixture or body, code, headers].
+ *
+ * @param  string|array<array-key, mixed>  $answer
+ * @return array{code: int, headers: list<array{name: string, value: string}>, body: string}|null
+ */
+function facebookBatchEntry(string|array $answer, ?string $postId = null): ?array
+{
+    if ($answer === FACEBOOK_UNFINISHED) {
+        return null;
+    }
+
+    $code = null;
+    $headers = [];
+
+    if (is_array($answer) && array_is_list($answer) && $answer !== []) {
+        [$answer, $code, $headers] = [$answer[0], $answer[1] ?? null, $answer[2] ?? []];
+    }
+
+    $code ??= is_string($answer) && str_contains($answer, 'error') ? 400 : 200;
+    $body = is_string($answer) ? facebookFixture($answer) : $answer;
+
+    // A fixture of a post answers for the post that was asked about.
+    if ($postId !== null && isset($body['id'], $body['reactions'])) {
+        $body['id'] = $postId;
+    }
+
+    $list = [];
+
+    foreach ($headers as $name => $value) {
+        $list[] = ['name' => (string) $name, 'value' => (string) $value];
+    }
+
+    return ['code' => $code, 'headers' => $list, 'body' => (string) json_encode($body)];
+}
+
+/**
+ * The reads of a recorded batch request, each with the id of the post, what
+ * was read of it (post or insights) and its query.
+ *
+ * @return list<array{post: string, kind: string, query: array<string, mixed>}>
+ */
+function facebookBatchReads(Request $request): array
+{
+    $reads = [];
+
+    foreach (json_decode((string) $request['batch'], true, flags: JSON_THROW_ON_ERROR) as $read) {
+        expect($read['method'])->toBe('GET')
+            // Relative to the configured address, never an address of its own.
+            ->and($read['relative_url'])->not->toContain('://')->not->toStartWith('/');
+
+        [$path, $query] = [...explode('?', $read['relative_url'], 2), ''];
+        parse_str($query, $parameters);
+        $insights = str_ends_with($path, '/insights');
+
+        $reads[] = [
+            'post' => $insights ? substr($path, 0, -strlen('/insights')) : $path,
+            'kind' => $insights ? 'insights' : 'post',
+            'query' => $parameters,
+        ];
+    }
+
+    return $reads;
+}
+
+/**
+ * Fakes the batch endpoint of the Graph API for reading metrics. Every call
+ * must be a POST to the configured address and version, with the token in
+ * the form body. Each read is answered with the fixture of a post with
+ * numbers and of its insights, unless replaced for a post id (or for "*",
+ * every post):
+ *
+ *     fakeGraphMetrics(['100_200' => ['post' => 'insights/error_post_gone']]);
+ *     fakeGraphMetrics(['*' => ['insights' => FACEBOOK_UNFINISHED]]);
+ *
+ * A value is anything facebookBatchEntry() takes. $headers are the headers
+ * of the batch answer itself.
+ *
+ * @param  array<string, array{post?: string|array<array-key, mixed>, insights?: string|array<array-key, mixed>}>  $answers
+ * @param  array<string, string>  $headers
+ */
+function fakeGraphMetrics(array $answers = [], array $headers = []): void
+{
+    Http::preventStrayRequests();
+
+    Http::fake(function (Request $request) use ($answers, $headers) {
+        expect($request->url())->toBe(FACEBOOK_TEST_GRAPH.'/')
+            ->and($request->method())->toBe('POST')
+            ->and($request->isForm())->toBeTrue();
+
+        $entries = [];
+
+        foreach (facebookBatchReads($request) as $read) {
+            $answer = $answers[$read['post']][$read['kind']]
+                ?? $answers['*'][$read['kind']]
+                ?? ($read['kind'] === 'post' ? 'insights/post_engagement' : 'insights/post_insights');
+
+            $entries[] = facebookBatchEntry($answer, $read['post']);
+        }
+
+        return Http::response($entries, 200, $headers);
+    });
+}
+
+/**
+ * Every batch request that was sent, in order.
+ *
+ * @return list<Request>
+ */
+function facebookBatchRequests(): array
+{
+    return Http::recorded()->map(fn (array $pair): Request => $pair[0])->values()->all();
+}

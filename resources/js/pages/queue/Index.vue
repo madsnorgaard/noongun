@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
 import { computed, ref, watch } from 'vue';
+import PostNumbersLine from '@/components/insights/PostNumbersLine.vue';
 import NextFiring from '@/components/posts/NextFiring.vue';
 import PostStateBadge from '@/components/posts/PostStateBadge.vue';
 import PostTexts from '@/components/posts/PostTexts.vue';
@@ -17,6 +18,7 @@ import {
 import { approve, create, reject, show, unschedule } from '@/routes/posts';
 import { create as propose } from '@/routes/proposals';
 import { approve as approveSelection, index } from '@/routes/queue';
+import type { PostInsights, Reading } from '@/types/insights';
 import type { Post } from '@/types/posts';
 import type { QueueDrafting } from '@/types/proposals';
 
@@ -38,6 +40,9 @@ const props = defineProps<{
     totals: { drafts: number; upcoming: number; failed: number } | null;
     history: {
         posts: Post[];
+        /** How the published posts on this page did, keyed by post id. */
+        insights: Record<number, PostInsights>;
+        reading: Reading;
         previous: string | null;
         next: string | null;
     } | null;
@@ -715,8 +720,14 @@ function failedHeadline(post: Post): string {
                         <PostStateBadge :state="post.state" />
                     </div>
 
-                    <div class="min-w-0 flex-[1_1_20rem]">
+                    <div class="grid min-w-0 flex-[1_1_20rem] gap-2.5">
                         <PostTexts :post="post" clamp />
+                        <PostNumbersLine
+                            v-if="history.insights[post.id]"
+                            :insights="history.insights[post.id]"
+                            :reading="history.reading"
+                            :data-test="`history-numbers-${post.id}`"
+                        />
                     </div>
 
                     <Button size="sm" variant="ghost" as-child>

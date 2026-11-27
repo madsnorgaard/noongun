@@ -123,6 +123,28 @@ return [
             // Facebook: when Facebook refuses the post, its photos are
             // not blamed and not sent again.
             'media_upload_trusted' => (int) env('FACEBOOK_MEDIA_UPLOAD_TRUSTED', 900),
+            // The permission that reach and clicks of a post need. It is not
+            // requested unless it is added to FACEBOOK_SCOPES; a Page
+            // connected without it gets reactions, comments and shares only.
+            'insights_scope' => 'read_insights',
+            // Calls a Page token may make in 24 hours: Meta allows 4800 for
+            // each user who engaged with the Page, and this is that limit at
+            // one such user. Reading metrics uses a share of it.
+            'rate_limit_calls_per_day' => 4800,
+            // How the numbers of a post are read. "post_fields" is asked of
+            // the post itself: totals only (limit(0) keeps the people out
+            // of the answer), comments counted with their replies (filter
+            // "stream"). "clicks" and "reach" are the names of the insights
+            // metrics; Meta renames these from time to time, and an empty
+            // name means the number is not asked for. "batch_size" is the
+            // most reads in one batch request, at most 50.
+            'metrics' => [
+                'post_fields' => 'reactions.summary(total_count).limit(0),comments.filter(stream).summary(true).limit(0),shares',
+                'clicks' => env('FACEBOOK_METRIC_CLICKS', 'post_clicks'),
+                'reach' => env('FACEBOOK_METRIC_REACH', 'post_total_media_view_unique'),
+                'period' => 'lifetime',
+                'batch_size' => 50,
+            ],
         ],
 
         // A member's own profile, through the self-serve products "Share on
@@ -271,6 +293,81 @@ return [
     ],
 
     /*
+    | Asking each platform whether the token of a connected channel is still
+    | good, and recording the permissions and the expiry it reports. Every
+    | active channel is checked once in "every_hours"; the scheduler queues
+    | at most "channels_per_run" checks each hour. A channel is marked as
+    | needing a reconnect only when the platform says so in so many words.
+    | "queue" is the queue of the checks: the one for reading metrics, which
+    | has a worker of its own, so a check never stands in front of a post.
+    */
+
+    'token_check' => [
+        'enabled' => filter_var(env('NOONGUN_TOKEN_CHECK_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'every_hours' => (int) env('NOONGUN_TOKEN_CHECK_EVERY_HOURS', 24),
+        'channels_per_run' => 50,
+        'queue' => env('NOONGUN_INSIGHTS_QUEUE', 'insights'),
+    ],
+
+    /*
+    | Reading the numbers of published posts (reactions, comments, shares,
+    | clicks, reach). Only platforms whose adapter reads metrics are asked;
+    | see docs/adr/0016-insights.md.
+    |
+    | "cadence" says how often a published post is read, by its age, as
+    | "hours:minutes" pairs, comma separated: until the post is that many
+    | hours old, read it every that many minutes. A post older than the last
+    | pair is not read any more. The default reads every hour during the
+    | first day, then once a day until the post is three weeks old.
+    | "variants_per_run" is the most posts of one channel that one run of
+    | the job reads. "rate_limit_percent" is the share of the platform's
+    | rate limit for a channel that reading may use, so that publishing
+    | always has calls left. "pause_minutes" is how long a channel is left
+    | alone after the platform refused a read; a longer wait the platform
+    | asks for is respected. "timeout" is the limit in seconds for one run
+    | of the job. "queue" is the queue the job runs on; it has a supervisor
+    | of its own in config/horizon.php. "gone_after" is how many times in a
+    | row a platform must answer that a post is gone before it is not asked
+    | about any more.
+    |
+    | "score" holds the weights of the engagement score, the one number
+    | posts are compared by: each count times its weight, added up. Reach is
+    | not part of it, so the score also works where reach is not available.
+    |
+    | "min_age_hours" is how long a post must have been out before it is
+    | compared with other posts, and "min_measured_posts" is how many
+    | measured posts of that age a channel needs before any of them is said
+    | to have done well. Below either, drafting takes its examples by
+    | recency alone. See docs/adr/0011-drafting-contract.md.
+    */
+
+    'insights' => [
+        'enabled' => filter_var(env('NOONGUN_INSIGHTS_ENABLED', true), FILTER_VALIDATE_BOOL),
+        'queue' => env('NOONGUN_INSIGHTS_QUEUE', 'insights'),
+        'cadence' => env('NOONGUN_INSIGHTS_CADENCE', '24:60,504:1440'),
+        'variants_per_run' => (int) env('NOONGUN_INSIGHTS_VARIANTS_PER_RUN', 25),
+        // The most posts handed to a platform in one call; what came back
+        // is stored after each call. A post that was never read is read
+        // once when it is older than the cadence reaches but not older than
+        // "backfill_days"; 0 turns that off.
+        'variants_per_call' => 25,
+        'backfill_days' => (int) env('NOONGUN_INSIGHTS_BACKFILL_DAYS', 365),
+        'rate_limit_percent' => (int) env('NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT', 20),
+        'pause_minutes' => (int) env('NOONGUN_INSIGHTS_PAUSE_MINUTES', 60),
+        'timeout' => (int) env('NOONGUN_INSIGHTS_TIMEOUT', 45),
+        'gone_after' => (int) env('NOONGUN_INSIGHTS_GONE_AFTER', 3),
+        'min_age_hours' => env('NOONGUN_INSIGHTS_MIN_AGE_HOURS', 48),
+        'min_measured_posts' => env('NOONGUN_INSIGHTS_MIN_MEASURED_POSTS', 5),
+
+        'score' => [
+            'reactions' => env('NOONGUN_INSIGHTS_WEIGHT_REACTIONS', 1),
+            'comments' => env('NOONGUN_INSIGHTS_WEIGHT_COMMENTS', 2),
+            'shares' => env('NOONGUN_INSIGHTS_WEIGHT_SHARES', 3),
+            'clicks' => env('NOONGUN_INSIGHTS_WEIGHT_CLICKS', 1),
+        ],
+    ],
+
+    /*
     | Drafting with an LLM. "provider" is the provider a workspace uses until
     | its owner chooses another one. "offered" lists the providers an owner
     | may choose from, comma separated in NOONGUN_DRAFT_PROVIDERS; the
@@ -319,12 +416,16 @@ return [
     | that it can be read and approved in time. "weeks_ahead" is how far
     | ahead a week can be proposed.
     |
-    | "examples" sends the texts the workspace approved most recently along
-    | with a draft request, so that a draft matches the voice and does not
-    | repeat what was said. "per_channel" is how many for each target
-    | channel, at most 10; 0 sends none. "max_characters" is the most
-    | characters all examples of one request may hold together; the oldest
-    | are left out first and a text is never cut.
+    | "examples" sends texts the workspace approved along with a draft
+    | request, so that a draft matches the voice and does not repeat what
+    | was said. "per_channel" is how many for each target channel, at most
+    | 10; 0 sends none. "max_characters" is the most characters the examples
+    | of one target channel may hold together; a text is never cut. "top_share" is
+    | the share of the examples of a channel, in percent, that goes to the
+    | approved posts that did best instead of the most recent ones; 0 takes
+    | only the most recent. "top_days" is how many days back a post may have
+    | been published to be taken for how it did; 0 takes none. See
+    | docs/adr/0011-drafting-contract.md.
     */
 
     'drafting' => [
@@ -332,7 +433,7 @@ return [
         'offered' => array_values(array_filter(array_map(trim(...), explode(',', (string) env('NOONGUN_DRAFT_PROVIDERS', ''))))),
         'max_tokens' => (int) env('NOONGUN_DRAFT_MAX_TOKENS', 16000),
         'timeout' => (int) env('NOONGUN_DRAFT_TIMEOUT', 120),
-        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v2'),
+        'prompt_version' => env('NOONGUN_DRAFT_PROMPT_VERSION', 'v3'),
         'currency' => env('NOONGUN_DRAFT_PRICE_CURRENCY', 'USD'),
 
         'providers' => [
@@ -374,6 +475,8 @@ return [
         'examples' => [
             'per_channel' => env('NOONGUN_DRAFT_EXAMPLES', 5),
             'max_characters' => env('NOONGUN_DRAFT_EXAMPLES_MAX_CHARS', 6000),
+            'top_share' => env('NOONGUN_DRAFT_EXAMPLES_TOP_SHARE', 50),
+            'top_days' => env('NOONGUN_DRAFT_EXAMPLES_TOP_DAYS', 90),
         ],
 
         'limits' => [

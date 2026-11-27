@@ -107,6 +107,13 @@ final class PostPresenter
             'left_out' => $this->leftOut($run),
             // How many approved posts went along as examples of the voice.
             'examples' => $run->exampleCount(),
+            // How many of those were chosen because they did well.
+            'examples_by_performance' => $run->performanceExampleCount(),
+            // Whether the prompt told the model which ones did well. An
+            // instance on an earlier prompt version sends them unmarked.
+            'examples_performance_marked' => $run->performanceExamplesMarked(),
+            // How many were chosen that way and not sent, for the limit on characters.
+            'examples_performance_left_out' => $run->performanceExamplesLeftOut(),
             'drafted_at' => $run->finished_at?->toIso8601String(),
             // What this one draft used: tokens as the provider reported
             // them, and the estimate of the price table when there is one.

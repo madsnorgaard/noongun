@@ -740,3 +740,326 @@ switches the app:
 - What the dashboard required before Live mode:
 - Did the post of 2026-11-26 become visible signed out afterwards:
 - Did publishing still work for the administrator's Pages without App Review:
+## 2026-11-26 - reading the numbers of a post (M6)
+
+What was read in Meta's documentation on 2026-11-26 before the metrics contract was
+designed (`App\Domain\Channels\Contracts\ReadsMetrics`, ADR 0016). Every reference page
+showed Graph API `v27.0`, the configured version. Nothing below has been run against
+the real API. `FacebookAdapter::fetchMetrics()` was built later the same day; the next
+entry records what was read again for it and how each open point below was handled.
+`tests/Fixtures/facebook/insights/README.md` lists what a first real call must show.
+
+### Confirmed in the documentation
+
+**Reactions, comments and shares are read from the post itself.**
+
+- `reactions` is an edge of the post. Its total is asked for with the summary:
+  `GET /{post-id}?fields=reactions.summary(total_count)`, which answers with
+  `reactions.summary.total_count`, "Total number of reactions" (unsigned int32). Without
+  `limit(0)` the answer also lists the people who reacted, in `data`, which Noon Gun
+  must not ask for.
+- `comments` is an edge with `summary` (bool). With it the answer holds `total_count`
+  and `order`. `filter=toplevel` is the default and counts top-level comments;
+  `filter=stream` counts "all comments (including replies)". The count "can be greater
+  than or equal to the actual number of comments returned" because of privacy and
+  deletions.
+- `shares` is a field of the post, a struct with `count`: "Number of times the post has
+  been shared". The reference shows no example answer. Whether the field is absent or
+  zero for a post nobody shared is not stated.
+
+Sources: developers.facebook.com/docs/graph-api/reference/page-post,
+developers.facebook.com/docs/graph-api/reference/v27.0/object/reactions,
+developers.facebook.com/docs/graph-api/reference/v27.0/object/comments
+
+**Reach and clicks are post insights, and the old names are gone.**
+
+- `GET /{post-id}/insights?metric={metric-1},{metric-2}` answers with `data` (a list of
+  InsightsResult) and `paging`. `period` can be `day`, `week`, `days_28`, `month`,
+  `lifetime` or `total_over_range`.
+- `post_clicks` ("clicks anywhere on a post that did not generate a story") and
+  `post_clicks_by_type` exist in v27.0, with `lifetime` as their only period. They are
+  not on the list of deprecated metrics.
+- `post_impressions` and `post_impressions_unique` are deprecated for all API versions:
+  `post_impressions_unique` since 15 June 2025 ("Alternative:
+  post_total_media_view_unique"), `post_impressions` since 15 November 2025
+  ("Alternative: post_media_view"). The insights reference marks them "deprecated above
+  Graph API v25" and says a deprecated metric answers with "an invalid metric error".
+  The paid, fan, organic, viral and nonviral variants are deprecated as well.
+- What exists instead: `post_media_view`, the "times content was played or displayed"
+  (breakdowns `is_from_ads`, `is_from_followers`), and `post_total_media_view_unique`,
+  the unique viewers of the post. So "reach" in Noon Gun is
+  `post_total_media_view_unique`. Views (`post_media_view`) are not stored; the brief
+  names reach.
+- Reactions by type are also insights (`post_reactions_like_total` and so on,
+  `post_reactions_by_type_total`). Not needed: the edge gives the total without the
+  insights permission.
+
+Sources: developers.facebook.com/docs/graph-api/reference/v27.0/insights,
+developers.facebook.com/docs/platforminsights/page/deprecated-metrics
+
+**Insights need one more permission.** The insights reference requires `read_insights`
+and `pages_read_engagement`, with a Page token of someone who can perform the `ANALYZE`
+task on the Page. The permissions reference: `read_insights` "allows your app to read
+the Insights data for Pages, apps and web domains the person owns" and depends on
+`pages_read_engagement` and `pages_show_list`. `FACEBOOK_SCOPES` does not request
+`read_insights` today. So a Page as it is connected now gives reactions, comments and
+shares, and **reach and clicks need `read_insights` added to the Meta app and to
+`FACEBOOK_SCOPES`, and the Page connected again.** Until then they are stored as "not
+given" (null), never as zero.
+
+**Limits of insights.** "Page Insights data is only available for Pages with 100 or more
+likes." Most metrics update once every 24 hours; the ones marked with a star in the
+reference, `post_clicks` among them, several times a day. Only the last two years are
+kept. `_unique` metrics are approximate. When a request times out or metrics are
+missing, the advice is to ask for fewer metrics in one request. A missing `metric`
+parameter is error 3001 with subcode 1504028; an invalid parameter is error 100; error
+200 is "Permissions error".
+
+**Reading many posts in one request does not save calls.** "Each call within the batch
+is counted separately for the purposes of calculating API call limits and resource
+limits", and the rate limiting page says the same of ids combined in one request: three
+ids in `ids=` count as three calls. Combining is recommended only because it answers
+faster. A batch holds at most 50 requests, needs an access token as a top-level
+parameter, reports the failure of one request in that request's own `code` and `body`
+while the others complete, and returns `null` for requests it did not finish in time.
+
+Sources: developers.facebook.com/docs/graph-api/batch-requests,
+developers.facebook.com/docs/graph-api/overview/rate-limiting
+
+**Rate limit.** Unchanged from the 2026-11-24 entry: calls with a Page token fall under
+the business use case limit, "Calls within 24 hours = 4800 * Number of Engaged Users",
+error 80001 for Pages, and `X-Business-Use-Case-Usage` with `call_count`,
+`total_cputime`, `total_time` (each a percentage) and `estimated_time_to_regain_access`
+in minutes. The advice is to stop calling once the limit is reached, because further
+calls make the wait longer.
+
+### Not confirmed
+
+1. **Which permission the reactions and comments edges of a Page post need.** The Page
+   Post reference names no permission for reading; its error 283 speaks of
+   `pages_read_engagement` "and/or" `pages_read_user_content`. The reactions reference
+   lists `pages_show_list` for "Page management apps". The comments reference says
+   "the same permissions required to view the parent object", and that reading comment
+   ids needs the `MODERATE` task. Assumed: the totals are readable with
+   `pages_read_engagement`, which every connected Page has. If the comment total turns
+   out to need `pages_read_user_content`, comments become a metric that needs a
+   permission, like reach.
+2. **The `ids=` form.** That `GET /?ids={id1},{id2}&fields=...` answers with an object
+   keyed by id is not on any page that was read, and neither is a limit of 50 ids. The
+   batch endpoint is documented and is the safe choice.
+3. **The answer of the insights edge.** The reference shows only `{"data": [],
+   "paging": {}}`. That each entry holds `name`, `period` and `values` with one `value`
+   for `lifetime` is how the Graph API has answered for years; it is from memory.
+4. **What a Page with fewer than 100 likes gets**: an error, or an empty `data`. The
+   adapter must treat both as "reach and clicks not given".
+5. **What a missing `read_insights` looks like**: presumably error 200 or 10, which
+   `GraphClient` reports as "connect again". For metrics that must not happen: the
+   adapter does not ask for insights at all when the channel lacks the scope, and a
+   permission error on the insights call alone leaves reach and clicks null.
+6. **Whether insights can be nested as a field** (`fields=insights.metric(post_clicks)`)
+   so that one request per post is enough. Not documented on the pages that were read.
+   `metricCallsPerVariant()` is 2 until this is known.
+7. **Whether a deleted post answers with error 100 and subcode 33**, as other objects
+   do. The adapter must report such a variant as "no reading", not as a failure of the
+   whole call.
+
+### Decisions
+
+1. Five numbers are stored: reactions, comments, shares, clicks (`post_clicks`,
+   lifetime) and reach (`post_total_media_view_unique`, lifetime). Whether comments are
+   counted with or without replies is decided when the call is built, and written here.
+   Metric names are Meta's and change; they belong in the adapter's settings under
+   `noongun.channels.facebook`, not in logic.
+2. The name of the insights permission is the setting `insights_scope`
+   (`read_insights`). `FacebookAdapter::metricsFor()` gives reach and clicks only for a
+   channel whose stored scopes hold it.
+3. Reading is budgeted in calls, not requests, because Meta counts every id:
+   `metricCallsPerVariant()` is 2, and `FetchMetricsJob` spends at most
+   `NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT` of the 4800 calls a day that the adapter
+   declares, which is the limit at one engaged user.
+4. No list of people is ever asked for: `limit(0)` on both edges. Noon Gun stores
+   counts only.
+
+## 2026-11-26 - reading the numbers of a post: the adapter (M6)
+
+`FacebookAdapter::fetchMetrics()` is built. Before it was written the open points of
+the entry above were looked up again in Meta's documentation, the same day. Still
+nothing has been run against the real API: every fixture in
+`tests/Fixtures/facebook/insights/` is written by hand, and
+`scripts/spike/facebook/read-metrics.sh` prints the real answers for one post so they
+can be replaced.
+
+### What the documentation settled
+
+**The shape of an insights entry (open point 3): confirmed.** The Page Insights guide
+shows the answer for post metrics: `data` is a list of entries with `name`, `period`
+(`lifetime`), `values` (a list with one object that holds `value`), `title`,
+`description` and `id` (`{page-post-id}/insights/{metric}/lifetime`), followed by
+`paging` with `previous` and `next` addresses. The InsightsResult reference lists the
+same fields (`id`, `name`, `period`, `values`, `title`, `description`,
+`description_from_api_doc`). The adapter reads `name`, `period` and
+`values[0].value` and nothing else.
+
+**A missing `read_insights` (open point 5): documented as an empty answer, not an
+error.** The error table of the same guide has a row without an error code: "An empty
+dataset is returned" - "You need the `read_insights` permission in order to access
+this endpoint". The other rows are error 100 "(#100) The value must be a valid
+insights metric" for a name that is misspelled or retired, and error 3001 with subcode
+1504028 when no metric is named. The insights reference still lists error 200
+"Permissions error", so the adapter accepts both: an empty `data`, and a permission
+error (10, or 200 to 299) on the insights read, leave reach and clicks null and keep
+the three numbers of the post.
+
+**The batch endpoint: confirmed again, and it is what the adapter uses.** At most 50
+requests in one batch. The access token is a top-level parameter. The answer is a
+list in the order of the requests; each entry has a status `code`, an optional
+`headers` list and an optional `body`, "a JSON encoded string". A request that failed
+carries its error in its own entry while the others complete. A batch that ran out of
+time is returned partly completed, with `null` for the requests that were not
+finished. `include_headers=false` leaves the headers out. "Each call within the batch
+is counted separately for the purposes of calculating API call limits and resource
+limits."
+
+**Field expansion: an edge can be named as a field and given arguments.** The field
+expansion guide: an entry of `fields` is "one or more (comma-separated) fields or
+edges from the parent node", and ".limit()" can be added "to any field or edge". Its
+examples only use `.limit()`, `.after()` and, for a picture, `.width()`, `.height()`
+and `.as()`. So `reactions.summary(total_count).limit(0)` follows the documented form
+with an argument, `summary`, that the guide itself does not show.
+
+**Rate limit headers.** `X-Business-Use-Case-Usage` is a JSON object keyed by the id
+of the business object, each a list of entries with `type`, `call_count`,
+`total_cputime`, `total_time`, `estimated_time_to_regain_access` ("Time, in minutes,
+until calls will not longer be throttled") and `ads_api_access_tier`. Three ids in one
+`ids=` request are three calls. "When the limit has been reached, stop making API
+calls."
+
+Sources: developers.facebook.com/docs/platforminsights/page,
+developers.facebook.com/docs/graph-api/reference/insights-result,
+developers.facebook.com/docs/graph-api/reference/v27.0/insights,
+developers.facebook.com/docs/graph-api/batch-requests,
+developers.facebook.com/docs/graph-api/guides/field-expansion,
+developers.facebook.com/docs/graph-api/overview/rate-limiting,
+developers.facebook.com/docs/graph-api/guides/error-handling,
+developers.facebook.com/docs/graph-api/reference/page-post,
+developers.facebook.com/docs/graph-api/reference/v27.0/object/comments
+
+### What the documentation does not say, and what the code does about it
+
+1. **The `ids=` form (open point 2): still not documented.** It appears twice, both
+   times only in passing: the rate limiting page counts
+   `GET https://graph.facebook.com/photos?ids=4,5,6` as three calls, and a batch example
+   uses `?ids=` in a `relative_url`. Neither the Graph API overview, nor "Using the
+   Graph API", nor the field expansion guide describes the answer or a limit on the
+   number of ids. **The adapter does not use it.** The batch endpoint gives the same
+   single round trip, is documented in full, and keeps the token out of the URL.
+2. **Insights nested as a field (open point 6): still not documented.** No page shows
+   `fields=insights.metric(...)`; every example calls the `/insights` edge. The field
+   expansion guide also warns that "certain resources ... are unable to utilize field
+   expansion on some or all connections". **The adapter sends a separate read for the
+   insights, in the same batch**, so it is still one round trip, and
+   `metricCallsPerVariant()` stays 2. The spike script tries the nested form; if it
+   works, one read for each post is enough and the number can become 1.
+3. **A deleted post (open point 7): not documented.** The error handling guide lists
+   neither error 100 nor subcode 33, and no page that was read says what a deleted
+   post answers. The adapter treats three answers as "the post is not there": error
+   100 with subcode 33 ("Unsupported get request. Object with ID ... does not exist,
+   cannot be loaded due to missing permissions, or does not support this operation"),
+   error 803 ("Some of the aliases you requested do not exist") and HTTP 404 on the
+   read. All three are from memory. Because the first one says in its own text that
+   it is also given for a missing permission, **one such answer does not stop
+   anything**: the reading is `MetricReading::gone()`, the job counts it, and only
+   after `NOONGUN_INSIGHTS_GONE_AFTER` (3) such answers in a row is the post not asked
+   about any more. A reading in between, or connecting the Page again, sets the count
+   back. An answer that is none of the three is not "gone": the variant gets no
+   reading and is asked again when it is next due.
+4. **A Page with fewer than 100 likes (open point 4): not documented beyond the one
+   sentence** "Page Insights data is only available on Pages with 100 or more likes".
+   The adapter gives null for reach and clicks whether the insights read answers with
+   an empty `data`, a permission error, or any other refusal. A refusal that is not a
+   permission error and not "not found" is logged once for each call ("Facebook
+   refused to give the insights of a post"), because that is also what a retired
+   metric name looks like. If such a Page turns out to answer with error 100, that
+   line will show up every hour for it and the code should learn the subcode.
+5. **Which permission the totals of reactions and comments need (open point 1): not
+   settled.** The Page Post reference names no permission for reading and lists error
+   283 with "pages_read_engagement and/or pages_read_user_content and/or
+   pages_manage_ads and/or pages_manage_metadata". A permission error on the read of
+   the post itself is a failure of the whole call of the "connect again" kind; the job
+   pauses reading for that Page and changes nothing else.
+6. **Whether `shares` is absent or zero for a post nobody shared: not documented.**
+   The reference only says "Number of times the post has been shared". The adapter
+   reads an absent `shares` as zero when the field was asked for and the post was
+   read, and as null when `shares` is there without a usable count.
+7. **Whether the batch request itself is counted as a call.** The documentation
+   counts "each call within the batch". The adapter budgets the reads and nothing for
+   the envelope. If the envelope is counted, 25 posts cost 51 calls instead of 50,
+   which the share of 20 percent absorbs.
+8. **Where the usage header is in a batch answer.** It may be on the batch, on the
+   entry of the read that was turned away, or on both. The adapter asks for the
+   headers of each entry and takes the wait from the entry, or from the batch when
+   the entry has none.
+9. **Whether the batch endpoint accepts a version in its path** (`POST /v27.0/`) and
+   `appsecret_proof` as a top-level parameter next to the token. Both are how the
+   API is known to work; the batch page shows `POST` to the bare host.
+
+### Decisions
+
+1. **Comments are counted with their replies**: `comments.filter(stream).summary(true)`.
+   `toplevel`, the default, would leave out every answer in a conversation, and a
+   conversation is what a post is written for. The count "can be greater than or equal
+   to the actual number of comments returned" (privacy, deletions); it is stored as
+   Facebook gives it.
+2. **One batch request for every 25 posts** (50 reads) with insights, 50 posts
+   without. The two reads of a post are always in the same batch. The fields, the two
+   metric names, the period and the batch size are settings under
+   `noongun.channels.facebook.metrics`; the metric names can also be set with
+   `FACEBOOK_METRIC_CLICKS` and `FACEBOOK_METRIC_REACH`, because Meta renames them. The
+   limit of 4800 calls a day is the setting `rate_limit_calls_per_day`.
+3. **A partial answer is kept.** A read that was not finished (`null`) or that failed
+   for a moment gives no reading for that post and nothing else. When this happens to
+   the insights of a post, the post gets no reading at all this time, instead of one
+   without reach and clicks: a stored number must not be replaced by "not given"
+   because of an outage. Only when nothing at all came back does the call fail.
+4. **A refused token or a rate limit on any read fails the whole call**, also when
+   other reads were answered. The token is the same for every read, and Meta asks to
+   stop calling when it limits requests.
+5. **Only an id that looks like a post id is ever sent**: digits, or two runs of
+   digits joined by an underscore. The id comes from Facebook's answer to the publish
+   call; anything else is reported as gone and never becomes part of an address.
+6. **No paging address is requested.** The insights answer carries `paging.previous`
+   and `paging.next`; they are ignored. Redirects are turned off for every Graph call.
+7. **`read_insights` is optional when it is configured.** It is requested in the
+   dialog when it is in `FACEBOOK_SCOPES`, but a Page that was not granted it connects
+   all the same, and the token check does not mark a Page that lacks it. Every other
+   configured permission is still required. Without this, adding `read_insights` to
+   `FACEBOOK_SCOPES` would have refused the connect of every Page whose owner declines
+   it, and `refreshToken()` would have marked every Page connected before the change
+   as needing a reconnect.
+
+## 2026-11-27 - changes after review of the metrics adapter
+
+No new reading of the documentation; these follow from what the entries above could
+not settle.
+
+1. **A permission error on one post is about that post.** Error 10 or 200 to 299 on
+   the read of a post gives no reading for it. Only when every post of a call answers
+   that way does the call fail as a missing permission. Decision 4 of the entry above
+   still holds for a refused token and a rate limit.
+2. **Reach and clicks a post already has survive an insights read that gives
+   nothing.** Because the documentation says a missing `read_insights` answers with an
+   empty dataset, and a retired metric name fails the whole insights read with error
+   100, both would otherwise have emptied the numbers of every recent post within a
+   day. The adapter still reports them as not given; `MetricSnapshot::record()` keeps
+   the stored number while the Page is recorded as having the permission (ADR 0016).
+3. **`debug_token` is asked once a day for each connected Page**
+   (`noongun:check-channel-tokens`). `data.is_valid` must be a boolean to count: `false`
+   marks the Page, a missing value is a failed check. `data.scopes` replaces the
+   recorded permissions when it is there, and a required one missing from it marks the
+   Page; an answer without `scopes` proves nothing. An error on the call itself is
+   about the app token it is made with, never about the Page.
+4. **The id of a post must be digits, or digits joined by one underscore, to the last
+   character** (`\A...\z`). `publish()` treats any other id in Facebook's answer as an
+   unknown outcome and stores nothing; `delete()` refuses to send one.
+5. **Text from Facebook is cut**: the message at 300 characters, type and trace id at
+   64. The refusal of the insights of a Page is logged once a day.

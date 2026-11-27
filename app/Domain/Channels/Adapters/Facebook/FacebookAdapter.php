@@ -9,8 +9,11 @@ use App\Domain\Channels\Contracts\ConnectedChannels;
 use App\Domain\Channels\Contracts\DescribesSetup;
 use App\Domain\Channels\Contracts\ExplainsMissingAccounts;
 use App\Domain\Channels\Contracts\MediaLinkRule;
+use App\Domain\Channels\Contracts\Metric;
+use App\Domain\Channels\Contracts\MetricReading;
 use App\Domain\Channels\Contracts\PublishResult;
 use App\Domain\Channels\Contracts\RateLimit;
+use App\Domain\Channels\Contracts\ReadsMetrics;
 use App\Domain\Channels\Contracts\SkippedAccount;
 use App\Domain\Channels\Contracts\UploadsMedia;
 use App\Domain\Channels\Exceptions\ChannelException;
@@ -30,7 +33,9 @@ use Illuminate\Contracts\Container\Container;
 use Illuminate\Contracts\Routing\UrlGenerator;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use SensitiveParameter;
 
 /**
@@ -40,7 +45,7 @@ use SensitiveParameter;
  * Only Page access tokens are stored. The user tokens met during connect()
  * are used for that one request and then dropped.
  */
-final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsMissingAccounts, UploadsMedia
+final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsMissingAccounts, ReadsMetrics, UploadsMedia
 {
     public const PLATFORM = 'facebook';
 
@@ -62,10 +67,37 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
      * Pages API calls with a Page token are limited to 4800 calls per 24
      * hours for each user who engaged with the Page. This is that formula at
      * one engaged user, the lowest it can meaningfully be.
+     * `rate_limit_calls_per_day` in the settings replaces it.
      */
     private const RATE_LIMIT_CALLS = 4800;
 
     private const RATE_LIMIT_SECONDS = 86400;
+
+    /**
+     * Read from the post itself with the permissions every connected Page
+     * has. See "Reading the numbers of a post" in docs/platform-notes/meta.md.
+     */
+    private const METRICS_OF_THE_POST = [Metric::Reactions, Metric::Comments, Metric::Shares];
+
+    /**
+     * Read from the insights of the post, which need one more permission
+     * (`insights_scope` in the settings). A Page connected without it gets
+     * null for these.
+     */
+    private const METRICS_OF_INSIGHTS = [Metric::Clicks, Metric::Reach];
+
+    /**
+     * The id of a Page post as publish() stores it: digits, or two runs of
+     * digits joined by an underscore. An id of any other form is never put
+     * into a request.
+     */
+    private const POST_ID = '/\A\d{1,32}(_\d{1,32})?\z/';
+
+    /** A refusal of the insights of a Page is logged once in this time. */
+    private const REFUSAL_LOGGED_EVERY_SECONDS = 86400;
+
+    /** Facebook allows 50 requests in one batch. `metrics.batch_size` in the settings can lower it. */
+    private const BATCH_SIZE = 50;
 
     /** Most result pages read from /me/accounts (100 Pages each). */
     private const MAX_ACCOUNT_PAGES = 10;
@@ -125,7 +157,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
         // Every value for images is a setting. Without the settings
         // Facebook takes no images.
         $types = $this->mediaTypes();
-        $items = $this->positive('max_media_items') ?? 0;
+        $items = $this->positiveSetting('max_media_items') ?? 0;
         $rule = $this->settings['media_link_rule'] ?? null;
 
         return new ChannelCapabilities(
@@ -133,13 +165,222 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
             mediaTypes: $items > 0 ? $types : [],
             maxMediaItems: $types !== [] ? $items : 0,
             linkPreviews: true,
-            rateLimit: new RateLimit(self::RATE_LIMIT_CALLS, self::RATE_LIMIT_SECONDS),
-            maxMediaBytes: $this->positive('max_media_bytes'),
-            maxMediaPixels: $this->positive('max_media_pixels'),
-            altTextLength: $this->positive('alt_text_length'),
+            rateLimit: new RateLimit($this->positive($this->settings['rate_limit_calls_per_day'] ?? null, self::RATE_LIMIT_CALLS), self::RATE_LIMIT_SECONDS),
+            maxMediaBytes: $this->positiveSetting('max_media_bytes'),
+            maxMediaPixels: $this->positiveSetting('max_media_pixels'),
+            altTextLength: $this->positiveSetting('alt_text_length'),
             mediaLinkRule: (is_string($rule) ? MediaLinkRule::tryFrom($rule) : null) ?? MediaLinkRule::InText,
-            mediaUploadLifetime: $this->positive('media_upload_lifetime'),
+            mediaUploadLifetime: $this->positiveSetting('media_upload_lifetime'),
+            metrics: [...self::METRICS_OF_THE_POST, ...self::METRICS_OF_INSIGHTS],
         );
+    }
+
+    public function metricsFor(Channel $channel): array
+    {
+        $insightsScope = $this->setting('insights_scope');
+
+        return $insightsScope !== '' && $channel->hasScope($insightsScope)
+            ? [...self::METRICS_OF_THE_POST, ...self::METRICS_OF_INSIGHTS]
+            : self::METRICS_OF_THE_POST;
+    }
+
+    /**
+     * Facebook counts every read inside a batch as one call. A variant
+     * costs one read of the post and, for a channel with the insights
+     * permission, one read of its insights. This is the larger of the two:
+     * a channel without the permission is counted as if it had it, so the
+     * share of the rate limit is never overspent.
+     */
+    public function metricCallsPerVariant(): int
+    {
+        return 2;
+    }
+
+    /**
+     * One batch request for every 25 variants (50 reads). For each variant:
+     *
+     * - `GET /{post-id}?fields=...` for reactions, comments and shares;
+     * - `GET /{post-id}/insights?metric=...&period=...` for clicks and
+     *   reach, only when the channel holds the insights permission.
+     *
+     * The fields, metric names and period are in the settings under
+     * `metrics`. What each answer means for the reading:
+     *
+     * - The post was read: its three numbers, and shares as zero when
+     *   Facebook left the field out, which is how it reports a post nobody
+     *   shared.
+     * - The post is not there: MetricReading::gone().
+     * - The insights were read: clicks and reach. They answered with a
+     *   missing permission, an empty list or a refusal: both are null, and
+     *   the three numbers of the post still stand.
+     * - A read was not finished or failed for a moment: no reading for that
+     *   variant this time, so that a number is never replaced by "not given"
+     *   because of an outage.
+     * - One post may not be read with this token: no reading for it. Every
+     *   post of the call answered that way: the call fails, as a missing
+     *   permission.
+     * - The token was refused, or Facebook is limiting requests: the whole
+     *   call fails, whatever else arrived.
+     *
+     * A paging address in an answer is never requested, and a variant that
+     * is not of this channel and workspace is never asked about.
+     */
+    public function fetchMetrics(Channel $channel, array $variants): array
+    {
+        $this->guardConfigured();
+
+        if ($channel->platform !== self::PLATFORM) {
+            throw ChannelException::permanent(self::PLATFORM, 'This channel is not a Facebook Page.');
+        }
+
+        if (blank($channel->access_token)) {
+            throw ChannelException::reconnectRequired(self::PLATFORM, 'The Page is not connected. Connect it again.');
+        }
+
+        $postFields = $this->metricSetting('post_fields');
+        $insightMetrics = $this->insightMetricsFor($channel);
+        $readsPerVariant = $insightMetrics === [] ? 1 : 2;
+
+        $readings = [];
+        $posts = [];
+
+        foreach ($variants as $variant) {
+            if ($variant->channel_id !== $channel->id || $variant->workspace_id !== $channel->workspace_id || blank($variant->external_id)) {
+                continue;
+            }
+
+            $postId = (string) $variant->external_id;
+
+            if (preg_match(self::POST_ID, $postId) !== 1) {
+                // Not an id Facebook gave for a post. It can never be read.
+                $readings[$variant->id] = MetricReading::gone();
+
+                continue;
+            }
+
+            $posts[$variant->id] = $postId;
+        }
+
+        if ($postFields === '' || $posts === []) {
+            return $readings;
+        }
+
+        $firstFailure = null;
+        $insightsRefused = null;
+        $notPermitted = [];
+        $unfinished = false;
+
+        $variantsPerBatch = max(1, intdiv(min($this->positive($this->metricSettings()['batch_size'] ?? null, self::BATCH_SIZE), self::BATCH_SIZE), $readsPerVariant));
+
+        foreach (array_chunk($posts, $variantsPerBatch, preserve_keys: true) as $chunk) {
+            $reads = [];
+
+            foreach ($chunk as $postId) {
+                $reads[] = ['path' => $postId, 'query' => ['fields' => $postFields]];
+
+                if ($insightMetrics !== []) {
+                    $reads[] = ['path' => $postId.'/insights', 'query' => array_filter([
+                        'metric' => implode(',', $insightMetrics),
+                        'period' => $this->metricSetting('period'),
+                    ], fn (string $value): bool => $value !== '')];
+                }
+            }
+
+            $answers = $this->graph->batch($reads, (string) $channel->access_token);
+
+            foreach (array_keys($chunk) as $position => $variantId) {
+                $post = $answers[$position * $readsPerVariant] ?? null;
+                $insights = $insightMetrics === [] ? null : ($answers[$position * $readsPerVariant + 1] ?? null);
+
+                foreach ([$post, $insights] as $answer) {
+                    if ($answer !== null && in_array($answer->outcome, [GraphOutcome::TokenRefused, GraphOutcome::RateLimited], true)) {
+                        throw $answer->failure ?? ChannelException::permanent(self::PLATFORM, 'Facebook refused the request.');
+                    }
+                }
+
+                if ($post === null) {
+                    $unfinished = true;
+
+                    continue;
+                }
+
+                if ($post->outcome === GraphOutcome::NotFound) {
+                    $readings[$variantId] = MetricReading::gone();
+
+                    continue;
+                }
+
+                // One post that may not be read says nothing about the
+                // others: it gets no reading. Only when every post of the
+                // call was refused this way is it the Page, see below.
+                if ($post->outcome === GraphOutcome::PermissionMissing) {
+                    $notPermitted[] = $post->failure;
+
+                    continue;
+                }
+
+                if (! $post->answered() || ! is_scalar($post->body['id'] ?? null)) {
+                    $firstFailure ??= $post->failure;
+
+                    continue;
+                }
+
+                $numbers = $this->engagementIn($post->body, $postFields);
+
+                if ($insightMetrics !== []) {
+                    if ($insights === null) {
+                        $unfinished = true;
+
+                        continue;
+                    }
+
+                    if ($insights->outcome === GraphOutcome::Temporary) {
+                        $firstFailure ??= $insights->failure;
+
+                        continue;
+                    }
+
+                    if ($insights->answered()) {
+                        $numbers += $this->insightsIn($insights->body, $insightMetrics);
+                    } elseif ($insights->outcome === GraphOutcome::Refused) {
+                        $insightsRefused ??= $insights->failure;
+                    }
+                }
+
+                $readings[$variantId] = MetricReading::fromPlatform($numbers);
+            }
+        }
+
+        // Without the permission to read any of the posts there is nothing
+        // to read on this Page with this token.
+        if (count($notPermitted) === count($posts)) {
+            throw $notPermitted[0] ?? ChannelException::reconnectRequired(self::PLATFORM, 'A permission is missing. Connect the Page again.');
+        }
+
+        // Most likely a metric name that Meta has retired. An operator has
+        // to see why two numbers are missing, once a day for each Page and
+        // not on every reading.
+        if ($insightsRefused !== null && Cache::add("noongun:facebook:insights-refused:{$channel->id}", true, self::REFUSAL_LOGGED_EVERY_SECONDS)) {
+            Log::warning('Facebook refused to give the insights of a post. Reach and clicks are left empty. Check the metric names in the settings.', [
+                'workspace_id' => $channel->workspace_id,
+                'channel_id' => $channel->id,
+                'message' => $insightsRefused->getMessage(),
+                ...$insightsRefused->context(),
+            ]);
+        }
+
+        // Nothing came back at all: that is a failure of the call, so the
+        // job waits before it asks again instead of counting the variants
+        // as read.
+        if ($readings === [] && $firstFailure !== null) {
+            throw $firstFailure;
+        }
+
+        if ($readings === [] && $unfinished) {
+            throw ChannelException::retryable(self::PLATFORM, 'Facebook did not finish reading the posts in time.');
+        }
+
+        return $readings;
     }
 
     public function setupSteps(): array
@@ -215,13 +456,16 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
         $pages = [];
 
         foreach ($granted as $page) {
+            // A new connection has to be proven: an answer that does not say
+            // the token is valid, or names no permissions, is refused.
             $inspection = $this->inspect($page['token']);
-            $missing = array_values(array_diff($this->scopes(), $inspection['scopes']));
+            $inspection['scopes'] ??= [];
+            $missing = array_values(array_diff($this->requiredScopes(), $inspection['scopes']));
 
-            if (! $inspection['valid'] || $missing !== []) {
+            if ($inspection['valid'] !== true || $missing !== []) {
                 throw ChannelException::permanent(
                     self::PLATFORM,
-                    ! $inspection['valid']
+                    $inspection['valid'] !== true
                         ? "Facebook gave a token for {$page['name']} that is not valid. Connect again."
                         : 'Facebook did not grant every permission that is needed ('.implode(', ', $missing).'). Connect again and allow all of them.',
                     ['page_id' => $page['id'], 'missing_scopes' => $missing],
@@ -290,11 +534,14 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
         $id = $response['id'] ?? null;
 
-        if (! is_string($id) || $id === '') {
+        // An id of another form is not stored: it would later become part
+        // of an address. The post may still be there, so this is an unknown
+        // outcome like a missing id, never a success.
+        if (! is_string($id) || preg_match(self::POST_ID, $id) !== 1) {
             // Not retryable: the post may be public, and a second call would duplicate it.
             throw PublishFailed::permanent(
                 self::PLATFORM,
-                'Facebook accepted the post but returned no id for it. Check the Page before trying again.',
+                'Facebook accepted the post but returned no usable id for it. Check the Page before trying again.',
                 ['endpoint' => 'POST /'.$channel->external_id.'/feed', 'outcome_unknown' => true],
             );
         }
@@ -379,6 +626,10 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
         if ($channel === null || blank($variant->external_id)) {
             throw ChannelException::permanent(self::PLATFORM, 'This post is not on Facebook, so there is nothing to delete.');
+        }
+
+        if (preg_match(self::POST_ID, (string) $variant->external_id) !== 1) {
+            throw ChannelException::permanent(self::PLATFORM, 'The id stored for this post is not one Facebook gives, so it cannot be deleted from here.');
         }
 
         if (blank($channel->access_token)) {
@@ -471,7 +722,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
             return false;
         }
 
-        $trusted = now()->subSeconds($this->positive('media_upload_trusted') ?? 0);
+        $trusted = now()->subSeconds($this->positiveSetting('media_upload_trusted') ?? 0);
 
         return $images->contains(
             fn (MediaAttachment $attachment): bool => $attachment->uploaded_at === null || $attachment->uploaded_at->lte($trusted),
@@ -610,7 +861,7 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
         ));
     }
 
-    private function positive(string $key): ?int
+    private function positiveSetting(string $key): ?int
     {
         $value = $this->settings[$key] ?? null;
 
@@ -639,14 +890,27 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
         $inspection = $this->inspect((string) $channel->access_token);
 
-        if (! $inspection['valid']) {
+        // Marking a channel stops it from publishing, so it takes a definite
+        // answer. One that does not say whether the token is valid is a
+        // failed check, not a bad token.
+        if ($inspection['valid'] === null) {
+            throw ChannelException::retryable(
+                self::PLATFORM,
+                'Facebook answered the check of the token in a form that could not be read. The channel was left as it is.',
+                context: ['endpoint' => 'GET /debug_token'],
+            );
+        }
+
+        if ($inspection['valid'] === false) {
             return $channel->markNeedsReconnect();
         }
 
         $channel->token_expires_at = $inspection['expires_at'];
-        $channel->scopes = $inspection['scopes'];
+        // An answer that names no permissions proves nothing about them:
+        // the ones recorded at the connect stand.
+        $channel->scopes = $inspection['scopes'] ?? $channel->scopes;
 
-        if ($channel->tokenExpired() || array_diff($this->scopes(), $inspection['scopes']) !== []) {
+        if ($channel->tokenExpired() || ($inspection['scopes'] !== null && array_diff($this->requiredScopes(), $inspection['scopes']) !== [])) {
             return $channel->markNeedsReconnect();
         }
 
@@ -715,9 +979,10 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
     /**
      * What debug_token reports about a token. An expires_at of 0 means the
-     * token does not expire.
+     * token does not expire. `valid` is null when the answer does not say,
+     * and `scopes` is null when it names none: neither is then known.
      *
-     * @return array{valid: bool, scopes: list<string>, expires_at: CarbonImmutable|null}
+     * @return array{valid: bool|null, scopes: list<string>|null, expires_at: CarbonImmutable|null}
      */
     private function inspect(#[SensitiveParameter] string $token): array
     {
@@ -728,11 +993,11 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
 
         $data = is_array($response['data'] ?? null) ? $response['data'] : [];
         $expiresAt = is_numeric($data['expires_at'] ?? null) ? (int) $data['expires_at'] : 0;
-        $scopes = is_array($data['scopes'] ?? null) ? $data['scopes'] : [];
+        $scopes = is_array($data['scopes'] ?? null) ? $data['scopes'] : null;
 
         return [
-            'valid' => ($data['is_valid'] ?? false) === true,
-            'scopes' => array_values(array_filter($scopes, is_string(...))),
+            'valid' => is_bool($data['is_valid'] ?? null) ? $data['is_valid'] : null,
+            'scopes' => $scopes === null ? null : array_values(array_filter($scopes, is_string(...))),
             'expires_at' => $expiresAt > 0 ? CarbonImmutable::createFromTimestampUTC($expiresAt) : null,
         ];
     }
@@ -764,6 +1029,129 @@ final class FacebookAdapter implements ChannelAdapter, DescribesSetup, ExplainsM
         $scopes = $this->settings['scopes'] ?? [];
 
         return array_values(array_filter(is_array($scopes) ? $scopes : [], fn (mixed $scope): bool => is_string($scope) && $scope !== ''));
+    }
+
+    /**
+     * The permissions without which a Page cannot be connected or kept. The
+     * insights permission is asked for when it is configured, but it is
+     * never one of these: a Page that was not granted it publishes as
+     * before and only lacks reach and clicks.
+     *
+     * @return list<string>
+     */
+    private function requiredScopes(): array
+    {
+        return array_values(array_diff($this->scopes(), [$this->setting('insights_scope')]));
+    }
+
+    /**
+     * The names of the insights metrics to ask for, keyed by the metric
+     * they fill. Empty for a channel without the insights permission.
+     *
+     * @return array<string, string>
+     */
+    private function insightMetricsFor(Channel $channel): array
+    {
+        if (! in_array(self::METRICS_OF_INSIGHTS[0], $this->metricsFor($channel), true)) {
+            return [];
+        }
+
+        return array_filter([
+            Metric::Clicks->value => $this->metricSetting('clicks'),
+            Metric::Reach->value => $this->metricSetting('reach'),
+        ], fn (string $name): bool => preg_match('/^[a-z0-9_]+$/', $name) === 1);
+    }
+
+    /**
+     * Reactions, comments and shares from the answer for a post. Whether a
+     * value is a usable number is decided by MetricReading::fromPlatform().
+     *
+     * Facebook leaves `shares` out for a post nobody shared. So when the
+     * field was asked for and the post was read, a missing `shares` is zero;
+     * a `shares` that is there without a count is not.
+     *
+     * @param  array<array-key, mixed>  $post
+     * @return array<string, mixed>
+     */
+    private function engagementIn(array $post, string $fields): array
+    {
+        $shares = array_key_exists('shares', $post)
+            ? self::dig($post, 'shares', 'count')
+            : (preg_match('/(^|,)\s*shares\b/', $fields) === 1 ? 0 : null);
+
+        return [
+            Metric::Reactions->value => self::dig($post, 'reactions', 'summary', 'total_count'),
+            Metric::Comments->value => self::dig($post, 'comments', 'summary', 'total_count'),
+            Metric::Shares->value => $shares,
+        ];
+    }
+
+    /**
+     * Clicks and reach from the answer of the insights edge: a list of
+     * entries with `name`, `period` and `values`, of which the first holds
+     * `value`. An entry for another period than the one asked for, and a
+     * name that was not asked for, are ignored. An empty list gives nothing.
+     *
+     * @param  array<array-key, mixed>  $insights
+     * @param  array<string, string>  $metrics  metric names of Facebook keyed by Metric value
+     * @return array<string, mixed>
+     */
+    private function insightsIn(array $insights, array $metrics): array
+    {
+        $period = $this->metricSetting('period');
+        $numbers = [];
+
+        foreach (is_array($insights['data'] ?? null) ? $insights['data'] : [] as $entry) {
+            if (! is_array($entry) || ! is_string($entry['name'] ?? null)) {
+                continue;
+            }
+
+            $metric = array_search($entry['name'], $metrics, true);
+
+            if ($metric === false || ($period !== '' && isset($entry['period']) && $entry['period'] !== $period)) {
+                continue;
+            }
+
+            $numbers[$metric] = self::dig($entry, 'values', 0, 'value');
+        }
+
+        return $numbers;
+    }
+
+    /**
+     * @param  array<array-key, mixed>  $data
+     */
+    private static function dig(array $data, string|int ...$path): mixed
+    {
+        foreach ($path as $key) {
+            if (! is_array($data) || ! array_key_exists($key, $data)) {
+                return null;
+            }
+
+            $data = $data[$key];
+        }
+
+        return $data;
+    }
+
+    /**
+     * @return array<array-key, mixed>
+     */
+    private function metricSettings(): array
+    {
+        return is_array($this->settings['metrics'] ?? null) ? $this->settings['metrics'] : [];
+    }
+
+    private function metricSetting(string $key): string
+    {
+        $value = $this->metricSettings()[$key] ?? null;
+
+        return is_scalar($value) ? trim((string) $value) : '';
+    }
+
+    private function positive(mixed $value, int $default): int
+    {
+        return is_numeric($value) && (int) $value > 0 ? (int) $value : $default;
     }
 
     private function setting(string $key): string

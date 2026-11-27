@@ -2,7 +2,7 @@
   "type": "WorkerIdentifiedEvent",
   "aggregateId": "77b426e0-7326-4266-8f23-ac9bd3ebe0c6",
   "version": 1,
-  "timestamp": "2026-11-27T12:25:29.029Z",
+  "timestamp": "2026-11-26T21:10:46.405Z",
   "payload": {
     "hostSessionKey": "8ddc579c324c69c431690a0a024360808aa565fe79c3210c7c091f579bfde1aa",
     "mode": null

@@ -267,17 +267,34 @@ describe('the limit on characters', function () {
         expect(examplesFor($this->workspace, [$this->page])->examples)->toHaveCount(1);
     });
 
-    it('holds for all channels of a request together, oldest approval first', function () {
+    it('holds for each target channel on its own, oldest approval first: one channel does not use up the room of another', function () {
         $profile = channelIn($this->workspace, ['platform' => 'linkedin']);
 
         approvedText($this->workspace, $this->page, str_repeat('a', 400), '2026-11-01 08:00:00');
         approvedText($this->workspace, $profile, str_repeat('b', 400), '2026-11-02 08:00:00');
         approvedText($this->workspace, $this->page, str_repeat('c', 400), '2026-11-03 08:00:00');
+        approvedText($this->workspace, $this->page, str_repeat('d', 400), '2026-11-04 08:00:00');
 
         config(['noongun.drafting.examples.max_characters' => 800]);
 
-        expect(exampleTexts(examplesFor($this->workspace, [$this->page, $profile])))->toBe([str_repeat('c', 400), str_repeat('b', 400)]);
+        expect(exampleTexts(examplesFor($this->workspace, [$this->page, $profile])))
+            ->toBe([str_repeat('d', 400), str_repeat('c', 400), str_repeat('b', 400)]);
     });
+
+    it('gives each channel less when many channels together would hold more than a request may', function (int $configured, int $channels, int $each) {
+        config(['noongun.drafting.examples.max_characters' => $configured]);
+
+        expect(DraftingConfig::exampleCharactersFor($channels))->toBe($each)
+            ->and($channels * $each)->toBeLessThanOrEqual(DraftingConfig::MAX_EXAMPLE_CHARACTERS);
+    })->with([
+        'one channel' => [6000, 1, 6000],
+        'two channels' => [6000, 2, 6000],
+        'six channels' => [6000, 6, 6000],
+        'seven channels' => [6000, 7, 5714],
+        'the most for one channel' => [40000, 1, 40000],
+        'the most, for two' => [40000, 2, 20000],
+        'none' => [0, 3, 0],
+    ]);
 
     it('sends none when the limit is 0', function () {
         approvedText($this->workspace, $this->page, 'An approved text.', '2026-11-01 08:00:00');
@@ -299,9 +316,9 @@ describe('two target channels', function () {
         $selection = examplesFor($this->workspace, [$this->page, $profile]);
 
         expect(array_map(fn (ExamplePost $example): array => $example->toArray(), $selection->examples))->toBe([
-            ['platform' => 'facebook', 'body' => 'For the page.', 'channel_id' => $this->page->id, 'pillar' => 'Craft'],
-            ['platform' => 'linkedin', 'body' => 'For the profile alone.', 'channel_id' => $profile->id, 'pillar' => null],
-            ['platform' => 'linkedin', 'body' => 'For the profile.', 'channel_id' => $profile->id, 'pillar' => 'Craft'],
+            ['platform' => 'facebook', 'body' => 'For the page.', 'channel_id' => $this->page->id, 'pillar' => 'Craft', 'performed_well' => false],
+            ['platform' => 'linkedin', 'body' => 'For the profile alone.', 'channel_id' => $profile->id, 'pillar' => null, 'performed_well' => false],
+            ['platform' => 'linkedin', 'body' => 'For the profile.', 'channel_id' => $profile->id, 'pillar' => 'Craft', 'performed_well' => false],
         ])
             ->and($selection->postIds)->toBe([$both->id, $one->id]);
     });
@@ -365,7 +382,7 @@ describe('another workspace', function () {
         ]));
     });
 
-    it('never reaches the prompt, with either version', function (string $version) {
+    it('never reaches the prompt, with any version', function (string $version) {
         approvedText($this->workspace, $this->page, 'Our own text.', '2026-11-01 08:00:00');
         postInState($this->other, PostState::Draft, [$this->theirPage], CarbonImmutable::parse('2026-12-01 08:00:00'));
 
@@ -379,7 +396,7 @@ describe('another workspace', function () {
         expect($prompt->user)->toContain('Our own text.')
             ->and($prompt->system.$prompt->user)->not->toContain('Their')
             ->and($request->alsoPlanned)->toBe([]);
-    })->with(['v1', 'v2']);
+    })->with(['v1', 'v2', 'v3']);
 });
 
 describe('the prompt', function () {
@@ -483,7 +500,7 @@ describe('the prompt', function () {
             ->and(substr_count($user, '</example_posts>'))->toBe(1)
             ->and($user)->not->toContain('<system>')
             ->not->toMatch('~<\s*/\s*example\s*>(?!\n(<example |</example_posts>))~i');
-    })->with(['v1', 'v2']);
+    })->with(['v1', 'v2', 'v3']);
 
     it('keeps the pillar of an example inside its attribute', function () {
         $user = $this->renderer->render(requestCarrying([
@@ -536,8 +553,8 @@ describe('a draft run', function () {
         $stored = json_decode(freshRun($run)->request, true);
 
         expect(array_map(fn (ExamplePost $example): array => $example->toArray(), $request->examples))->toBe([
-            ['platform' => 'facebook', 'body' => 'Approved second.', 'channel_id' => $this->page->id, 'pillar' => null],
-            ['platform' => 'facebook', 'body' => 'Approved first.', 'channel_id' => $this->page->id, 'pillar' => 'Craft'],
+            ['platform' => 'facebook', 'body' => 'Approved second.', 'channel_id' => $this->page->id, 'pillar' => null, 'performed_well' => false],
+            ['platform' => 'facebook', 'body' => 'Approved first.', 'channel_id' => $this->page->id, 'pillar' => 'Craft', 'performed_well' => false],
         ])
             ->and(freshRun($run)->status)->toBe('succeeded')
             ->and($stored['example_post_ids'])->toBe([$first->id, $second->id])
@@ -826,10 +843,10 @@ describe('the code', function () {
             ->toContain("->on('posts.workspace_id', '=', 'post_variants.workspace_id')");
     });
 
-    it('builds an example from a text, a platform, a pillar name and a channel of the request, and has room for nothing else', function () {
+    it('builds an example from a text, a platform, a pillar name, a channel of the request and whether it did well, and has room for nothing else', function () {
         $reflection = new ReflectionClass(ExamplePost::class);
 
         expect(array_map(fn (ReflectionProperty $property): string => $property->getName(), $reflection->getProperties()))
-            ->toEqualCanonicalizing(['platform', 'body', 'channelId', 'pillar']);
+            ->toEqualCanonicalizing(['platform', 'body', 'channelId', 'pillar', 'performedWell']);
     });
 });

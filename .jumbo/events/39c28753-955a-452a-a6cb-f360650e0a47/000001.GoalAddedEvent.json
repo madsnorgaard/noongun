@@ -1,0 +1,21 @@
+{
+  "type": "GoalAddedEvent",
+  "aggregateId": "39c28753-955a-452a-a6cb-f360650e0a47",
+  "version": 1,
+  "timestamp": "2026-11-26T20:32:32.815Z",
+  "payload": {
+    "title": "LinkedIn real connect and spike (#5)",
+    "objective": "Prove the LinkedIn adapter against the live API: one real connect and the spike script, then replace the hand-written fixtures with recorded ones.",
+    "successCriteria": [
+      "A self-serve LinkedIn app with Share on LinkedIn and Sign In with LinkedIn using OpenID Connect connects a profile",
+      "The spike publishes and deletes a text post and a link post",
+      "What the token answer lists as scope, the permalink form and the character limit are recorded in docs/platform-notes/linkedin.md",
+      "Fixtures are replaced by recorded answers",
+      "Thumbnail for link posts is built or explicitly deferred to the media model"
+    ],
+    "scopeIn": [],
+    "scopeOut": [],
+    "status": "defined"
+  },
+  "seq": 1
+}

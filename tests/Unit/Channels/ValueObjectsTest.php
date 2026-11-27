@@ -34,6 +34,7 @@ it('describes what a platform accepts', function () {
             'alt_text_length' => null,
             'media_link_rule' => 'in_text',
             'media_upload_lifetime' => null,
+            'metrics' => [],
         ]);
 });
 

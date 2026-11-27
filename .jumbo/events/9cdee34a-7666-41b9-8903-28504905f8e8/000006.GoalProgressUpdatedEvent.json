@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "9cdee34a-7666-41b9-8903-28504905f8e8",
+  "version": 6,
+  "timestamp": "2026-11-26T21:10:47.034Z",
+  "payload": {
+    "taskDescription": "First real publish on 2026-11-26: a drafted, edited and approved post went out to the Page at its scheduled minute (22:10 Europe/Copenhagen, sent seven seconds past), with external id and permalink recorded, the link shown as a preview card, and no error in the log. Seen on the Page by the owner. Still open: visibility from a signed-out browser while the Meta app is in Development mode, what Live mode requires, photo posts and deletion."
+  },
+  "seq": 6
+}

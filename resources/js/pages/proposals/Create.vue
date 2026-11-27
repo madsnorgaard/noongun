@@ -38,7 +38,7 @@ const props = defineProps<{
     /** Expected and worst case cost by the price table, or null without a price. */
     cost: { currency: string; expected: string; worst: string } | null;
     /** How many approved posts go along for each channel, or null when none do. */
-    examples: { per_channel: number } | null;
+    examples: { per_channel: number; top_days: number | null } | null;
     limits: {
         posts_per_proposal: number;
         runs_per_day: number;
@@ -431,9 +431,11 @@ function start(): void {
                             </dt>
                             <dd class="text-sm">
                                 {{
-                                    examples.per_channel === 1
-                                        ? 'The last approved post for each channel is sent as an example.'
-                                        : `The last ${examples.per_channel} approved posts for each channel are sent as examples.`
+                                    examples.top_days !== null
+                                        ? `Up to ${examples.per_channel} approved posts for each channel are sent as examples: the most recent, and those of the last ${examples.top_days} days that did best.`
+                                        : examples.per_channel === 1
+                                          ? 'The last approved post for each channel is sent as an example.'
+                                          : `The last ${examples.per_channel} approved posts for each channel are sent as examples.`
                                 }}
                             </dd>
                         </div>

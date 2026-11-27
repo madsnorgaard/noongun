@@ -47,7 +47,8 @@ class LlmKeyController extends Controller
      * entry for each part of DraftRequest::toArray(), which is all a prompt
      * is built from. A test holds the two together, so a part that is
      * added to the request has to be named here. ":count" is the most
-     * examples for one channel; sentToProvider() fills it in.
+     * examples for one channel; sentToProvider() fills it in, and says
+     * EXAMPLES_BY_RECENCY instead when no example is chosen for how it did.
      *
      * @var array<string, string>
      */
@@ -58,9 +59,12 @@ class LlmKeyController extends Controller
         'idea' => 'the idea with its notes',
         'source_url' => 'the source link',
         'channels' => 'the platform and the limits of each target channel',
-        'examples' => 'the texts of the posts this workspace approved most recently as examples, at most :count for each target channel',
+        'examples' => 'the texts of posts this workspace approved as examples, at most :count for each target channel: the most recent ones and those that did best, the latter marked as such without their numbers',
         'also_planned' => 'the pillar, the idea title and the first line of the other posts of the same week',
     ];
+
+    /** What is said of the examples when they are chosen by recency alone. */
+    public const EXAMPLES_BY_RECENCY = 'the texts of the posts this workspace approved most recently as examples, at most :count for each target channel';
 
     /**
      * The list as the page prints it. Without examples
@@ -75,6 +79,8 @@ class LlmKeyController extends Controller
 
         if ($perChannel === 0 || DraftingConfig::exampleCharacters() === 0) {
             unset($parts['examples']);
+        } elseif (DraftingConfig::exampleTopSlots() === 0) {
+            $parts['examples'] = self::EXAMPLES_BY_RECENCY;
         }
 
         return array_values(array_map(

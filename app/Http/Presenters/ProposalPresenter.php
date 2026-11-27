@@ -195,26 +195,36 @@ final class ProposalPresenter
 
     /**
      * What the pages say about examples: how many approved posts a draft
-     * for these channels carries for each channel at most. Null when
+     * for these channels carries for each channel at most, and, when the
+     * choice made now holds a post that was chosen because it did well,
+     * how many days back such a post may have been published. Null when
      * examples are turned off or the workspace has no approved text that
      * would be sent for these channels now.
      *
+     * It is the choice a draft run makes (SelectExamplePosts), made now. A
+     * run makes it again when it writes.
+     *
      * @param  list<Channel>  $channels  every channel the plan drafts for
-     * @return array{per_channel: int}|null
+     * @return array{per_channel: int, top_days: int|null}|null
      */
     public function examples(array $channels): ?array
     {
-        if ($channels === [] || $this->selectExamples->handle($channels)->isEmpty()) {
+        $selection = $channels === [] ? null : $this->selectExamples->handle($channels);
+
+        if ($selection === null || $selection->isEmpty()) {
             return null;
         }
 
-        return ['per_channel' => DraftingConfig::examplesPerChannel()];
+        return [
+            'per_channel' => DraftingConfig::examplesPerChannel(),
+            'top_days' => $selection->performancePostIds === [] ? null : DraftingConfig::exampleTopDays(),
+        ];
     }
 
     /**
      * The same for a planned week: every channel one of its posts is for.
      *
-     * @return array{per_channel: int}|null
+     * @return array{per_channel: int, top_days: int|null}|null
      */
     public function examplesOfWeek(WeekPlan $plan): ?array
     {

@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "6bb5e2a3-9379-46ac-9ffa-8e227172935f",
+  "version": 8,
+  "timestamp": "2026-11-26T20:54:31.256Z",
+  "payload": {
+    "taskDescription": "Foundation merged: ReadsMetrics contract, MetricReading (null is not zero), metric_snapshots stored on change, FetchMetricsJob and noongun:poll-metrics on its own queue using at most 20 percent of the rate limit, Performance queries and EngagementScore, ADR 0016. 2450 tests. Meta docs checked 2026-11-26: reach and clicks need read_insights; post_impressions is gone, reach is post_total_media_view_unique."
+  },
+  "seq": 8
+}

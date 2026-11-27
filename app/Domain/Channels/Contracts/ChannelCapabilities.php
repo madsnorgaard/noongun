@@ -26,6 +26,7 @@ final readonly class ChannelCapabilities
      * @param  int|null  $altTextLength  longest alternative text of an image in characters; null when the platform takes none
      * @param  MediaLinkRule  $mediaLinkRule  what happens to the link of a post that has images
      * @param  int|null  $mediaUploadLifetime  seconds the platform keeps an uploaded image that is on no post yet; null when it keeps it. An upload older than this is made again.
+     * @param  list<Metric>  $metrics  the numbers the platform can give about a published post; empty means none can be read. An adapter that lists any also implements ReadsMetrics
      */
     public function __construct(
         public int $maxBodyLength,
@@ -40,6 +41,7 @@ final readonly class ChannelCapabilities
         public ?int $altTextLength = null,
         public MediaLinkRule $mediaLinkRule = MediaLinkRule::InText,
         public ?int $mediaUploadLifetime = null,
+        public array $metrics = [],
     ) {
         if ($maxBodyLength < 1 || $maxMediaItems < 0) {
             throw new InvalidArgumentException('Capabilities need a positive body length and no negative media count.');
@@ -78,6 +80,16 @@ final readonly class ChannelCapabilities
     public function supportsMedia(string $mimeType): bool
     {
         return $this->maxMediaItems > 0 && in_array(strtolower($mimeType), $this->mediaTypes, true);
+    }
+
+    public function readsMetrics(): bool
+    {
+        return $this->metrics !== [];
+    }
+
+    public function gives(Metric $metric): bool
+    {
+        return in_array($metric, $this->metrics, true);
     }
 
     /**
@@ -142,7 +154,7 @@ final readonly class ChannelCapabilities
     }
 
     /**
-     * @return array{max_body_length: int, media_types: list<string>, max_media_items: int, link_previews: bool, rate_limit: array{max_calls: int, per_seconds: int}|null, link_title_length: int|null, link_description_length: int|null, max_media_bytes: int|null, max_media_pixels: int|null, alt_text_length: int|null, media_link_rule: string, media_upload_lifetime: int|null}
+     * @return array{max_body_length: int, media_types: list<string>, max_media_items: int, link_previews: bool, rate_limit: array{max_calls: int, per_seconds: int}|null, link_title_length: int|null, link_description_length: int|null, max_media_bytes: int|null, max_media_pixels: int|null, alt_text_length: int|null, media_link_rule: string, media_upload_lifetime: int|null, metrics: list<string>}
      */
     public function toArray(): array
     {
@@ -159,6 +171,7 @@ final readonly class ChannelCapabilities
             'alt_text_length' => $this->altTextLength,
             'media_link_rule' => $this->mediaLinkRule->value,
             'media_upload_lifetime' => $this->mediaUploadLifetime,
+            'metrics' => array_map(fn (Metric $metric): string => $metric->value, $this->metrics),
         ];
     }
 }

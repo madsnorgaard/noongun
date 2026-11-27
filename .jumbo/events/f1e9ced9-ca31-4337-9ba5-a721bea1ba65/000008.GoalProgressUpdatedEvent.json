@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "f1e9ced9-ca31-4337-9ba5-a721bea1ba65",
+  "version": 8,
+  "timestamp": "2026-11-26T21:05:26.739Z",
+  "payload": {
+    "taskDescription": "Merged in PR #24 and deployed to the home server on 2026-11-26. Examples set to 5 per channel, 6000 characters. Both scheduled posts become examples once they count as approved. Not yet seen in a real draft."
+  },
+  "seq": 8
+}

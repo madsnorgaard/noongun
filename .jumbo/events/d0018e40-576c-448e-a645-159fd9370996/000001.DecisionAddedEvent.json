@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "d0018e40-576c-448e-a645-159fd9370996",
+  "version": 1,
+  "timestamp": "2026-11-27T07:38:36.655Z",
+  "payload": {
+    "title": "Ranking and comparison use only numbers every post has",
+    "context": "M6 review (#6): clicks need an extra Facebook permission, so scores with clicks favoured Pages and periods that had it; fresh posts and tiny samples were ranked as if comparable; reach was summed although it counts unique people.",
+    "rationale": "Every ranking, on the Insights page and in the choice of examples for drafting, uses reactions, comments and shares only. A post competes after 48 hours, and nothing is called best or marked as having done well until a channel has five such measured posts. Pillar averages are per post on one channel. Reach is never added up.",
+    "alternatives": [],
+    "consequences": "Clicks and reach are shown where given and never ranked. The two minimums are settings without data behind them yet."
+  },
+  "seq": 1
+}

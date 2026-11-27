@@ -58,11 +58,37 @@ class PromptRenderer
             $post,
         ), $data['also_planned']);
 
+        $user = self::tidy($this->views->make($views['user'], $data)->render());
+
         return new RenderedPrompt(
             system: self::tidy($this->views->make($views['system'], $data)->render()),
-            user: self::tidy($this->views->make($views['user'], $data)->render()),
+            user: $user,
             version: $version,
+            marksPerformance: $this->tellsWhichDidWell($views['user'], $data, $user),
         );
+    }
+
+    /**
+     * Whether the template made anything of the examples that did well:
+     * whether the same request without that knowledge renders to another
+     * text. It asks the template and not the name of the version or the
+     * words of the prompt, so a version from before the mark answers no,
+     * and nothing a brief or an example says can answer yes.
+     *
+     * @param  view-string  $view
+     * @param  array<string, mixed>  $data
+     */
+    private function tellsWhichDidWell(string $view, array $data, string $rendered): bool
+    {
+        $examples = is_array($data['examples'] ?? null) ? $data['examples'] : [];
+
+        if (! in_array(true, array_column($examples, 'performed_well'), true)) {
+            return false;
+        }
+
+        $data['examples'] = array_map(fn (array $example): array => [...$example, 'performed_well' => false], $examples);
+
+        return self::tidy($this->views->make($view, $data)->render()) !== $rendered;
     }
 
     public function has(string $version): bool
