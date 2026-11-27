@@ -120,7 +120,7 @@ final readonly class DraftRequest
      *     idea: array{title: string, notes: string|null}|null,
      *     source_url: string|null,
      *     channels: non-empty-list<array{channel_id: int, platform: string, max_body_length: int, link_previews: bool, media_types: list<string>, max_media_items: int, link_title_length: int|null, link_description_length: int|null, voice_rules: list<string>}>,
-     *     examples: list<array{platform: string, body: string, channel_id: int|null, pillar: string|null}>,
+     *     examples: list<array{platform: string, body: string, channel_id: int|null, pillar: string|null, performed_well: bool}>,
      *     also_planned: list<array{pillar: string|null, idea: string|null, opening: string|null}>
      * }
      */

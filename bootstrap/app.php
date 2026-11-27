@@ -15,7 +15,7 @@ use Illuminate\Http\Request;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
-        web: [__DIR__.'/../routes/web.php', __DIR__.'/../routes/channels.php', __DIR__.'/../routes/posts.php', __DIR__.'/../routes/brief.php', __DIR__.'/../routes/llm.php', __DIR__.'/../routes/proposals.php'],
+        web: [__DIR__.'/../routes/web.php', __DIR__.'/../routes/channels.php', __DIR__.'/../routes/posts.php', __DIR__.'/../routes/brief.php', __DIR__.'/../routes/llm.php', __DIR__.'/../routes/proposals.php', __DIR__.'/../routes/insights.php'],
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
@@ -23,6 +23,7 @@ return Application::configure(basePath: dirname(__DIR__))
         __DIR__.'/../app/Domain/Scheduling/Console',
         __DIR__.'/../app/Domain/Channels/Console',
         __DIR__.'/../app/Domain/Drafting/Console',
+        __DIR__.'/../app/Domain/Insights/Console',
     ])
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->prependToPriorityList(

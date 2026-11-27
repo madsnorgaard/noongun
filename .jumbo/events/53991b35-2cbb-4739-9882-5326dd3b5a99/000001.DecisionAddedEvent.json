@@ -1,0 +1,17 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "53991b35-2cbb-4739-9882-5326dd3b5a99",
+  "version": 1,
+  "timestamp": "2026-11-26T20:54:31.564Z",
+  "payload": {
+    "title": "ADR 0016: Insights",
+    "context": "M6 (#6): engagement metrics for published posts, read through channel adapters and fed back into drafting.",
+    "rationale": "Metric reading is an optional interface ReadsMetrics plus a capability list, so LinkedIn honestly has none until M9. A reading keeps null apart from zero. Snapshots are stored only when numbers change and polling stops after three weeks. One engagement score, a weighted sum of reactions, comments, shares and clicks without reach, is computed on read. Polling runs on its own queue, uses a bounded share of the channel rate limit and never changes a post or a channel status, so publishing keeps priority.",
+    "alternatives": [
+      "fetchMetrics on ChannelAdapter for every platform",
+      "A snapshot row per poll"
+    ],
+    "consequences": "Reach and clicks on Facebook need read_insights, which is not requested by default; reach is Meta's unique viewers metric. Replaces the fetchMetrics shape in the brief."
+  },
+  "seq": 1
+}

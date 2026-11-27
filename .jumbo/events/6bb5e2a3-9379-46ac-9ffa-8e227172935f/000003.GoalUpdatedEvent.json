@@ -1,0 +1,22 @@
+{
+  "type": "GoalUpdatedEvent",
+  "aggregateId": "6bb5e2a3-9379-46ac-9ffa-8e227172935f",
+  "version": 3,
+  "timestamp": "2026-11-26T20:32:33.127Z",
+  "payload": {
+    "objective": "Poll engagement metrics for published posts, show how posts and pillars perform, and let performance decide which approved posts are sent as examples when drafting. LinkedIn metrics wait for M9 (ADR 0007).",
+    "successCriteria": [
+      "FetchMetricsJob polls Facebook through ChannelAdapter::fetchMetrics on a schedule, within rate limits",
+      "LinkedIn channels show that metrics are not available yet, without errors",
+      "metric_snapshots stored per variant over time, with workspace isolation",
+      "Per-post and per-pillar performance summary in the UI",
+      "Examples sent with a draft request are ranked by performance, building on the approved-posts examples of #22",
+      "The permissions metrics need are confirmed against the current Meta documentation and recorded",
+      "Tests with metric fixtures and workspace isolation tests"
+    ],
+    "prerequisiteGoals": [
+      "304e5dfe-c8eb-428d-9f9b-a50f2bd1e5c0"
+    ]
+  },
+  "seq": 3
+}

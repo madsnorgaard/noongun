@@ -5,9 +5,11 @@ namespace App\Domain\Channels\Adapters\Facebook;
 use App\Domain\Channels\Exceptions\ChannelException;
 use App\Domain\Channels\Support\NetworkFailure;
 use GuzzleHttp\Exception\TransferException;
+use GuzzleHttp\Psr7\Response as Psr7Response;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Factory;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Str;
 use SensitiveParameter;
 
 /**
@@ -52,6 +54,29 @@ final class GraphClient
      * which does not say how far the call got before it failed.
      */
     private const TRANSIENT_CODES = [1, 2, 341];
+
+    /**
+     * "Unsupported get request. Object with ID ... does not exist, cannot be
+     * loaded due to missing permissions, or does not support this
+     * operation" (100 with subcode 33) and "Some of the aliases you
+     * requested do not exist" (803). Neither is in the documentation that
+     * was read; they are what the API is known to answer for an object that
+     * was deleted. See docs/platform-notes/meta.md.
+     */
+    private const NOT_FOUND_CODE = 100;
+
+    private const NOT_FOUND_SUBCODE = 33;
+
+    private const UNKNOWN_ALIAS_CODE = 803;
+
+    /** Most characters of an error message from Facebook that are kept. */
+    private const MESSAGE_LENGTH = 300;
+
+    /** Most characters of an error type or trace id that are kept. */
+    private const LABEL_LENGTH = 64;
+
+    /** Headers in which Facebook says how long to wait. */
+    private const WAIT_HEADERS = ['X-Business-Use-Case-Usage', 'Retry-After'];
 
     /**
      * @param  string  $platform  platform name for exceptions
@@ -99,6 +124,83 @@ final class GraphClient
         string $failure = ChannelException::class,
         bool $safeToRepeat = false,
     ): array {
+        [$response, $endpoint, $secrets] = $this->request($method, $path, $parameters, $token, $failure, $safeToRepeat);
+
+        $body = $response->json();
+
+        if ($response->successful() && is_array($body) && ! isset($body['error'])) {
+            return $body;
+        }
+
+        throw $this->failure($response, $failure, $endpoint, $secrets, $safeToRepeat);
+    }
+
+    /**
+     * Reads several objects in one request to the batch endpoint, and gives
+     * one answer for each read, in the same order. Null is a read that
+     * Facebook did not finish in time; it can be asked again.
+     *
+     * A read that failed does not fail the others: its answer says how
+     * (GraphOutcome) and carries the exception that send() would have
+     * thrown. Only a failure of the batch itself is thrown.
+     *
+     * Every read still counts as one call against the rate limit. Only GET
+     * is offered, so a batch is always safe to repeat, and the token travels
+     * in the form body, not in a URL. Paths are relative to the configured
+     * address: no absolute address is ever put into a batch.
+     *
+     * @param  list<array{path: string, query: array<string, string>}>  $reads  at most the 50 that Facebook allows in one batch
+     * @return list<GraphAnswer|null>
+     *
+     * @throws ChannelException
+     */
+    public function batch(array $reads, #[SensitiveParameter] string $token): array
+    {
+        if ($reads === []) {
+            return [];
+        }
+
+        $batch = array_map(fn (array $read): array => [
+            'method' => 'GET',
+            'relative_url' => ltrim($read['path'], '/').($read['query'] === [] ? '' : '?'.http_build_query($read['query'], '', '&', PHP_QUERY_RFC3986)),
+        ], $reads);
+
+        [$response, $endpoint, $secrets] = $this->request('POST', '', [
+            'batch' => json_encode($batch, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+            'include_headers' => 'true',
+        ], $token, ChannelException::class, true);
+
+        $body = $response->json();
+
+        if (! $response->successful() || ! is_array($body) || ! array_is_list($body)) {
+            throw $this->failure($response, ChannelException::class, $endpoint.' (batch)', $secrets, true);
+        }
+
+        $answers = [];
+
+        foreach ($reads as $index => $read) {
+            $answers[] = $this->answer($body[$index] ?? null, 'GET /'.ltrim($read['path'], '/'), $secrets, $response);
+        }
+
+        return $answers;
+    }
+
+    /**
+     * @param  'GET'|'POST'|'DELETE'  $method
+     * @param  array<string, string|int>  $parameters
+     * @param  class-string<ChannelException>  $failure
+     * @return array{Response, string, list<string>} the response, the endpoint for messages, and the credentials that were sent
+     *
+     * @throws ChannelException
+     */
+    private function request(
+        string $method,
+        string $path,
+        #[SensitiveParameter] array $parameters,
+        #[SensitiveParameter] ?string $token,
+        string $failure,
+        bool $safeToRepeat,
+    ): array {
         if ($token !== null) {
             $parameters['access_token'] = $token;
             $parameters['appsecret_proof'] = hash_hmac('sha256', $token, $this->appSecret);
@@ -107,10 +209,13 @@ final class GraphClient
         $secrets = $this->secretsIn($parameters);
         $endpoint = $method.' /'.ltrim($path, '/');
 
+        // A redirect is never followed: the next address would get the
+        // token. The Graph API answers where it is asked.
         $request = $this->http
             ->baseUrl($this->baseUrl)
             ->timeout($this->timeout)
             ->connectTimeout(min(10, $this->timeout))
+            ->withoutRedirecting()
             ->acceptJson();
 
         try {
@@ -141,13 +246,59 @@ final class GraphClient
             );
         }
 
-        $body = $response->json();
+        return [$response, $endpoint, $secrets];
+    }
 
-        if ($response->successful() && is_array($body) && ! isset($body['error'])) {
-            return $body;
+    /**
+     * One entry of a batch answer: `code`, `headers` (a list of name and
+     * value) and `body`, a JSON document as a string. Anything else than
+     * that shape is treated as a read that was not finished.
+     *
+     * @param  list<string>  $secrets
+     */
+    private function answer(mixed $entry, string $endpoint, #[SensitiveParameter] array $secrets, Response $batch): ?GraphAnswer
+    {
+        if (! is_array($entry)) {
+            return null;
         }
 
-        throw $this->failure($response, $failure, $endpoint, $secrets, $safeToRepeat);
+        $status = is_numeric($entry['code'] ?? null) ? (int) $entry['code'] : 0;
+        $raw = $entry['body'] ?? null;
+        $body = is_string($raw) ? json_decode($raw, true) : $raw;
+
+        if ($status >= 200 && $status < 300 && is_array($body) && ! isset($body['error'])) {
+            return new GraphAnswer(GraphOutcome::Answered, $body);
+        }
+
+        $headers = [];
+
+        foreach (is_array($entry['headers'] ?? null) ? $entry['headers'] : [] as $header) {
+            if (is_array($header) && is_string($header['name'] ?? null) && is_string($header['value'] ?? null)) {
+                $headers[$header['name']] = $header['value'];
+            }
+        }
+
+        // The advice on how long to wait may be on the batch instead of on
+        // the read that was turned away.
+        $sent = array_change_key_case($headers);
+
+        foreach (self::WAIT_HEADERS as $name) {
+            if (! array_key_exists(strtolower($name), $sent) && $batch->header($name) !== '') {
+                $headers[$name] = $batch->header($name);
+            }
+        }
+
+        $response = new Response(new Psr7Response(
+            $status >= 100 && $status <= 599 ? $status : 502,
+            $headers,
+            is_string($raw) ? $raw : (string) json_encode($body),
+        ));
+
+        return new GraphAnswer(
+            $this->outcome($response),
+            [],
+            $this->failure($response, ChannelException::class, $endpoint, $secrets, true),
+        );
     }
 
     /**
@@ -177,15 +328,17 @@ final class GraphClient
 
         $code = is_numeric($error['code'] ?? null) ? (int) $error['code'] : null;
         $subcode = is_numeric($error['error_subcode'] ?? null) ? (int) $error['error_subcode'] : null;
-        $said = is_string($error['message'] ?? null) ? $this->scrub($error['message'], $secrets) : null;
+        // Text from Facebook is cut to a length that fits a log line and a
+        // row: an answer can be as long as its sender likes.
+        $said = $this->said($error['message'] ?? null, self::MESSAGE_LENGTH, $secrets);
 
         $context = [
             'endpoint' => $endpoint,
             'http_status' => $response->status(),
             'code' => $code,
             'subcode' => $subcode,
-            'type' => is_string($error['type'] ?? null) ? $error['type'] : null,
-            'fbtrace_id' => is_string($error['fbtrace_id'] ?? null) ? $error['fbtrace_id'] : null,
+            'type' => $this->said($error['type'] ?? null, self::LABEL_LENGTH, $secrets),
+            'fbtrace_id' => $this->said($error['fbtrace_id'] ?? null, self::LABEL_LENGTH, $secrets),
         ];
 
         $detail = $said === null ? '' : ' Facebook said: '.$said;
@@ -205,7 +358,7 @@ final class GraphClient
                 $this->platform,
                 'Facebook is limiting requests at the moment.'.$detail,
                 $this->retryAfter($response),
-                $context,
+                [...$context, 'rate_limited' => true],
             );
         }
 
@@ -218,7 +371,7 @@ final class GraphClient
                 $this->platform,
                 $response->status() === 429 ? 'Facebook is limiting requests at the moment.'.$detail : 'Facebook had a temporary problem.'.$detail,
                 $this->retryAfter($response),
-                $context,
+                $response->status() === 429 ? [...$context, 'rate_limited' => true] : $context,
             );
         }
 
@@ -247,11 +400,59 @@ final class GraphClient
         return $failure::permanent($this->platform, 'Facebook refused the request.'.$detail, $context);
     }
 
+    /**
+     * A text field of a Graph error, without credentials and no longer than
+     * $length characters. Null when Facebook sent none.
+     *
+     * @param  list<string>  $secrets
+     */
+    private function said(mixed $value, int $length, #[SensitiveParameter] array $secrets): ?string
+    {
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        return Str::limit($this->scrub($value, $secrets), $length);
+    }
+
+    /**
+     * How one read of a batch failed, for a caller that treats a missing
+     * permission, a missing object and a refused token differently.
+     */
+    private function outcome(Response $response): GraphOutcome
+    {
+        $error = $response->json('error');
+        $error = is_array($error) ? $error : [];
+
+        $code = is_numeric($error['code'] ?? null) ? (int) $error['code'] : null;
+        $subcode = is_numeric($error['error_subcode'] ?? null) ? (int) $error['error_subcode'] : null;
+
+        return match (true) {
+            $this->tokenProblem($code, $subcode) => GraphOutcome::TokenRefused,
+            $this->permissionProblem($code) => GraphOutcome::PermissionMissing,
+            $this->rateLimited($code), $response->status() === 429 => GraphOutcome::RateLimited,
+            $code === self::NOT_FOUND_CODE && $subcode === self::NOT_FOUND_SUBCODE,
+            $code === self::UNKNOWN_ALIAS_CODE,
+            $response->status() === 404 => GraphOutcome::NotFound,
+            in_array($code, self::TRANSIENT_CODES, true), $response->serverError() => GraphOutcome::Temporary,
+            default => GraphOutcome::Refused,
+        };
+    }
+
     private function tokenOrPermissionProblem(?int $code, ?int $subcode): bool
     {
+        return $this->tokenProblem($code, $subcode) || $this->permissionProblem($code);
+    }
+
+    private function tokenProblem(?int $code, ?int $subcode): bool
+    {
         return in_array($code, self::TOKEN_CODES, true)
-            || in_array($subcode, self::TOKEN_SUBCODES, true)
-            || $code === self::PERMISSION_CODE
+            || in_array($subcode, self::TOKEN_SUBCODES, true);
+    }
+
+    private function permissionProblem(?int $code): bool
+    {
+        return $code === self::PERMISSION_CODE
             || ($code !== null && $code >= 200 && $code <= 299);
     }
 

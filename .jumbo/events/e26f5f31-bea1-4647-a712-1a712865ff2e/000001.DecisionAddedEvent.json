@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "e26f5f31-bea1-4647-a712-1a712865ff2e",
+  "version": 1,
+  "timestamp": "2026-11-27T07:38:36.945Z",
+  "payload": {
+    "title": "Old posts are read once",
+    "context": "M6 review (#6): posts published before insights existed would have stayed unmeasured for ever, leaving the 28 and 90 day views empty.",
+    "rationale": "A published post that was never read is read once even when older than the reading window, up to a year back by default, after posts still in their window and inside the same rate share.",
+    "alternatives": [],
+    "consequences": "The first days after deploy fill in history gradually. NOONGUN_INSIGHTS_BACKFILL_DAYS set to 0 turns it off."
+  },
+  "seq": 1
+}

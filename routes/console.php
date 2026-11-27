@@ -17,6 +17,15 @@ Schedule::command('noongun:recover-stuck-posts')->everyFiveMinutes()->withoutOve
 // Channels. Removes accounts that a connect returned and nobody confirmed.
 Schedule::command('noongun:discard-pending-channels')->everyFiveMinutes()->withoutOverlapping(10);
 
+// Channels. Queues a check of the token of every active channel about once a
+// day, a bounded number each hour. The check itself runs in a worker, so a
+// slow platform never holds the scheduler.
+Schedule::command('noongun:check-channel-tokens')->hourlyAt(17)->withoutOverlapping(10);
+
 // Drafting. Marks draft runs that lost their worker as failed. It never asks
 // a provider again.
 Schedule::command('noongun:recover-stuck-draft-runs')->everyFiveMinutes()->withoutOverlapping(10);
+
+// Insights. Queues a reading of the numbers of published posts that are due,
+// one job per channel. The job decides again what it reads, under a lock.
+Schedule::command('noongun:poll-metrics')->everyTenMinutes()->withoutOverlapping(10);

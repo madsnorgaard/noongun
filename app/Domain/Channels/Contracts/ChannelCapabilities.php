@@ -18,6 +18,7 @@ final readonly class ChannelCapabilities
      * @param  RateLimit|null  $rateLimit  publishing rate limit per channel, null when unknown
      * @param  int|null  $linkTitleLength  longest title of a link card the author must supply, in characters; null when the platform builds the card itself or shows none
      * @param  int|null  $linkDescriptionLength  longest description of such a card; only read when $linkTitleLength is set
+     * @param  list<Metric>  $metrics  the numbers the platform can give about a published post; empty means none can be read. An adapter that lists any also implements ReadsMetrics
      */
     public function __construct(
         public int $maxBodyLength,
@@ -27,6 +28,7 @@ final readonly class ChannelCapabilities
         public ?RateLimit $rateLimit = null,
         public ?int $linkTitleLength = null,
         public ?int $linkDescriptionLength = null,
+        public array $metrics = [],
     ) {
         if ($maxBodyLength < 1 || $maxMediaItems < 0) {
             throw new InvalidArgumentException('Capabilities need a positive body length and no negative media count.');
@@ -56,8 +58,18 @@ final readonly class ChannelCapabilities
         return $this->maxMediaItems > 0 && in_array(strtolower($mimeType), $this->mediaTypes, true);
     }
 
+    public function readsMetrics(): bool
+    {
+        return $this->metrics !== [];
+    }
+
+    public function gives(Metric $metric): bool
+    {
+        return in_array($metric, $this->metrics, true);
+    }
+
     /**
-     * @return array{max_body_length: int, media_types: list<string>, max_media_items: int, link_previews: bool, rate_limit: array{max_calls: int, per_seconds: int}|null, link_title_length: int|null, link_description_length: int|null}
+     * @return array{max_body_length: int, media_types: list<string>, max_media_items: int, link_previews: bool, rate_limit: array{max_calls: int, per_seconds: int}|null, link_title_length: int|null, link_description_length: int|null, metrics: list<string>}
      */
     public function toArray(): array
     {
@@ -69,6 +81,7 @@ final readonly class ChannelCapabilities
             'rate_limit' => $this->rateLimit?->toArray(),
             'link_title_length' => $this->linkTitleLength,
             'link_description_length' => $this->linkDescriptionLength,
+            'metrics' => array_map(fn (Metric $metric): string => $metric->value, $this->metrics),
         ];
     }
 }

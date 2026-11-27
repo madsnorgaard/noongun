@@ -9,6 +9,7 @@ import {
     ref,
     watch,
 } from 'vue';
+import PostNumbers from '@/components/insights/PostNumbers.vue';
 import InputError from '@/components/InputError.vue';
 import PostStateBadge from '@/components/posts/PostStateBadge.vue';
 import PostTexts from '@/components/posts/PostTexts.vue';
@@ -41,7 +42,8 @@ import {
     update,
 } from '@/routes/posts';
 import { index as queue } from '@/routes/queue';
-import type { ChannelOption, Post } from '@/types/posts';
+import type { PostInsights, Reading } from '@/types/insights';
+import type { ChannelOption, Post, PostOrigin } from '@/types/posts';
 
 defineOptions({
     layout: {
@@ -58,11 +60,53 @@ defineOptions({
     },
 });
 
+/**
+ * What is true of the examples a draft was written with: how many there
+ * were, how many of them were chosen for how they did, whether the model
+ * was told which, and how many more did not fit.
+ */
+function examplesLine(origin: PostOrigin): string {
+    const chosen = origin.examples_by_performance;
+    const leftOut = origin.examples_performance_left_out;
+    const parts = [
+        `Written with ${
+            origin.examples === 1
+                ? '1 earlier post as an example'
+                : `${origin.examples} earlier posts as examples`
+        }${
+            chosen > 0
+                ? `, ${chosen} of them chosen because they did well.`
+                : ' of your voice.'
+        }`,
+    ];
+
+    if (chosen > 0 && !origin.examples_performance_marked) {
+        parts.push(
+            chosen === 1
+                ? 'The model was not told which one.'
+                : 'The model was not told which ones.',
+        );
+    }
+
+    if (leftOut > 0) {
+        parts.push(
+            leftOut === 1
+                ? '1 more that was chosen for doing well was left out, because of the character limit for examples.'
+                : `${leftOut} more that were chosen for doing well were left out, because of the character limit for examples.`,
+        );
+    }
+
+    return parts.join(' ');
+}
+
 const props = defineProps<{
     post: Post | null;
     channels: ChannelOption[];
     /** A planned time to start a new post with, on the workspace clock. */
     planned: string | null;
+    /** How the texts that are on a platform did. Null before that. */
+    insights: PostInsights | null;
+    reading: Reading | null;
 }>();
 
 type VariantFields = {
@@ -789,6 +833,12 @@ const locked = computed(() => {
                         <PostTexts :post="post" side-by-side />
                     </section>
                 </template>
+
+                <PostNumbers
+                    v-if="insights && reading"
+                    :insights="insights"
+                    :reading="reading"
+                />
             </div>
 
             <aside
@@ -1260,13 +1310,7 @@ const locked = computed(() => {
                                 Examples
                             </dt>
                             <dd>
-                                Written with
-                                {{
-                                    post.origin.examples === 1
-                                        ? '1 earlier post as an example'
-                                        : `${post.origin.examples} earlier posts as examples`
-                                }}
-                                of your voice.
+                                {{ examplesLine(post.origin) }}
                             </dd>
                         </div>
                         <div

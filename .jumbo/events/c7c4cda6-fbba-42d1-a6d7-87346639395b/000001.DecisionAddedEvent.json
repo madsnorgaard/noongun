@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "c7c4cda6-fbba-42d1-a6d7-87346639395b",
+  "version": 1,
+  "timestamp": "2026-11-27T07:38:36.059Z",
+  "payload": {
+    "title": "A stored number is kept when the platform stops giving it",
+    "context": "M6 review (#6): an empty or refused insights answer replaced a stored reach or clicks number with nothing, for every post under three weeks.",
+    "rationale": "A number a variant has is carried forward while the channel still claims that metric, and marked with the time it was last given. It becomes empty only when the channel no longer lists the metric. One post answering with a permission error is no reading for that post, not a failure of the whole Page.",
+    "alternatives": [],
+    "consequences": "Pages show a kept number as kept, with the date. metric_snapshots.carried holds the marker."
+  },
+  "seq": 1
+}

@@ -121,9 +121,10 @@ function describedBy(...ids: (string | false)[]): string | undefined {
         class="grid content-start gap-4 rounded-2xl bg-card p-5.5 shadow-xs"
         :aria-labelledby="`column-${channel.id}`"
     >
-        <header
-            class="flex flex-wrap items-start justify-between gap-x-4 gap-y-3"
-        >
+        <!-- The copy control always has its own row under the name, so that
+             it is in the same place in every column, whatever the length
+             of the names. -->
+        <header class="grid gap-3">
             <div class="grid min-w-0 gap-1.5">
                 <h2
                     :id="`column-${channel.id}`"
@@ -141,6 +142,7 @@ function describedBy(...ids: (string | false)[]): string | undefined {
                 type="button"
                 size="sm"
                 variant="outline"
+                class="w-fit max-w-full"
                 :disabled="sources[0].body === body"
                 :aria-label="`Copy the text for ${sources[0].name} into the text for ${channel.display_name}`"
                 :data-test="`copy-into-${channel.id}`"

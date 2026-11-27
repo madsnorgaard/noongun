@@ -1,0 +1,10 @@
+{
+  "type": "GoalProgressUpdatedEvent",
+  "aggregateId": "473ede65-f4b3-42a8-84ba-2736114baa8d",
+  "version": 7,
+  "timestamp": "2026-11-26T21:10:45.474Z",
+  "payload": {
+    "taskDescription": "First real publish on 2026-11-26: a drafted, edited and approved post went out to the Page at its scheduled minute (22:10 Europe/Copenhagen, sent seven seconds past), with external id and permalink recorded, the link shown as a preview card, and no error in the log. Seen on the Page by the owner."
+  },
+  "seq": 7
+}

@@ -219,6 +219,9 @@ it later.
 `connect`, `publish`, `delete` and `refreshToken`. `fetchMetrics()` is added in M6
 together with `MetricSnapshot`.
 
+Changed by ADR 0016: metrics did not become a method of `ChannelAdapter`. They are
+the optional interface `ReadsMetrics`.
+
 ## Consequences
 
 - The scheduler needs one query: `scheduled` posts with `scheduled_at` in the past,

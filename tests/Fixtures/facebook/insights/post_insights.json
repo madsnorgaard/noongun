@@ -1,0 +1,32 @@
+{
+    "data": [
+        {
+            "name": "post_clicks",
+            "period": "lifetime",
+            "values": [
+                {
+                    "value": 40
+                }
+            ],
+            "title": "Lifetime Post Clicks",
+            "description": "Lifetime: The number of times people clicked on anywhere in your posts without generating a story.",
+            "id": "100000000000001_900000000000001/insights/post_clicks/lifetime"
+        },
+        {
+            "name": "post_total_media_view_unique",
+            "period": "lifetime",
+            "values": [
+                {
+                    "value": 900
+                }
+            ],
+            "title": "Lifetime Post Unique Media Viewers",
+            "description": "Lifetime: The number of total unique media viewers for FB post.",
+            "id": "100000000000001_900000000000001/insights/post_total_media_view_unique/lifetime"
+        }
+    ],
+    "paging": {
+        "previous": "https://graph.facebook.test/v99.0/100000000000001_900000000000001/insights?access_token=must-never-be-requested&since=1&until=2",
+        "next": "https://elsewhere.example/v99.0/100000000000001_900000000000001/insights?access_token=must-never-be-requested&since=2&until=3"
+    }
+}

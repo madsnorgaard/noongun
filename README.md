@@ -310,10 +310,12 @@ there: Noon Gun estimates cost, it does not cap what the provider charges.
 | `NOONGUN_DRAFT_OPENAI_EFFORT` | empty | The reasoning effort for OpenAI: `minimal`, `low`, `medium`, `high`, `xhigh` or `max`, as far as the model accepts it. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call. |
-| `NOONGUN_DRAFT_PROMPT_VERSION` | `v2` | The folder under `resources/prompts/draft/` that holds the prompt. `v2` asks for a text written for each channel; `v1` is kept for the runs that used it. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v3` | The folder under `resources/prompts/draft/` that holds the prompt. `v3` asks for a text written for each channel and tells the model which examples did well; `v2` and `v1` are kept for the runs that used them. |
 | `NOONGUN_DRAFT_PRICES`, `NOONGUN_DRAFT_PRICE_CURRENCY` | empty, `USD` | The price table for the cost estimate. |
-| `NOONGUN_DRAFT_EXAMPLES` | `5` | How many of the texts the workspace approved most recently are sent with a draft request as examples, for each target channel. `0` sends none. Never more than 10. |
-| `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` | `6000` | The most characters all examples of one request hold together. Over that, the oldest are left out; a text is never cut. `0` sends none. Never more than 40000. |
+| `NOONGUN_DRAFT_EXAMPLES` | `5` | How many texts the workspace approved are sent with a draft request as examples, for each target channel. `0` sends none. Never more than 10. |
+| `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` | `6000` | The most characters the examples of one target channel hold together. Over that, the texts chosen for how they did are left out first, then the oldest; a text is never cut. `0` sends none. Never more than 40000, also for all channels of one request together. |
+| `NOONGUN_DRAFT_EXAMPLES_TOP_SHARE` | `50` | The share of the examples of a channel, in percent, that goes to the approved posts that did best instead of the most recent ones. Rounded down, and one example always stays with the most recent post. `0` takes only the most recent. |
+| `NOONGUN_DRAFT_EXAMPLES_TOP_DAYS` | `90` | How many days back a post may have been published to be taken as an example for how it did. `0` takes none that way. Never more than 365. |
 
 ### What is sent to the provider
 
@@ -329,12 +331,13 @@ conversation. The prompt is built in one place
   does not open it, and neither does the model;
 - for each target channel its number, its platform and the limits of that
   platform, such as the longest text;
-- the texts the workspace approved most recently, as examples of its voice
-  and of what has already been said: for each target channel the last
-  `NOONGUN_DRAFT_EXAMPLES` texts of that channel (see "Examples from approved
-  posts" below). With each text goes the platform, the number of the channel
-  when the draft is for that channel too, and the name of the pillar the post
-  had. `NOONGUN_DRAFT_EXAMPLES=0` sends none;
+- texts the workspace approved, as examples of its voice and of what has
+  already been said: for each target channel `NOONGUN_DRAFT_EXAMPLES` texts
+  of that channel, the most recent ones and those that did best (see
+  "Examples from approved posts" below). With each text goes the platform,
+  the number of the channel when the draft is for that channel too, the name
+  of the pillar the post had, and a mark when the text was chosen because it
+  did well. `NOONGUN_DRAFT_EXAMPLES=0` sends none;
 - a few words about the other posts of the same week, so that the same post
   is not written twice: for each at most 60 characters of the name of its
   pillar, of the title of its idea and of the first line of its text, for at
@@ -348,7 +351,9 @@ Never sent: platform tokens, API keys, the names of your Pages and profiles,
 the name of the workspace, names or email addresses of users, and anything
 that belongs to another workspace. Of an earlier post the text is sent and
 nothing else about it: not its link or the card of the link, not who wrote or
-approved it, not when, not its address on the platform and no figures. The API
+approved it, not when, not its address on the platform and no figures: of
+how a post did, the provider learns only whether it was marked as one that did
+well, never a score or a count. The API
 key travels in a request header to the provider and nowhere else. It is not
 written to logs, error messages, the queue or the draft run.
 
@@ -368,13 +373,15 @@ phrases, and that it must never copy a sentence.
   published, published, or failed on the way to the platform. A draft that
   waits for approval, a rejected post and a post that was returned to draft
   do not count.
-- For each channel a draft is for, the last `NOONGUN_DRAFT_EXAMPLES` texts of
-  that channel are taken, newest approval first. A channel with fewer is
-  topped up with texts of your other channels on the same platform. Nothing
-  is taken from another platform.
-- All examples of one request hold at most `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS`
-  characters together. Over that, the oldest are left out. A text is never
-  cut.
+- For each channel a draft is for, `NOONGUN_DRAFT_EXAMPLES` texts of that
+  channel are taken. Some of them are the posts that did best (see below),
+  the rest are the most recent, newest approval first. A channel with fewer
+  is topped up with the most recent texts of your other channels on the same
+  platform. Nothing is taken from another platform.
+- The examples of one channel hold at most `NOONGUN_DRAFT_EXAMPLES_MAX_CHARS`
+  characters together, so a draft for two channels has room for both. Over
+  that, the texts chosen for how they did are left out first, then the
+  oldest. A text is never cut.
 - They are chosen when the draft is written, not when it is asked for. The
   drafts of one proposed week therefore do not see each other as examples
   until you approve them. What they do get is the list of the other posts of
@@ -383,11 +390,52 @@ phrases, and that it must never copy a sentence.
 - Only texts of your own workspace can be chosen.
 
 The pages that start a draft say when examples are sent. The editor says on
-a drafted post how many earlier posts it was written with; the draft run
-keeps the numbers of those posts and no text.
+a drafted post how many earlier posts it was written with and how many of
+them were chosen because they did well; the draft run keeps the numbers of
+those posts and no text.
 
-Noon Gun does not yet know how a post did. From the insights milestone on,
-the examples are chosen by that, not only by how recent they are.
+#### Posts that did well
+
+Once Noon Gun reads how your posts do (see "Insights"), some of the examples
+are chosen for that:
+
+- Of the examples of a channel, `NOONGUN_DRAFT_EXAMPLES_TOP_SHARE` percent
+  (default 50, which is 2 of 5) go to posts that did well. The others stay
+  with the most recent posts, and at least one always does, so a draft still
+  sees what you said last.
+- A post did well when its score on that channel is above the average of
+  your approved posts on the same channel, among those published in the last
+  `NOONGUN_DRAFT_EXAMPLES_TOP_DAYS` days (default 90). After that a post is no
+  longer chosen for how it did, however well it did.
+- For this comparison the score is reactions, comments and shares. Clicks and
+  reach are left out, because not every post of a channel has them: they need
+  a permission that can be added later.
+- A post is compared only when it has been out for
+  `NOONGUN_INSIGHTS_MIN_AGE_HOURS` hours (default 48), and nothing is chosen
+  this way until the channel has `NOONGUN_INSIGHTS_MIN_MEASURED_POSTS` such
+  posts (default 5). Until then the examples are the most recent posts.
+- At most one post of each pillar is chosen this way, so that the drafts do
+  not all learn from the same theme.
+- A post without numbers is not a post that did badly. It is simply not
+  chosen this way and can still be one of the most recent. On a channel
+  without numbers, such as LinkedIn today, and in a new workspace, the
+  examples are the most recent posts, as before.
+- A post of another channel is never chosen for how it did there. Numbers of
+  two Pages cannot be compared.
+- The model is told which examples did well and to learn from how they are
+  made: the opening, one clear point, a concrete detail. It is also told not
+  to write about their topics again and not to reuse their wording. It is not
+  sent any number.
+
+`NOONGUN_DRAFT_EXAMPLES_TOP_SHARE=0` turns this off and takes only the most
+recent posts. Marking the examples needs prompt `v3`, the default; with `v2`
+the same posts are sent without the mark, and the draft run notes that.
+
+Reactions and comments come from anyone who can see a post, so someone
+outside your workspace can make one post look better than it did. What that
+changes is small: one of your own approved posts is marked as an example that
+did well, for one pillar on one channel. No text of anyone else is read or
+sent, and you still approve every draft.
 
 ### What comes back
 
@@ -469,7 +517,7 @@ The model must support structured outputs. A smaller model is cheaper and
 faster and writes plainer drafts. Thinking counts against
 `NOONGUN_DRAFT_MAX_TOKENS`, so if answers are cut off, raise that limit or set
 a lower `NOONGUN_DRAFT_ANTHROPIC_EFFORT`. To change what the model is told,
-copy `resources/prompts/draft/v2` to a new folder, edit it and point
+copy `resources/prompts/draft/v3` to a new folder, edit it and point
 `NOONGUN_DRAFT_PROMPT_VERSION` at it. Details are in
 `docs/platform-notes/llm.md` and `docs/adr/0011-drafting-contract.md`.
 
@@ -609,9 +657,11 @@ Before the start the page shows two figures from the price table:
   more than this, however long the brief is.
 
 Both figures include the examples from approved posts. The expected cost
-counts the examples that would be sent now. The worst case counts the most
+counts the examples that would be sent now, chosen the way a draft run
+chooses them. The worst case counts the most
 there could be, at four tokens for each of the
-`NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` characters, because a post can be approved
+`NOONGUN_DRAFT_EXAMPLES_MAX_CHARS` characters of each channel the post is
+for, because a post can be approved
 between the start and the moment a draft is written. Lower that setting or
 `NOONGUN_DRAFT_EXAMPLES` to lower both.
 
@@ -660,6 +710,188 @@ Three things to know when operating it:
   operator. Keys are removed before anything is logged. When the page says
   that drafting is not set up on this instance, the log line "Drafting is not
   set up, so a week cannot be proposed." names the setting that is missing.
+
+## Insights
+
+Noon Gun reads how published posts did: reactions, comments, shares, clicks
+and reach. See `docs/adr/0016-insights.md`.
+
+### How often
+
+The `scheduler` container runs `noongun:poll-metrics` every ten minutes. It
+queues one `FetchMetricsJob` for each active channel that has a published
+post due for a reading, and the job reads those posts in one call. A post is
+read every hour during its first day, once a day until it is three weeks old,
+and not after that (`NOONGUN_INSIGHTS_CADENCE`). That is about 45 readings
+for one post.
+
+### What is read from Facebook
+
+| Number | Where it comes from | Needs |
+|---|---|---|
+| Reactions | The total of all reactions on the post. | Nothing more than a connected Page. |
+| Comments | The total of all comments on the post, replies included. | Nothing more. |
+| Shares | How often the post was shared. | Nothing more. |
+| Clicks | The post insight `post_clicks`: clicks anywhere on the post. | `read_insights` |
+| Reach | The post insight `post_total_media_view_unique`: how many people saw the post. | `read_insights` |
+
+Only totals are asked for, never who reacted or commented. The posts of a
+channel are read together, at most 25 posts in one run, and Meta counts
+each post as one call against the rate limit of the Page (two with reach and
+clicks).
+
+Meta gives reach and clicks only for Pages with 100 or more likes, updates
+reach about once a day, and renames these metrics from time to time. When it
+does, set the new names with `FACEBOOK_METRIC_CLICKS` and
+`FACEBOOK_METRIC_REACH`; the log line "Facebook refused to give the insights
+of a post" says that a name is no longer accepted.
+
+### Getting reach and clicks: `read_insights`
+
+A Page as it is connected by default gives reactions, comments and shares.
+Reach and clicks stay empty until the Page has one more permission:
+
+1. In the Meta app at developers.facebook.com, add the permission
+   `read_insights` to the use case **Manage everything on your Page**.
+2. Add it to the permissions Noon Gun asks for, in `.env`:
+
+   ```
+   FACEBOOK_SCOPES=pages_show_list,pages_read_engagement,pages_manage_posts,read_insights
+   ```
+
+   If `FACEBOOK_SCOPES` already has other entries, such as
+   `business_management`, keep them and add `read_insights` at the end.
+3. Restart with `docker compose up -d`.
+4. Open **Channels**, choose **Connect Facebook** again and allow the new
+   permission. The Page keeps publishing while you do this.
+
+The person who connects must be able to see the insights of the Page on
+Facebook. From the next reading on, reach and clicks are filled for posts
+that are younger than three weeks. Numbers of the time before are not
+fetched.
+
+`read_insights` is optional in every respect: a Page that is connected
+without it, or that loses it later, publishes as before and only lacks these
+two numbers. It is never a reason for "connect again".
+
+### What to know when operating it
+
+- **A number that is missing is not zero.** A platform that does not give a
+  number, or a channel without the permission for it, leaves it empty.
+- **LinkedIn gives no numbers yet.** A self-serve LinkedIn app may not read
+  them (see `docs/adr/0007-linkedin-self-serve-until-m9.md`). LinkedIn posts
+  are shown as not measured.
+- **Publishing comes first.** Reading uses at most
+  `NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT` of a channel's rate limit and stops
+  for a channel when the platform asks it to wait. It runs on its own queue
+  (`insights`) with one worker of its own (`supervisor-insights` in
+  `config/horizon.php`), so readings and publishing never wait for each
+  other. A failed reading changes nothing about a post or a channel; it is
+  logged and tried again later.
+- **A token that Facebook refuses for reading** pauses reading for that Page
+  for six hours and changes nothing else. Whether the Page needs to be
+  connected again is decided by publishing and by the token check (see
+  "Checking tokens"), never by a reading. Connecting the Page again, or a
+  token check that finds the token good, ends the pause at once.
+- **A number a post has is not lost when Facebook stops giving it.** When
+  Meta renames a metric, or the permission is removed on Facebook, the
+  insights of a post come back empty. Reach and clicks then keep their last
+  values for as long as the Page is recorded as having `read_insights`, and
+  the post says since when they are no longer fresh. They become empty only
+  when the token check has recorded that the permission is gone.
+- **One post that Facebook will not show** does not stop the others. It gets
+  no numbers and moves to the back of the line.
+- **Posts from before insights existed** are read once: a published post that
+  was never read is read a single time when it is up to
+  `NOONGUN_INSIGHTS_BACKFILL_DAYS` old (365), after the posts that are due
+  anyway and within the same share of the rate limit. With a long history
+  this takes a few runs. Such a post is not read again.
+- **A post that was deleted on Facebook** is not read for ever. After
+  Facebook has answered three times in a row that it does not have the post
+  (`NOONGUN_INSIGHTS_GONE_AFTER`), Noon Gun stops asking about it. The numbers
+  it had are kept. Connecting the Page again makes Noon Gun ask once more.
+- **When the workers are down** the queue does not fill up: at most one
+  reading for each channel waits in it.
+- A reading is only stored when a number changed, so the table grows with
+  what happens to a post, not with how often it is read.
+- The answers of Meta that this is built on were read in its documentation,
+  not yet recorded from a real Page. `scripts/spike/facebook/` holds a script
+  that prints them for one post; `docs/platform-notes/meta.md` lists what is
+  still assumed.
+
+### Where the numbers are shown
+
+Everyone in the workspace who can see posts can see their numbers, viewers
+included. Nothing on these pages changes anything. Only an owner is told how
+to change the set-up (a setting, a permission, connecting again); everyone
+else is told whom to ask.
+
+- **Insights** (`/insights`) covers the last 7, 28 or 90 days, counted in days
+  of the workspace timezone, today included. It shows what the period added up
+  to, a table of averages for each pillar, the posts with the highest score,
+  and a table for each channel that also says why a channel has no numbers.
+  The pillars and the top posts can be narrowed to one channel. Period and
+  channel are in the address (`/insights?period=7&channel=3`), so a view can
+  be linked.
+- **A published post** (`/posts/{id}`) shows its numbers for each channel, a
+  total when it is on several, when they were last checked, and the readings
+  over time.
+- **History** in the queue shows the total of each published post on one line.
+- **The dashboard** shows the totals of the last 7 days once a post of that
+  week is measured, and the best post once enough posts compete.
+
+How to read them:
+
+- A dash is a number the platform did not give. It is left out of totals and
+  averages. A column that would hold only dashes is not shown, and the page
+  says which numbers are missing.
+- **The score** on these pages is reactions x 1 + comments x 2 + shares x 3,
+  with the weights from `NOONGUN_INSIGHTS_WEIGHT_*`. These are the numbers
+  every measured channel gives, and the same score drafting ranks its
+  examples by. Clicks are shown and not counted: a Page with `read_insights`
+  would otherwise outrank one without it for the same post.
+- **Reach is never added up.** It counts people, and the same person sees
+  several posts and follows several Pages. Reach is shown for one post on one
+  channel, or as the average for one post.
+- **An average is for one post on one channel.** A post that went to three
+  Pages counts three times, so a pillar does not look better because it went
+  to more channels. An average is taken over the posts that have the number,
+  and the page says "from 3 of 5" when that is fewer than the measured ones.
+  Pages of different sizes are still mixed under "All channels": choose one
+  channel to compare pillars like with like.
+- **Young posts are left out of comparisons.** A post competes in the pillar
+  averages, in the top posts and for "best post" once it is
+  `NOONGUN_INSIGHTS_MIN_AGE_HOURS` old (48 by default), because it is still
+  collecting reactions before that.
+- **No claim from a handful of posts.** Below
+  `NOONGUN_INSIGHTS_MIN_MEASURED_POSTS` (5 by default) the list is headed
+  "Measured posts" instead of "Top posts", a pillar is marked "Too few to
+  compare" and listed after the others, and the dashboard names no best post.
+- A post that was just published says when its first reading is expected: by
+  the next run of `noongun:poll-metrics`, about ten minutes after it went out.
+  If it says that a reading is due and nothing changes within the hour, check
+  that the `scheduler` and `horizon` containers are running.
+- When reading is paused for a channel, the post and the channel table say
+  why and until when: the platform asked for a wait, it did not accept the
+  access of the channel for reading (connecting again starts reading at once,
+  and it is tried again by itself), or a reading did not get through.
+- A number the platform stopped giving is kept and marked "kept", and the
+  post page says since when the platform has not given it.
+- A post older than the last step of `NOONGUN_INSIGHTS_CADENCE` says "Last
+  measured on" with the time of its last reading. One that was never read
+  says that it waits for the one reading older posts get
+  (`NOONGUN_INSIGHTS_BACKFILL_DAYS`; such posts are read after the young
+  ones, newest first), that the platform gave no numbers when it was asked,
+  or that it went out too long ago to be read at all.
+- A channel that needs to be connected again keeps its last numbers, and the
+  pages say that they are not updated until it is connected.
+- A post that Facebook reported as gone `NOONGUN_INSIGHTS_GONE_AFTER` times
+  says so and keeps the numbers it had. Connecting the Page again makes Noon
+  Gun ask once more.
+- A Page without `read_insights` has no clicks and no reach, and the pages say
+  once that these two need one more permission, which is optional.
+- With `NOONGUN_INSIGHTS_ENABLED=false` the pages say that insights are turned
+  off and still show what was read before.
 
 ## Running on a home server
 
@@ -816,7 +1048,8 @@ it there.
 | `REDIS_HOST` | `redis` | Redis host. |
 | `FACEBOOK_APP_ID`, `FACEBOOK_APP_SECRET` | empty | Credentials of the Meta app this instance connects Pages with. |
 | `FACEBOOK_GRAPH_VERSION` | `v27.0` | Graph API version used for every Facebook call. |
-| `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. |
+| `FACEBOOK_SCOPES` | `pages_show_list,pages_read_engagement,pages_manage_posts` | Permissions requested when a Page is connected, comma separated. A Page must be granted all of them, except `read_insights`, which only adds the reach and clicks of posts (see "Insights"). |
+| `FACEBOOK_METRIC_CLICKS`, `FACEBOOK_METRIC_REACH` | `post_clicks`, `post_total_media_view_unique` | Names of the post insights that are read as clicks and reach. Change them when Meta renames a metric. An empty name means the number is not asked for. |
 | `FACEBOOK_GRAPH_URL`, `FACEBOOK_DIALOG_URL` | `https://graph.facebook.com`, `https://www.facebook.com` | Base addresses of the Graph API and the login dialog. Change only for testing. |
 | `LINKEDIN_CLIENT_ID`, `LINKEDIN_CLIENT_SECRET` | empty | Credentials of the LinkedIn app this instance connects profiles with. |
 | `LINKEDIN_API_VERSION` | `202611` | Value of the `Linkedin-Version` header on every LinkedIn API call, `YYYYMM`. LinkedIn refuses a version about a year after it came out. |
@@ -830,6 +1063,20 @@ it there.
 | `REDIS_QUEUE_RETRY_AFTER`, `DB_QUEUE_RETRY_AFTER` | `300` | Seconds after which the queue treats a running job as lost. Must be greater than the longest time limit of any job: 255 seconds for a drafting job with the defaults, 105 for a publishing job. Raise it when you raise `NOONGUN_DRAFT_TIMEOUT`. |
 | `NOONGUN_PUBLISH_STUCK_AFTER_MINUTES` | `30` | How long a post may stay in the publishing state without a sign of life from its job before it is treated as failed. The largest backoff value is added to this, because a job that waits for a retry is silent. |
 | `NOONGUN_PUBLISH_QUEUE` | `default` | Queue that publishing jobs run on. If you change it, add the queue to the supervisor in `config/horizon.php`. |
+| `NOONGUN_INSIGHTS_ENABLED` | `true` | Whether the numbers of published posts are read at all. `false` stops the scheduler command and the job. |
+| `NOONGUN_INSIGHTS_CADENCE` | `24:60,504:1440` | How often a published post is read, by its age, as `hours:minutes` pairs: until the post is that many hours old, read it every that many minutes. A post older than the last pair is not read any more. When any pair cannot be read, the whole default is used and the log says so. |
+| `NOONGUN_INSIGHTS_BACKFILL_DAYS` | `365` | A published post that was never read is read once when it is older than the cadence reaches and at most this many days old. `0` turns that off. |
+| `NOONGUN_TOKEN_CHECK_ENABLED` | `true` | Whether the tokens of connected channels are checked with their platform (see "Checking tokens"). |
+| `NOONGUN_TOKEN_CHECK_EVERY_HOURS` | `24` | Hours between two checks of the token of one channel. |
+| `NOONGUN_INSIGHTS_VARIANTS_PER_RUN` | `25` | Most posts of one channel that one run of the job reads. Never more than 500. |
+| `NOONGUN_INSIGHTS_RATE_LIMIT_PERCENT` | `20` | The share of a channel's rate limit that reading may use, so that publishing always has calls left. From 1 to 90. |
+| `NOONGUN_INSIGHTS_PAUSE_MINUTES` | `60` | How long a channel is left alone after the platform refused a reading. A longer wait the platform asks for is respected, up to a day. |
+| `NOONGUN_INSIGHTS_TIMEOUT` | `45` | Time limit in seconds for one run of the job. Must stay below the `timeout` of `supervisor-insights` in `config/horizon.php`. |
+| `NOONGUN_INSIGHTS_QUEUE` | `insights` | Queue that the job runs on. `supervisor-insights` in `config/horizon.php` reads the same setting, so the queue always has a worker. Do not set it to the publishing queue. |
+| `NOONGUN_INSIGHTS_MIN_AGE_HOURS` | `48` | How long a post must have been out before it is compared with other posts. A younger post is never chosen as an example for how it did and does not count towards the average. Never more than 720. |
+| `NOONGUN_INSIGHTS_MIN_MEASURED_POSTS` | `5` | How many measured posts of that age a channel needs before any of them is said to have done well. Below that, drafting takes its examples by recency alone. Never fewer than 2. |
+| `NOONGUN_INSIGHTS_GONE_AFTER` | `3` | How many times in a row a platform must answer that a post is gone before Noon Gun stops asking for its numbers. |
+| `NOONGUN_INSIGHTS_WEIGHT_REACTIONS`, `_COMMENTS`, `_SHARES`, `_CLICKS` | `1`, `2`, `3`, `1` | Weights of the engagement score, the one number posts are compared by: each count times its weight, added up. Reach is not part of it. |
 | `ANTHROPIC_API_KEY` | empty | The instance key for drafting with Claude, used by every workspace that has no key of its own. Leave empty when every workspace brings its own key. |
 | `OPENAI_API_KEY` | empty | The instance key for drafting with OpenAI, used by every workspace that drafts with OpenAI and has no OpenAI key of its own. |
 | `NOONGUN_DRAFT_PROVIDER` | `anthropic` | The LLM provider a workspace drafts with until its owner chooses another. Must be listed under `drafting.providers` in `config/noongun.php`. |
@@ -840,7 +1087,7 @@ it there.
 | `NOONGUN_DRAFT_ANTHROPIC_EFFORT` | empty | How much work the model puts into one answer: `low`, `medium`, `high`, `xhigh` or `max`. Empty leaves it to the default of the model. |
 | `NOONGUN_DRAFT_MAX_TOKENS` | `16000` | Most tokens one answer may use, including the tokens the model spends on thinking. |
 | `NOONGUN_DRAFT_TIMEOUT` | `120` | Seconds allowed for one call to the provider. |
-| `NOONGUN_DRAFT_PROMPT_VERSION` | `v2` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
+| `NOONGUN_DRAFT_PROMPT_VERSION` | `v3` | Which folder under `resources/prompts/draft/` holds the prompt. Stored on every draft run. |
 | `NOONGUN_DRAFT_PRICES` | empty | Prices per million tokens, as JSON, added to the table in `config/noongun.php`: `{"anthropic":{"model-name":{"input":4,"output":20}}}`. Only used to estimate what a draft run cost. |
 | `NOONGUN_DRAFT_PRICE_CURRENCY` | `USD` | Currency of the price table. |
 | `NOONGUN_DRAFT_MAX_POSTS_PER_PROPOSAL` | `14` | Most posts one "Propose a week" drafts. |
@@ -944,6 +1191,31 @@ keeps the history of what was published.
 Only owners of a workspace can connect and disconnect channels, because a
 channel holds the access to an account on a platform. Editors and viewers can
 see them.
+
+## Checking tokens
+
+A platform can withdraw a token at any time, and a permission can be added or
+removed on its side. So that Noon Gun does not find out only when a post
+fails, the `scheduler` container runs `noongun:check-channel-tokens` every
+hour. It queues a check for each active channel that was not checked in the
+last 24 hours (`NOONGUN_TOKEN_CHECK_EVERY_HOURS`), at most 50 in one run, and
+the check runs in the `horizon` container on the `insights` queue.
+
+A check asks the platform about the token (`debug_token` for a Facebook Page,
+token introspection for a LinkedIn profile) and records the permissions and
+the expiry it reports. That is how a Page that gained or lost `read_insights`
+starts or stops getting reach and clicks.
+
+A channel is marked **Needs reconnecting** only when the platform says so in
+so many words: the token is not valid, it has expired, or a permission that
+publishing needs is no longer among the ones it names. Everything else
+leaves the channel exactly as it was and is tried again the next day: a
+platform that cannot be reached, a rate limit, an answer that cannot be read,
+wrong app credentials on this instance. The log line "The token of a channel
+could not be checked" names the reason. A check never makes a channel active
+again; only connecting it does.
+
+`NOONGUN_TOKEN_CHECK_ENABLED=false` turns the checks off.
 
 ## Connecting a LinkedIn profile
 

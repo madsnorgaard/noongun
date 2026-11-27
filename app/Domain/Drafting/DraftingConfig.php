@@ -15,8 +15,15 @@ final class DraftingConfig
     /** The most approved posts one target channel can get as examples, whatever is configured. */
     public const MAX_EXAMPLES_PER_CHANNEL = 10;
 
-    /** The most characters the examples of one request can hold, whatever is configured. */
+    /**
+     * The most characters the examples of one target channel can hold,
+     * whatever is configured, and the most the examples of one request
+     * can hold together, however many channels it is for.
+     */
     public const MAX_EXAMPLE_CHARACTERS = 40000;
+
+    /** The furthest back, in days, a post can be taken as an example for how it did, whatever is configured. */
+    public const MAX_EXAMPLE_TOP_DAYS = 365;
 
     public static function defaultProvider(): ?string
     {
@@ -148,8 +155,8 @@ final class DraftingConfig
     }
 
     /**
-     * How many recently approved posts a draft request carries as examples
-     * for each target channel. 0 sends none.
+     * How many approved posts a draft request carries as examples for each
+     * target channel. 0 sends none.
      */
     public static function examplesPerChannel(): int
     {
@@ -157,12 +164,53 @@ final class DraftingConfig
     }
 
     /**
-     * The most characters all examples of one request hold together. 0
-     * sends none.
+     * The most characters the examples of one target channel hold
+     * together, as configured. 0 sends none. A request for several
+     * channels uses exampleCharactersFor().
      */
     public static function exampleCharacters(): int
     {
         return self::bounded('examples.max_characters', 6000, self::MAX_EXAMPLE_CHARACTERS);
+    }
+
+    /**
+     * The most characters the examples of one target channel hold in a
+     * request for that many channels: the configured limit, or less when
+     * the channels together would hold more than MAX_EXAMPLE_CHARACTERS.
+     * So each channel has room of its own, and a request never holds more
+     * than this times the number of its channels.
+     */
+    public static function exampleCharactersFor(int $channels): int
+    {
+        return min(self::exampleCharacters(), intdiv(self::MAX_EXAMPLE_CHARACTERS, max(1, $channels)));
+    }
+
+    /**
+     * How many of the examples of one target channel are chosen for how
+     * they did instead of for being recent: the configured share of
+     * examplesPerChannel(), rounded down, and always at least one fewer
+     * than that, so that the most recent approved text is always among
+     * them. 0 chooses by recency only, which is what a share of 0, a
+     * window of 0 days and a single example for a channel all give.
+     */
+    public static function exampleTopSlots(): int
+    {
+        $perChannel = self::examplesPerChannel();
+
+        if ($perChannel < 2 || self::exampleTopDays() === 0) {
+            return 0;
+        }
+
+        return min($perChannel - 1, intdiv($perChannel * self::bounded('examples.top_share', 50, 100), 100));
+    }
+
+    /**
+     * How many days back a post may have been published to be chosen as
+     * an example for how it did. 0 chooses none that way.
+     */
+    public static function exampleTopDays(): int
+    {
+        return self::bounded('examples.top_days', 90, self::MAX_EXAMPLE_TOP_DAYS);
     }
 
     public static function currency(): string

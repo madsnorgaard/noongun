@@ -2,11 +2,13 @@
 
 namespace App\Http\Controllers\Posts;
 
+use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\PostState;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Http\Controllers\Controller;
 use App\Http\Controllers\Posts\Concerns\ActsOnPosts;
+use App\Http\Presenters\InsightsPresenter;
 use App\Http\Presenters\PostPresenter;
 use App\Http\Presenters\ProposalPresenter;
 use Illuminate\Database\Eloquent\Builder;
@@ -32,6 +34,7 @@ class QueueController extends Controller
     public function __construct(
         private readonly PostPresenter $presenter,
         private readonly ProposalPresenter $proposals,
+        private readonly InsightsPresenter $insights,
     ) {}
 
     public function index(Request $request): Response
@@ -54,6 +57,10 @@ class QueueController extends Controller
                 'totals' => null,
                 'history' => [
                     'posts' => array_map($present, $history->items()),
+                    // The numbers of the published posts on this page,
+                    // keyed by post id, read in one query.
+                    'insights' => (object) $this->insights->forPosts($history->items()),
+                    'reading' => $this->insights->reading($request->user()?->can('create', Channel::class) ?? false),
                     'previous' => $history->previousPageUrl(),
                     'next' => $history->nextPageUrl(),
                 ],

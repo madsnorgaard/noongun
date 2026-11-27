@@ -1,0 +1,14 @@
+{
+  "type": "DecisionAddedEvent",
+  "aggregateId": "4ab8a90d-efde-4166-b479-d6a9e37bf6c6",
+  "version": 1,
+  "timestamp": "2026-11-27T07:38:36.364Z",
+  "payload": {
+    "title": "Channel tokens are checked daily, and only a definite answer changes a channel",
+    "context": "M6 review (#6): the token check the documents relied on had no caller, so scopes went stale and a revoked token was noticed only by a failed publish.",
+    "rationale": "A scheduled command checks each active channel once a day on the insights queue, updates scopes and expiry, and marks a channel as needing reconnection only when the platform says the token is invalid, expired, or lacks a required scope. An outage, a rate limit or an ambiguous answer leaves the channel untouched, because a wrong mark stops publishing.",
+    "alternatives": [],
+    "consequences": "It never reactivates a channel. A good check ends a reading pause. Token checks share the insights worker and never compete with publishing."
+  },
+  "seq": 1
+}

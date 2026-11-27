@@ -73,6 +73,12 @@ export type PostOrigin = {
     left_out: string[];
     /** How many approved posts were sent along as examples of the voice. */
     examples: number;
+    /** How many of those were chosen because they did well with readers. */
+    examples_by_performance: number;
+    /** Whether the prompt told the model which examples did well. */
+    examples_performance_marked: boolean;
+    /** How many chosen for doing well were not sent, for the character limit. */
+    examples_performance_left_out: number;
     drafted_at: string | null;
     /** Tokens the draft used, as the provider reported them. */
     input_tokens: number | null;

@@ -8,10 +8,11 @@ namespace App\Domain\Drafting;
  * approved, for one channel.
  *
  * It carries the platform, the text, the pillar name when the post had
- * one, and the id of the channel only when that channel is a target of the
- * same request. No post id, no author, no link, no metrics.
- * Actions\SelectExamplePosts chooses them. From M6 they are ranked by how
- * they did.
+ * one, the id of the channel only when that channel is a target of the
+ * same request, and whether it was chosen because it did well with
+ * readers. No post id, no author, no link and no numbers: of how a post
+ * did, a provider learns that one yes or no and nothing else.
+ * Actions\SelectExamplePosts chooses them.
  */
 final readonly class ExamplePost
 {
@@ -25,6 +26,7 @@ final readonly class ExamplePost
         public string $body,
         public ?int $channelId = null,
         ?string $pillar = null,
+        public bool $performedWell = false,
     ) {
         $pillar = $pillar !== null ? mb_substr(trim($pillar), 0, self::PILLAR_LENGTH) : null;
 
@@ -32,7 +34,7 @@ final readonly class ExamplePost
     }
 
     /**
-     * @return array{platform: string, body: string, channel_id: int|null, pillar: string|null}
+     * @return array{platform: string, body: string, channel_id: int|null, pillar: string|null, performed_well: bool}
      */
     public function toArray(): array
     {
@@ -41,6 +43,7 @@ final readonly class ExamplePost
             'body' => $this->body,
             'channel_id' => $this->channelId,
             'pillar' => $this->pillar,
+            'performed_well' => $this->performedWell,
         ];
     }
 }
