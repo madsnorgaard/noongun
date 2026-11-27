@@ -715,3 +715,28 @@ To be filled in from the summary the script prints.
 - Posts visible from a logged-out browser (with `SPIKE_PAUSE=1`):
 - What was changed afterwards (fixtures, `FACEBOOK_MAX_MEDIA_ITEMS`,
   `FACEBOOK_ALT_TEXT_LENGTH`, the codes in `FacebookAdapter::PHOTO_PROBLEM_CODES`):
+
+## 2026-11-27 - a post made in Development mode is not public
+
+Checked on the first real post, published by Noon Gun on 2026-11-26 while the Meta
+app was in Development mode, from a browser with a new profile and no Facebook
+session:
+
+- The permalink of the post answers "This content isn't available right now".
+- The Page itself opens signed out and shows posts, so the Page is public. Its newest
+  visible post is one made by hand the day before. The Noon Gun post, which is newer,
+  is not listed.
+
+This matches the app modes page quoted on 2026-11-23: data made in Development mode is
+seen only by people with a role on the app, and becomes visible to everyone once the
+app is switched to Live mode. Open question 2 of the first review and difference 3 are
+answered for Development mode: Phase 1 needs the app in Live mode.
+
+Still open: whether an app with the "Manage everything on your Page" use case in Live
+mode keeps `pages_manage_posts` for its own administrator without App Review, and what
+the dashboard asks for before it allows **Publish**. To be filled in when the owner
+switches the app:
+
+- What the dashboard required before Live mode:
+- Did the post of 2026-11-26 become visible signed out afterwards:
+- Did publishing still work for the administrator's Pages without App Review:
