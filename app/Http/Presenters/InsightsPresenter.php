@@ -9,7 +9,6 @@ use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\Models\PostVariant;
 use App\Domain\Insights\ChannelPolling;
-use App\Domain\Insights\EngagementScore;
 use App\Domain\Insights\InsightsConfig;
 use App\Domain\Insights\MetricTotals;
 use App\Domain\Insights\Models\MetricSnapshot;
@@ -25,10 +24,23 @@ use Illuminate\Support\Str;
  * each of its channels, and the summary of a period for the Insights page
  * and the dashboard. Read-only.
  *
- * A number that the platform did not give goes out as null with the reason
- * next to it, never as zero. Times go out as UTC instants and the pages
- * show them on the clock of the workspace. The sentences are written by the
- * pages (resources/js/lib/insights.ts); this class says which one applies.
+ * What it keeps to, so that no number says more than it knows:
+ *
+ * - A number that the platform did not give goes out as null with the
+ *   reason next to it, never as zero.
+ * - Reach is people, and the same person sees several posts and follows
+ *   several Pages. It is never added up over posts or channels; it goes out
+ *   for one post on one channel, or as an average.
+ * - "Score" is the comparable score (Performance::comparableScore()):
+ *   reactions, comments and shares, which every measured channel has.
+ *   Clicks are shown and not counted.
+ * - Comparisons leave out posts that are too young to have collected their
+ *   reactions, and make no claim about a best post or pillar from fewer
+ *   posts than the configured minimum.
+ *
+ * Times go out as UTC instants and the pages show them on the clock of the
+ * workspace. The sentences are written by the pages
+ * (resources/js/lib/insights.ts); this class says which one applies.
  */
 final class InsightsPresenter
 {
@@ -37,22 +49,32 @@ final class InsightsPresenter
 
     public const DEFAULT_PERIOD = 28;
 
-    /** The period of the line on the dashboard, in days. */
+    /** The period of the block on the dashboard, in days. */
     public const DASHBOARD_PERIOD = 7;
 
     /**
-     * Minutes between two runs of noongun:poll-metrics, as scheduled in
-     * routes/console.php. A post that was never read is read by the next
-     * run, so its first reading is expected this long after it went out.
+     * Minutes between two runs of noongun:poll-metrics. A post that was
+     * never read is read by the next run, so its first reading is expected
+     * this long after it went out. The schedule is in routes/console.php;
+     * a test fails when the two differ.
      */
-    private const POLL_MINUTES = 10;
+    public const POLL_MINUTES = 10;
 
     private const TOP_POSTS = 10;
 
     private const EXCERPT_LENGTH = 90;
 
-    /** @var array<int, array{platform: list<Metric>, channel: list<Metric>}> */
+    /**
+     * What is known of each channel while one answer is put together. Both
+     * are emptied at the start of every answer: a controller, and with it
+     * this presenter, can outlive a request.
+     *
+     * @var array<int, array{platform: list<Metric>, channel: list<Metric>}>
+     */
     private array $channelMetrics = [];
+
+    /** @var array<int, array{kind: string, until: string|null}|null> */
+    private array $pauses = [];
 
     public function __construct(
         private readonly ChannelManager $channels,
@@ -61,11 +83,13 @@ final class InsightsPresenter
     ) {}
 
     /**
-     * Whether numbers are read on this instance, and how often, in words.
+     * Whether numbers are read on this instance, how often, and what a
+     * comparison asks of a post, in words.
      *
-     * @return array{enabled: bool, cadence: string, stop_after: string}
+     * @param  bool  $canSetUp  whether the viewer can connect channels and is told how to change the set-up
+     * @return array<string, mixed>
      */
-    public function reading(): array
+    public function reading(bool $canSetUp): array
     {
         $steps = [];
 
@@ -77,6 +101,13 @@ final class InsightsPresenter
             'enabled' => InsightsConfig::enabled(),
             'cadence' => 'A post is read '.implode(', then ', $steps).', and not after that.',
             'stop_after' => self::age(InsightsConfig::stopAfterHours()),
+            // How far back a post that was never read is still read once.
+            'once_within' => self::age(self::readOnceWithinDays() * 24),
+            // How old a post has to be before it is compared with others.
+            'min_age' => self::age(self::minAgeHours()),
+            'min_measured' => self::minMeasuredPosts(),
+            'weights' => Performance::comparableWeights(),
+            'can_set_up' => $canSetUp,
         ];
     }
 
@@ -91,6 +122,8 @@ final class InsightsPresenter
      */
     public function forPosts(iterable $posts, bool $withHistory = false): array
     {
+        $this->forget();
+
         $published = [];
 
         foreach ($posts as $post) {
@@ -131,17 +164,26 @@ final class InsightsPresenter
 
     /**
      * The Insights page for the last $days days on the calendar of the
-     * workspace, today included.
+     * workspace, today included. With a channel, the pillars and the top
+     * posts are those of that channel alone.
      *
      * @return array<string, mixed>
      */
-    public function page(int $days): array
+    public function page(int $days, ?int $channelId, bool $canSetUp): array
     {
-        [$from, $until] = $this->period($days);
+        $this->forget();
 
-        $pillars = $this->performance->pillarSummaries($from, $until);
-        $totals = $this->totals($pillars);
-        $top = $totals['measured_posts'] > 0 ? $this->performance->topPosts($from, $until, self::TOP_POSTS) : [];
+        [$from, $until] = $this->period($days);
+        $settledBefore = $this->settledBefore();
+
+        $channels = $this->channelRows($this->performance->channelSummaries($from, $until));
+        $channelId = in_array($channelId, array_column($channels, 'id'), true) ? $channelId : null;
+
+        $totals = $this->totals($this->performance->pillarSummaries($from, $until));
+        $pillars = $totals['measured'] > 0 ? $this->performance->pillarSummaries($from, $until, $channelId, $settledBefore) : [];
+        $top = $totals['measured'] > 0
+            ? $this->performance->topPosts($from, $until, max(self::TOP_POSTS, self::minMeasuredPosts()), $channelId, $settledBefore)
+            : [];
 
         return [
             'period' => [
@@ -150,23 +192,27 @@ final class InsightsPresenter
                 'from' => $from->format('Y-m-d'),
                 'until' => $until->subDay()->format('Y-m-d'),
             ],
-            'reading' => $this->reading(),
-            'weights' => $this->weights(),
+            // The channel the pillars and the top posts are narrowed to.
+            'channel' => $channelId,
+            'reading' => $this->reading($canSetUp),
             'status' => match (true) {
                 $totals['posts'] === 0 => PostVariant::query()->whereNotNull('external_id')->exists() ? 'nothing_in_period' : 'nothing_published',
-                $totals['measured_posts'] === 0 => 'nothing_measured',
+                $totals['measured'] === 0 => 'nothing_measured',
                 default => 'ok',
             },
             'totals' => $totals,
             'pillars' => $this->pillars($pillars),
-            'top' => $this->top($top),
-            'channels' => $this->channelRows($this->performance->channelSummaries($from, $until)),
+            // False while too few posts compete to say which did best.
+            'ranked' => count($top) >= self::minMeasuredPosts(),
+            'top' => array_slice($this->top($top, $channelId), 0, self::TOP_POSTS),
+            'channels' => $channels,
         ];
     }
 
     /**
-     * The line on the dashboard: what the last week added up to and the
-     * post that did best. Null when no post of the week is measured.
+     * The block on the dashboard: what the last week added up to, and the
+     * post that did best when enough posts compete to say so. Null when no
+     * post of the week is measured.
      *
      * @return array<string, mixed>|null
      */
@@ -176,14 +222,16 @@ final class InsightsPresenter
 
         $totals = $this->totals($this->performance->pillarSummaries($from, $until));
 
-        if ($totals['measured_posts'] === 0) {
+        if ($totals['measured'] === 0) {
             return null;
         }
+
+        $top = $this->performance->topPosts($from, $until, self::minMeasuredPosts(), null, $this->settledBefore());
 
         return [
             'days' => self::DASHBOARD_PERIOD,
             ...$totals,
-            'best' => $this->top($this->performance->topPosts($from, $until, 1))[0] ?? null,
+            'best' => count($top) >= self::minMeasuredPosts() ? ($this->top([$top[0]], null)[0] ?? null) : null,
         ];
     }
 
@@ -192,6 +240,17 @@ final class InsightsPresenter
         return is_string($value) && ctype_digit($value) && in_array((int) $value, self::PERIODS, true)
             ? (int) $value
             : self::DEFAULT_PERIOD;
+    }
+
+    public static function channelFrom(mixed $value): ?int
+    {
+        return is_string($value) && ctype_digit($value) && strlen($value) <= 18 ? (int) $value : null;
+    }
+
+    private function forget(): void
+    {
+        $this->channelMetrics = [];
+        $this->pauses = [];
     }
 
     /**
@@ -209,6 +268,71 @@ final class InsightsPresenter
     }
 
     /**
+     * A post that went out after this instant is too young to be compared.
+     */
+    private function settledBefore(): CarbonImmutable
+    {
+        return CarbonImmutable::now('UTC')->subHours(self::minAgeHours());
+    }
+
+    /**
+     * How old a post has to be before it competes, in hours. Read here
+     * and nowhere else on the pages.
+     */
+    private static function minAgeHours(): int
+    {
+        $hours = config('noongun.insights.min_age_hours');
+
+        return is_numeric($hours) && (int) $hours >= 0 ? min((int) $hours, 24 * 30) : 48;
+    }
+
+    /**
+     * How many posts have to compete before one is called the best.
+     */
+    private static function minMeasuredPosts(): int
+    {
+        $posts = config('noongun.insights.min_measured_posts');
+
+        return is_numeric($posts) && (int) $posts >= 1 ? min((int) $posts, 100) : 5;
+    }
+
+    /**
+     * How many days back a post that was never read is still read once.
+     * The key is the one the one-time read of old posts is expected to
+     * use; this is the only place the pages read it.
+     */
+    private static function readOnceWithinDays(): int
+    {
+        $days = config('noongun.insights.backfill_days');
+
+        return is_numeric($days) && (int) $days >= 0 ? (int) $days : 365;
+    }
+
+    /**
+     * Why reading is paused for a channel, or null when it is not. The one
+     * place the pages ask: kind is "rate_limit" (the platform asked for a
+     * wait), "token" (it did not accept the token for reading, until the
+     * channel is connected again), "other" (a reading did not get through)
+     * or "unknown" when only the fact of a pause is known. "until" is when
+     * reading starts again, when that is known.
+     *
+     * ChannelPolling only says that a channel is paused today, so every
+     * pause is "unknown" and the pages say what is true of all of them.
+     *
+     * @return array{kind: string, until: string|null}|null
+     */
+    private function pauseOf(Channel $channel): ?array
+    {
+        if (array_key_exists($channel->id, $this->pauses)) {
+            return $this->pauses[$channel->id];
+        }
+
+        return $this->pauses[$channel->id] = ChannelPolling::isPaused($channel->id)
+            ? ['kind' => 'unknown', 'until' => null]
+            : null;
+    }
+
+    /**
      * @param  list<MetricSnapshot>|null  $history
      * @return array<string, mixed>
      */
@@ -220,6 +344,7 @@ final class InsightsPresenter
         $publishedAt = $variant->published_at;
         $stopped = $publishedAt === null || $publishedAt->lessThanOrEqualTo($now->subHours(InsightsConfig::stopAfterHours()));
         $read = $status === ChannelStatus::Active;
+        $asked = $variant->metrics_checked_at !== null;
         // The platform said often enough that the post is not there any
         // more, and it is not asked about again (see DueVariants).
         $gone = $variant->metrics_gone_count >= InsightsConfig::goneAfter();
@@ -227,10 +352,15 @@ final class InsightsPresenter
         $state = match (true) {
             $snapshot !== null => 'measured',
             $metrics['platform'] === [] => 'unavailable',
-            $stopped => 'never',
+            // Read while it was young, or once later, and nothing came.
+            $stopped && $asked => 'no_numbers',
+            $stopped && ($publishedAt === null || $publishedAt->lessThan($now->subDays(self::readOnceWithinDays()))) => 'too_old',
             ! InsightsConfig::enabled() => 'off',
             ! $read => 'blocked',
             $gone => 'gone',
+            // Older than the cadence reaches and never asked about: it
+            // waits for the one reading that old posts get.
+            $stopped => 'waiting_once',
             default => 'pending',
         };
 
@@ -254,6 +384,8 @@ final class InsightsPresenter
             }
         }
 
+        $waiting = in_array($state, ['pending', 'waiting_once'], true) || ($snapshot !== null && ! $stopped && $read && ! $gone);
+
         return [
             'variant_id' => $variant->id,
             'channel_id' => $variant->channel_id,
@@ -262,20 +394,22 @@ final class InsightsPresenter
             'channel_status' => $status->value,
             'state' => $state,
             'numbers' => $numbers,
-            'score' => $snapshot?->score(),
+            'score' => $snapshot !== null ? Performance::comparableScore($snapshot->reading()) : null,
             'checked_at' => $snapshot?->checked_at->toIso8601String(),
             // Set while a reading is still to come: when the next one is due.
             'next_reading_at' => $state === 'pending'
                 ? $this->nextReading($variant, $publishedAt, $now)->toIso8601String()
                 : null,
             // The platform was asked at least once and gave nothing.
-            'asked' => $variant->metrics_checked_at !== null,
+            'asked' => $asked,
             // Older than the last step of the cadence: not read any more.
             'stopped' => $stopped,
             // The numbers are not being updated, although the post is young enough.
             'stale' => $snapshot !== null && ! $stopped && ! $read,
             // Young enough to be read, and the platform says the post is gone.
             'gone' => ! $stopped && $read && $gone,
+            // Set when a reading is expected and reading is paused for the channel.
+            'pause' => $waiting && $channel !== null && InsightsConfig::enabled() ? $this->pauseOf($channel) : null,
             // Numbers the platform has and the token of this channel may not read.
             'needs_permission' => in_array($state, ['measured', 'pending'], true)
                 ? $this->names(array_udiff($metrics['platform'], $metrics['channel'], fn (Metric $a, Metric $b): int => $a->value <=> $b->value))
@@ -315,7 +449,8 @@ final class InsightsPresenter
 
     /**
      * The numbers of the measured variants of one post added up, or null
-     * when none is measured.
+     * when none is measured. Reach is only given when one channel is
+     * measured: across channels the same person would be counted twice.
      *
      * @param  list<MetricSnapshot>  $measured
      * @return array<string, mixed>|null
@@ -334,14 +469,14 @@ final class InsightsPresenter
                 fn (?int $value): bool => $value !== null,
             );
 
-            $sums[$metric->value] = $values === [] ? null : array_sum($values);
+            $sums[$metric->value] = $values === [] || ($metric === Metric::Reach && count($measured) > 1) ? null : array_sum($values);
         }
 
         $totals = new MetricTotals(...$sums);
 
         return [
             'numbers' => $totals->toArray(),
-            'score' => $totals->score(),
+            'score' => Performance::comparableScore($totals),
             'measured' => count($measured),
             'published' => $published,
             // The oldest of the readings: the total is at least this fresh.
@@ -352,13 +487,15 @@ final class InsightsPresenter
     /**
      * The whole period, from the summaries of its pillars. A post has one
      * pillar or none, so adding the pillars up counts every post once.
+     * Reach is not in it: it cannot be added up over posts.
      *
      * @param  list<PerformanceSummary>  $pillars
-     * @return array{posts: int, measured_posts: int, numbers: array<string, int|null>, score: float|null}
+     * @return array{posts: int, channel_posts: int, measured: int, numbers: array<string, int|null>, with: array<string, int>, score: float|null}
      */
     private function totals(array $pillars): array
     {
         $sums = [];
+        $with = [];
 
         foreach (Metric::cases() as $metric) {
             $values = array_filter(
@@ -366,35 +503,44 @@ final class InsightsPresenter
                 fn (?int $value): bool => $value !== null,
             );
 
-            $sums[$metric->value] = $values === [] ? null : array_sum($values);
+            $sums[$metric->value] = $values === [] || $metric === Metric::Reach ? null : array_sum($values);
+            // How many measured channel posts the total is made of.
+            $with[$metric->value] = array_sum(array_map(fn (PerformanceSummary $pillar): int => $pillar->with($metric), $pillars));
         }
 
         $totals = new MetricTotals(...$sums);
 
         return [
             'posts' => array_sum(array_map(fn (PerformanceSummary $pillar): int => $pillar->posts, $pillars)),
-            'measured_posts' => array_sum(array_map(fn (PerformanceSummary $pillar): int => $pillar->measuredPosts, $pillars)),
+            'channel_posts' => array_sum(array_map(fn (PerformanceSummary $pillar): int => $pillar->channelPosts, $pillars)),
+            'measured' => array_sum(array_map(fn (PerformanceSummary $pillar): int => $pillar->measured, $pillars)),
             'numbers' => $totals->toArray(),
-            'score' => $totals->score(),
+            'with' => $with,
+            'score' => Performance::comparableScore($totals),
         ];
     }
 
     /**
-     * Best average score first, pillars without a score after those, by
-     * name among equals. Posts without a pillar are the last row: they are
-     * not a theme to compare with the others.
+     * Pillars with enough measured posts to compare first, best average
+     * score first among them; then the pillars with too few, the same way;
+     * by name among equals. Posts without a pillar are the last row: they
+     * are not a theme to compare with the others.
      *
      * @param  list<PerformanceSummary>  $pillars
      * @return list<array<string, mixed>>
      */
     private function pillars(array $pillars): array
     {
-        usort($pillars, fn (PerformanceSummary $a, PerformanceSummary $b): int => [$a->id === null, -($a->averageScore() ?? -1.0), (string) $a->name]
-            <=> [$b->id === null, -($b->averageScore() ?? -1.0), (string) $b->name]);
+        $enough = fn (PerformanceSummary $pillar): bool => $pillar->scored >= self::minMeasuredPosts();
+        $key = fn (PerformanceSummary $pillar): array => [$pillar->id === null, ! $enough($pillar), -($pillar->averageScore() ?? -1.0), (string) $pillar->name];
+
+        usort($pillars, fn (PerformanceSummary $a, PerformanceSummary $b): int => $key($a) <=> $key($b));
 
         return array_map(fn (PerformanceSummary $pillar): array => [
             'id' => $pillar->id,
             'name' => $pillar->name,
+            // False while too few of its posts are measured to compare it.
+            'enough' => $enough($pillar),
             ...$this->summary($pillar),
         ], $pillars);
     }
@@ -408,17 +554,19 @@ final class InsightsPresenter
 
         foreach (Metric::cases() as $metric) {
             $numbers[$metric->value] = [
-                'total' => $summary->totals->get($metric),
+                // Reach has no total: it cannot be added up over posts.
+                'total' => $metric === Metric::Reach ? null : $summary->totals->get($metric),
                 'average' => $summary->average($metric),
-                // How many posts the total and the average are made of.
-                'posts' => $summary->postsWith($metric),
+                // How many channel posts the total and the average are made of.
+                'with' => $summary->with($metric),
             ];
         }
 
         return [
             'posts' => $summary->posts,
-            'measured_posts' => $summary->measuredPosts,
-            'scored_posts' => $summary->scoredPosts,
+            'channel_posts' => $summary->channelPosts,
+            'measured' => $summary->measured,
+            'scored' => $summary->scored,
             'numbers' => $numbers,
             'score' => $summary->score,
             'average_score' => $summary->averageScore(),
@@ -429,7 +577,7 @@ final class InsightsPresenter
      * @param  list<PostPerformance>  $top
      * @return list<array<string, mixed>>
      */
-    private function top(array $top): array
+    private function top(array $top, ?int $channelId): array
     {
         if ($top === []) {
             return [];
@@ -450,18 +598,26 @@ final class InsightsPresenter
                 continue;
             }
 
-            $variants = $post->variants->filter(fn (PostVariant $variant): bool => $variant->isPublished())->sortBy('id')->values();
+            $variants = $post->variants
+                ->filter(fn (PostVariant $variant): bool => $variant->isPublished() && ($channelId === null || $variant->channel_id === $channelId))
+                ->sortBy('id')
+                ->values();
 
             $rows[] = [
                 'post_id' => $post->id,
                 'excerpt' => self::firstLine((string) $variants->first()?->body),
                 'pillar' => $post->pillar?->name,
                 'channels' => $variants->map(fn (PostVariant $variant): array => [
+                    'id' => $variant->channel_id,
                     'name' => $variant->channel->display_name ?? '',
                     'platform_label' => $variant->channel !== null ? PlatformLabel::for($variant->channel->platform) : '',
                 ])->all(),
                 'published_at' => $variants->max(fn (PostVariant $variant) => $variant->published_at)?->toIso8601String(),
-                'numbers' => $performance->totals->toArray(),
+                'numbers' => [
+                    ...$performance->totals->toArray(),
+                    // Of one channel only: across channels reach cannot be added up.
+                    'reach' => $performance->measuredVariants === 1 ? $performance->totals->reach : null,
+                ],
                 'score' => $performance->score,
                 'measured' => $performance->measuredVariants,
                 'published' => $variants->count(),
@@ -486,7 +642,7 @@ final class InsightsPresenter
             $byChannel[(int) $summary->id] = $summary;
         }
 
-        $empty = new PerformanceSummary(null, null, 0, 0, 0, new MetricTotals, [], null);
+        $empty = new PerformanceSummary(null, null, 0, 0, 0, 0, new MetricTotals, [], null);
         $rows = [];
 
         $channels = Channel::query()
@@ -504,6 +660,7 @@ final class InsightsPresenter
             }
 
             $metrics = $this->metricsOf($channel);
+            $read = $metrics['platform'] !== [] && $channel->status === ChannelStatus::Active && InsightsConfig::enabled();
 
             $rows[] = [
                 'id' => $channel->id,
@@ -514,8 +671,8 @@ final class InsightsPresenter
                 'gives_numbers' => $metrics['platform'] !== [],
                 'metrics' => $this->names($metrics['channel']),
                 'needs_permission' => $this->names(array_udiff($metrics['platform'], $metrics['channel'], fn (Metric $a, Metric $b): int => $a->value <=> $b->value)),
-                // The platform asked Noon Gun to wait. Reading starts again by itself.
-                'paused' => $metrics['platform'] !== [] && ChannelPolling::isPaused($channel->id),
+                // Why reading is paused, for a channel that would be read.
+                'pause' => $read ? $this->pauseOf($channel) : null,
                 ...$this->summary($summary ?? $empty),
             ];
         }
@@ -547,22 +704,6 @@ final class InsightsPresenter
             'platform' => $platform,
             'channel' => array_values(array_filter($reader->metricsFor($channel), fn (Metric $metric): bool => in_array($metric, $platform, true))),
         ];
-    }
-
-    /**
-     * The weights of the engagement score, in the order of the formula.
-     *
-     * @return array<string, float>
-     */
-    private function weights(): array
-    {
-        $weights = [];
-
-        foreach ([Metric::Reactions, Metric::Comments, Metric::Shares, Metric::Clicks] as $index => $metric) {
-            $weights[$metric->value] = EngagementScore::bindings()[$index];
-        }
-
-        return $weights;
     }
 
     /**

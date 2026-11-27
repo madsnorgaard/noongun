@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Posts;
 
+use App\Domain\Channels\Models\Channel;
 use App\Domain\Content\Models\Post;
 use App\Domain\Content\PostState;
 use App\Domain\Drafting\Models\DraftRun;
@@ -59,7 +60,7 @@ class QueueController extends Controller
                     // The numbers of the published posts on this page,
                     // keyed by post id, read in one query.
                     'insights' => (object) $this->insights->forPosts($history->items()),
-                    'reading' => $this->insights->reading(),
+                    'reading' => $this->insights->reading($request->user()?->can('create', Channel::class) ?? false),
                     'previous' => $history->previousPageUrl(),
                     'next' => $history->nextPageUrl(),
                 ],

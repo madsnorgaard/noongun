@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, usePage } from '@inertiajs/vue3';
 import MetricList from '@/components/insights/MetricList.vue';
+import PeriodCounts from '@/components/insights/PeriodCounts.vue';
 import TextLink from '@/components/TextLink.vue';
 import { computed } from 'vue';
 import { formatNumber } from '@/lib/insights';
@@ -127,16 +128,7 @@ const localTime = computed(() => {
             data-test="dashboard-insights"
         >
             <h2 class="text-heading">Last {{ insights.days }} days</h2>
-            <p>
-                <span class="font-mono">{{
-                    formatNumber(insights.posts)
-                }}</span>
-                {{ insights.posts === 1 ? 'post' : 'posts' }} published,
-                <span class="font-mono">{{
-                    formatNumber(insights.measured_posts)
-                }}</span>
-                measured.
-            </p>
+            <PeriodCounts :totals="insights" />
             <MetricList :numbers="insights.numbers" :score="insights.score" />
             <p v-if="insights.best" class="max-w-[72ch]">
                 Best post:

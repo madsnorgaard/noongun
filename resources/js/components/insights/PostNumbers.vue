@@ -1,19 +1,24 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import MetricValue from '@/components/insights/MetricValue.vue';
+import ScrollTable from '@/components/insights/ScrollTable.vue';
 import TextLink from '@/components/TextLink.vue';
 import {
+    hiddenNote,
     metricLabels,
-    metricNames,
+    metricsShown,
     missingReason,
     needsReconnect,
     permissionNote,
+    reachNotAdded,
+    scoreFormula,
+    sentenceList,
     variantNote,
 } from '@/lib/insights';
 import { formatDateTime, useWorkspaceTimezone } from '@/lib/posts';
 import { index as channels } from '@/routes/channels';
 import { index as insightsPage } from '@/routes/insights';
-import type { PostInsights, Reading } from '@/types/insights';
+import type { MetricName, PostInsights, Reading } from '@/types/insights';
 
 /**
  * How a published post did, on the post page: one row for each channel it
@@ -33,28 +38,59 @@ const measured = computed(() =>
     props.insights.variants.filter((variant) => variant.state === 'measured'),
 );
 
-// What is said under the table: where the numbers of each measured channel
-// stand, and which numbers a channel could give with one more permission.
-const notes = computed(() =>
-    props.insights.variants
-        .map((variant) => ({
-            id: variant.variant_id,
-            channel: variant.channel_name,
-            text:
-                variant.state === 'measured'
-                    ? variantNote(variant, props.reading, timezone.value)
-                    : null,
-            reconnect: variant.state === 'measured' && needsReconnect(variant),
-            permission: permissionNote(
-                variant.needs_permission,
-                variant.platform_label,
-            ),
-        }))
-        .filter((note) => note.text !== null || note.permission !== null),
+// Clicks and reach get a column only when a channel of this post has them.
+const shown = computed(() =>
+    metricsShown((metric) =>
+        props.insights.variants.some(
+            (variant) => (variant.numbers?.[metric].value ?? null) !== null,
+        ),
+    ),
 );
+
+const hidden = computed(() => hiddenNote(shown.value));
+
+// Where the numbers of each measured channel stand.
+const notes = computed(() =>
+    measured.value.map((variant) => ({
+        id: variant.variant_id,
+        channel: variant.channel_name,
+        text: variantNote(variant, props.reading, timezone.value),
+        reconnect: props.reading.can_set_up && needsReconnect(variant),
+    })),
+);
+
+// Said once for the post, not for each channel: which numbers a channel
+// could give with one more permission.
+const permission = computed(() => {
+    const wanting = props.insights.variants.filter(
+        (variant) => variant.needs_permission.length > 0,
+    );
+
+    if (wanting.length === 0) {
+        return null;
+    }
+
+    const metrics = [
+        ...new Set(wanting.flatMap((variant) => variant.needs_permission)),
+    ] as MetricName[];
+    const platforms = [
+        ...new Set(wanting.map((variant) => variant.platform_label)),
+    ];
+
+    return permissionNote(metrics, sentenceList(platforms));
+});
 
 const withHistory = computed(() =>
     measured.value.filter((variant) => (variant.history?.length ?? 0) > 0),
+);
+
+// Whether a row of the readings has anything in a column.
+const historyShown = computed(() =>
+    metricsShown((metric) =>
+        withHistory.value.some((variant) =>
+            (variant.history ?? []).some((row) => row[metric] !== null),
+        ),
+    ),
 );
 </script>
 
@@ -72,8 +108,8 @@ const withHistory = computed(() =>
             </p>
         </div>
 
-        <div class="overflow-x-auto">
-            <table class="w-full min-w-[38rem] border-collapse text-base">
+        <ScrollTable label="The numbers of this post for each channel">
+            <table class="w-full min-w-[30rem] border-collapse text-base">
                 <caption class="sr-only">
                     The numbers of this post for each channel
                 </caption>
@@ -83,7 +119,7 @@ const withHistory = computed(() =>
                             Channel
                         </th>
                         <th
-                            v-for="metric in metricNames"
+                            v-for="metric in shown"
                             :key="metric"
                             scope="col"
                             class="px-3 py-2 text-right font-normal"
@@ -119,7 +155,7 @@ const withHistory = computed(() =>
 
                         <template v-if="variant.numbers">
                             <td
-                                v-for="metric in metricNames"
+                                v-for="metric in shown"
                                 :key="metric"
                                 class="px-3 py-2.5 text-right"
                             >
@@ -143,13 +179,16 @@ const withHistory = computed(() =>
                         </template>
                         <td
                             v-else
-                            :colspan="metricNames.length + 1"
+                            :colspan="shown.length + 1"
                             class="max-w-[60ch] py-2.5 pl-3 text-sm"
                             :data-test="`not-measured-${variant.variant_id}`"
                         >
                             {{ variantNote(variant, reading, timezone) }}
                             <TextLink
-                                v-if="needsReconnect(variant)"
+                                v-if="
+                                    reading.can_set_up &&
+                                    needsReconnect(variant)
+                                "
                                 :href="channels()"
                             >
                                 Open Channels
@@ -176,13 +215,18 @@ const withHistory = computed(() =>
                             </span>
                         </th>
                         <td
-                            v-for="metric in metricNames"
+                            v-for="metric in shown"
                             :key="metric"
                             class="px-3 py-2.5 text-right"
                         >
                             <MetricValue
                                 :value="insights.total.numbers[metric]"
-                                reason="No channel gave this number."
+                                :reason="
+                                    metric === 'reach' &&
+                                    insights.total.measured > 1
+                                        ? reachNotAdded
+                                        : 'No channel gave this number.'
+                                "
                             />
                         </td>
                         <td class="py-2.5 pl-3 text-right">
@@ -195,10 +239,10 @@ const withHistory = computed(() =>
                     </tr>
                 </tfoot>
             </table>
-        </div>
+        </ScrollTable>
 
         <ul
-            v-if="notes.length"
+            v-if="notes.length || permission"
             class="grid max-w-[72ch] gap-1.5 text-sm text-muted-foreground"
             data-test="numbers-notes"
         >
@@ -210,13 +254,34 @@ const withHistory = computed(() =>
                 <TextLink v-if="note.reconnect" :href="channels()">
                     Open Channels
                 </TextLink>
-                <template v-if="note.permission">
-                    {{ note.permission }}
-                    <TextLink :href="`${insightsPage.url()}#more-numbers`">
-                        How to get them
-                    </TextLink>
+            </li>
+            <li v-if="measured.length">
+                Score = {{ scoreFormula(reading.weights) }}. Clicks and reach
+                are not counted, because not every channel gives them.
+                <template
+                    v-if="
+                        several &&
+                        shown.includes('reach') &&
+                        insights.total &&
+                        insights.total.measured > 1
+                    "
+                >
+                    {{ reachNotAdded }}
                 </template>
             </li>
+            <li v-if="permission" data-test="numbers-permission">
+                {{ permission }} It is optional.
+                <TextLink
+                    v-if="reading.can_set_up"
+                    :href="`${insightsPage.url()}#more-numbers`"
+                >
+                    How to add it
+                </TextLink>
+                <template v-else>
+                    An owner of this workspace can add it.
+                </template>
+            </li>
+            <li v-else-if="hidden && measured.length">{{ hidden }}</li>
         </ul>
 
         <details v-if="withHistory.length" data-test="numbers-history">
@@ -231,13 +296,13 @@ const withHistory = computed(() =>
                     changed, so each row held from its first time until at least
                     its second.
                 </p>
-                <div
+                <ScrollTable
                     v-for="variant in withHistory"
                     :key="variant.variant_id"
-                    class="overflow-x-auto"
+                    :label="`Readings over time for ${variant.channel_name}`"
                 >
                     <table
-                        class="w-full min-w-[40rem] border-collapse text-base"
+                        class="w-full min-w-[34rem] border-collapse text-base"
                     >
                         <caption
                             class="pb-1 text-left text-sm font-semibold"
@@ -262,7 +327,7 @@ const withHistory = computed(() =>
                                     Still so at
                                 </th>
                                 <th
-                                    v-for="metric in metricNames"
+                                    v-for="metric in historyShown"
                                     :key="metric"
                                     scope="col"
                                     class="px-3 py-2 text-right font-normal last:pr-0"
@@ -291,7 +356,7 @@ const withHistory = computed(() =>
                                     }}
                                 </td>
                                 <td
-                                    v-for="metric in metricNames"
+                                    v-for="metric in historyShown"
                                     :key="metric"
                                     class="px-3 py-2 text-right last:pr-0"
                                 >
@@ -300,7 +365,7 @@ const withHistory = computed(() =>
                             </tr>
                         </tbody>
                     </table>
-                </div>
+                </ScrollTable>
             </div>
         </details>
     </section>

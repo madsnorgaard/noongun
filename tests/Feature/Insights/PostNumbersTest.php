@@ -2,6 +2,7 @@
 
 use App\Domain\Channels\Contracts\Metric;
 use App\Domain\Content\PostState;
+use App\Domain\Insights\ChannelPolling;
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
 use Illuminate\Support\Facades\DB;
@@ -81,7 +82,7 @@ describe('a post that is not measured yet', function () {
         ($this->asked)($variant, now()->subMinutes(5));
 
         expect(($this->numbersOf)($variant->post_id)['variants'][0]['next_reading_at'])->toBe('2026-11-26T10:10:00+00:00')
-            ->and($this->get(route('posts.show', $variant->post_id))->inertiaProps('reading'))->toBe([
+            ->and($this->get(route('posts.show', $variant->post_id))->inertiaProps('reading'))->toMatchArray([
                 'enabled' => true,
                 'cadence' => 'A post is read every 15 minutes until it is 6 hours old, then every 2 hours until it is 2 days old, and not after that.',
                 'stop_after' => '2 days',
@@ -91,11 +92,33 @@ describe('a post that is not measured yet', function () {
     it('describes the default cadence in plain words', function () {
         $variant = publishedVariant($this->workspace, $this->page);
 
-        expect($this->actingAs($this->owner)->get(route('posts.show', $variant->post_id))->inertiaProps('reading'))->toBe([
+        expect($this->actingAs($this->owner)->get(route('posts.show', $variant->post_id))->inertiaProps('reading'))->toMatchArray([
             'enabled' => true,
             'cadence' => 'A post is read every hour until it is 1 day old, then once a day until it is 21 days old, and not after that.',
             'stop_after' => '21 days',
+            'once_within' => '365 days',
+            'can_set_up' => true,
         ]);
+
+        expect($this->actingAs(userWithRole($this->workspace, Role::Editor))->get(route('posts.show', $variant->post_id))->inertiaProps('reading.can_set_up'))->toBeFalse();
+    });
+
+    it('says that reading is paused for the channel instead of promising a time', function () {
+        $waiting = publishedVariant($this->workspace, $this->page, now()->subMinutes(30));
+        $measured = publishedVariant($this->workspace, $this->page, now()->subHours(3));
+        $old = publishedVariant($this->workspace, $this->page, now()->subDays(30));
+        snapshotFor($measured, ['reactions' => 2]);
+        snapshotFor($old, ['reactions' => 2], now()->subDays(20));
+
+        expect(($this->numbersOf)($waiting->post_id)['variants'][0]['pause'])->toBeNull();
+
+        ChannelPolling::pause($this->page->id, 600);
+
+        // Only the fact of a pause is known today, and no more is claimed.
+        expect(($this->numbersOf)($waiting->post_id)['variants'][0])->toMatchArray(['state' => 'pending', 'pause' => ['kind' => 'unknown', 'until' => null]])
+            ->and(($this->numbersOf)($measured->post_id)['variants'][0]['pause'])->toBe(['kind' => 'unknown', 'until' => null])
+            // No reading is expected for a post that is not read any more.
+            ->and(($this->numbersOf)($old->post_id)['variants'][0]['pause'])->toBeNull();
     });
 });
 
@@ -231,14 +254,39 @@ describe('a post that will not be measured', function () {
             ]);
     });
 
-    it('says so when the post grew too old without a reading', function () {
-        $variant = publishedVariant($this->workspace, $this->page, now()->subDays(21));
+    it('tells apart an old post that waits for its one reading, one that gave nothing and one that is too old', function () {
+        $waiting = publishedVariant($this->workspace, $this->page, now()->subDays(21));
+        $asked = publishedVariant($this->workspace, $this->page, now()->subDays(40));
+        $ancient = publishedVariant($this->workspace, $this->page, now()->subDays(366));
+        ($this->asked)($asked, now()->subDays(30));
 
-        expect(($this->numbersOf)($variant->post_id)['variants'][0])->toMatchArray([
-            'state' => 'never',
+        expect(($this->numbersOf)($waiting->post_id)['variants'][0])->toMatchArray([
+            'state' => 'waiting_once',
             'stopped' => true,
+            'asked' => false,
             'next_reading_at' => null,
-        ]);
+        ])
+            ->and(($this->numbersOf)($asked->post_id)['variants'][0])->toMatchArray(['state' => 'no_numbers', 'asked' => true])
+            ->and(($this->numbersOf)($ancient->post_id)['variants'][0])->toMatchArray(['state' => 'too_old', 'asked' => false]);
+
+        // An old post is not said to be waiting for a reading that cannot come.
+        config(['noongun.insights.enabled' => false]);
+
+        expect(($this->numbersOf)($waiting->post_id)['variants'][0]['state'])->toBe('off')
+            ->and(($this->numbersOf)($ancient->post_id)['variants'][0]['state'])->toBe('too_old');
+    });
+
+    it('does not count clicks in the score, so that a channel with more numbers does not score higher', function () {
+        $withClicks = publishedVariant($this->workspace, $this->page, now()->subHours(3));
+        $without = publishedVariant($this->workspace, $this->page, now()->subHours(3));
+        snapshotFor($withClicks, ['reactions' => 5, 'comments' => 1, 'clicks' => 400, 'reach' => 900]);
+        snapshotFor($without, ['reactions' => 5, 'comments' => 1]);
+
+        expect(($this->numbersOf)($withClicks->post_id)['variants'][0]['score'])->toBe(7)
+            ->and(($this->numbersOf)($without->post_id)['variants'][0]['score'])->toBe(7)
+            ->and(($this->numbersOf)($withClicks->post_id)['total'])->toMatchArray(['score' => 7])
+            // One channel: its reach is the reach of the post.
+            ->and(($this->numbersOf)($withClicks->post_id)['total']['numbers'])->toMatchArray(['clicks' => 400, 'reach' => 900]);
     });
 
     it('says that the channel has to be connected again before a first reading', function () {
@@ -267,7 +315,7 @@ describe('a post that will not be measured', function () {
             ->and(($this->numbersOf)($gone->post_id)['variants'][0])->toMatchArray(['state' => 'gone', 'gone' => true, 'next_reading_at' => null])
             ->and(($this->numbersOf)($goneWithNumbers->post_id)['variants'][0])->toMatchArray(['state' => 'measured', 'gone' => true, 'stale' => false, 'score' => 4])
             // Too old to be read anyway: that is what the page says.
-            ->and(($this->numbersOf)($goneAndOld->post_id)['variants'][0])->toMatchArray(['state' => 'never', 'gone' => false]);
+            ->and(($this->numbersOf)($goneAndOld->post_id)['variants'][0])->toMatchArray(['state' => 'no_numbers', 'gone' => false]);
 
         config(['noongun.insights.gone_after' => 2]);
 
@@ -297,7 +345,7 @@ describe('a post on several channels', function () {
         alsoPublishedOn($this->workspace, $onPage, $profile);
 
         snapshotFor($onPage, ['reactions' => 5, 'comments' => 1, 'reach' => 300], now()->subHours(2));
-        snapshotFor($onSecond, ['reactions' => 2, 'shares' => 1], now()->subHour());
+        snapshotFor($onSecond, ['reactions' => 2, 'shares' => 1, 'reach' => 80], now()->subHour());
 
         $numbers = ($this->numbersOf)($onPage->post_id);
 
@@ -308,7 +356,8 @@ describe('a post on several channels', function () {
         ])
             ->and(array_column($numbers['variants'], 'score'))->toBe([7, 5, null])
             ->and($numbers['total'])->toBe([
-                'numbers' => ['reactions' => 7, 'comments' => 1, 'shares' => 1, 'clicks' => null, 'reach' => 300],
+                // Reach is not added up: 300 and 80 may be the same people.
+                'numbers' => ['reactions' => 7, 'comments' => 1, 'shares' => 1, 'clicks' => null, 'reach' => null],
                 'score' => 12,
                 'measured' => 2,
                 'published' => 3,
