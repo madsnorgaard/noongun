@@ -16,6 +16,7 @@ use App\Domain\Drafting\Exceptions\DraftGeneratorNotAvailable;
 use App\Domain\Drafting\Exceptions\DraftingException;
 use App\Domain\Drafting\Exceptions\DraftingNotAllowed;
 use App\Domain\Drafting\Exceptions\DraftingStateConflict;
+use App\Domain\Drafting\Exceptions\UnknownPromptVersion;
 use App\Domain\Drafting\Models\DraftRun;
 use App\Domain\Scheduling\Models\Slot;
 use App\Domain\Workspaces\CurrentWorkspace;
@@ -41,8 +42,9 @@ use Throwable;
  *
  * The examples (SelectExamplePosts) and the list of the other posts of the
  * week (ListPlannedAlongside) are also chosen here, when the job runs. The
- * run notes the ids of the posts whose texts went along as examples, and
- * which of them were chosen because they did well.
+ * run notes the ids of the posts whose texts went along as examples, which
+ * of them were chosen because they did well, and whether its prompt told
+ * the model so.
  *
  * A call to a provider costs money, so:
  *
@@ -99,6 +101,7 @@ final class GenerateDraftJob implements ShouldQueue
         DraftGenerators $generators,
         SelectExamplePosts $selectExamples,
         ListPlannedAlongside $listAlongside,
+        PromptRenderer $prompts,
     ): void {
         $workspace = Workspace::query()->find($this->workspaceId);
 
@@ -106,7 +109,7 @@ final class GenerateDraftJob implements ShouldQueue
             return;
         }
 
-        $currentWorkspace->run($workspace, function (Workspace $workspace) use ($build, $generate, $generators, $selectExamples, $listAlongside): void {
+        $currentWorkspace->run($workspace, function (Workspace $workspace) use ($build, $generate, $generators, $selectExamples, $listAlongside, $prompts): void {
             $run = DraftRun::query()->find($this->runId);
 
             // Only a look: markRunning() inside GenerateDraft is the guard.
@@ -176,7 +179,14 @@ final class GenerateDraftJob implements ShouldQueue
                 return;
             }
 
-            if (! $run->noteExamples($examples->postIds, $examples->performancePostIds)) {
+            try {
+                $marked = $prompts->render($request, $run->prompt_version)->marksPerformance;
+            } catch (UnknownPromptVersion) {
+                // The generator refuses the run for it. Nothing is sent, so nothing is marked.
+                $marked = false;
+            }
+
+            if (! $run->noteExamples($examples->postIds, $examples->performancePostIds, $marked, $examples->performanceLeftOut)) {
                 return;
             }
 

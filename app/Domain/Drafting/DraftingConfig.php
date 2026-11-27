@@ -15,7 +15,11 @@ final class DraftingConfig
     /** The most approved posts one target channel can get as examples, whatever is configured. */
     public const MAX_EXAMPLES_PER_CHANNEL = 10;
 
-    /** The most characters the examples of one request can hold, whatever is configured. */
+    /**
+     * The most characters the examples of one target channel can hold,
+     * whatever is configured, and the most the examples of one request
+     * can hold together, however many channels it is for.
+     */
     public const MAX_EXAMPLE_CHARACTERS = 40000;
 
     /** The furthest back, in days, a post can be taken as an example for how it did, whatever is configured. */
@@ -160,12 +164,25 @@ final class DraftingConfig
     }
 
     /**
-     * The most characters all examples of one request hold together. 0
-     * sends none.
+     * The most characters the examples of one target channel hold
+     * together, as configured. 0 sends none. A request for several
+     * channels uses exampleCharactersFor().
      */
     public static function exampleCharacters(): int
     {
         return self::bounded('examples.max_characters', 6000, self::MAX_EXAMPLE_CHARACTERS);
+    }
+
+    /**
+     * The most characters the examples of one target channel hold in a
+     * request for that many channels: the configured limit, or less when
+     * the channels together would hold more than MAX_EXAMPLE_CHARACTERS.
+     * So each channel has room of its own, and a request never holds more
+     * than this times the number of its channels.
+     */
+    public static function exampleCharactersFor(int $channels): int
+    {
+        return min(self::exampleCharacters(), intdiv(self::MAX_EXAMPLE_CHARACTERS, max(1, $channels)));
     }
 
     /**

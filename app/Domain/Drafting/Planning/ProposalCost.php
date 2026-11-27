@@ -47,7 +47,9 @@ use DateTimeInterface;
  * between. The expected cost counts them as they are now. The worst case
  * does not rely on that: it counts the most of both a request could ever
  * carry, each marked as one that did well, with every character of an
- * example as four tokens, the most bytes one character has.
+ * example as four tokens, the most bytes one character has. Each target
+ * channel has its own allowance of characters, so a post for two channels
+ * counts twice the allowance of a post for one.
  *
  * Both are estimates of the price table, not an invoice. Without a price
  * for the model there is neither.
@@ -139,7 +141,7 @@ final class ProposalCost
 
                 $expectedInput += intdiv($this->bytesOf($request, $context) + $schemaBytes, self::EXPECTED_BYTES_PER_TOKEN) + 1;
                 $worstInput += $this->bytesOf(self::carryingTheMost($request), $context)
-                    + self::MOST_BYTES_PER_CHARACTER * self::exampleCharacters()
+                    + self::MOST_BYTES_PER_CHARACTER * self::exampleCharacters(count($request->channels))
                     + $schemaBytes
                     + self::FRAMING_TOKENS;
             }
@@ -191,7 +193,7 @@ final class ProposalCost
         $widest = str_repeat("\u{1F600}", max(ExamplePost::PILLAR_LENGTH, PlannedAlongside::TEXT_LENGTH));
         $examples = [];
 
-        if (self::exampleCharacters() > 0) {
+        if (self::exampleCharacters(count($request->channels)) > 0) {
             foreach ($request->channels as $channel) {
                 for ($i = 0; $i < DraftingConfig::examplesPerChannel(); $i++) {
                     $examples[] = new ExamplePost($channel->platform, '', $channel->channelId, $widest, performedWell: true);
@@ -206,11 +208,16 @@ final class ProposalCost
     }
 
     /**
-     * The most characters the examples of one request hold, or none when
-     * examples are turned off.
+     * The most characters the examples of one request for that many
+     * channels hold: the limit of one channel for each of them, and never
+     * more than a request can hold. It does not grow when a run drafts
+     * for fewer channels than were planned. None when examples are turned
+     * off.
      */
-    private static function exampleCharacters(): int
+    private static function exampleCharacters(int $channels): int
     {
-        return DraftingConfig::examplesPerChannel() > 0 ? DraftingConfig::exampleCharacters() : 0;
+        return DraftingConfig::examplesPerChannel() > 0
+            ? min($channels * DraftingConfig::exampleCharacters(), DraftingConfig::MAX_EXAMPLE_CHARACTERS)
+            : 0;
     }
 }

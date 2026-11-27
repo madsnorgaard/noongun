@@ -39,11 +39,14 @@ use App\Domain\Drafting\ExampleSelection;
  * - Never from elsewhere for how it did. A score compares posts of one
  *   channel, so a text of another channel is never taken because it did
  *   well there.
- * - How much. All examples of a request together hold at most
- *   noongun.drafting.examples.max_characters characters. Over that, the
- *   texts chosen for how they did are left out first, lowest score first,
- *   and then the text with the oldest approval, then the next oldest. A
- *   text is never cut.
+ * - How much. The examples of one target channel together hold at most
+ *   noongun.drafting.examples.max_characters characters
+ *   (DraftingConfig::exampleCharactersFor()), so a request for two
+ *   channels has room for both. Over that, the texts of that channel
+ *   chosen for how they did are left out first, lowest score first, and
+ *   then the text with the oldest approval, then the next oldest. A text
+ *   is never cut. A text that was chosen for how it did and left out is
+ *   counted, so that a run can say so.
  * - The same state gives the same choice in the same order: every order
  *   ends on the id of the text.
  *
@@ -65,14 +68,14 @@ final class SelectExamplePosts
         $perChannel = DraftingConfig::examplesPerChannel();
         $topSlots = DraftingConfig::exampleTopSlots();
         $topDays = DraftingConfig::exampleTopDays();
-        $budget = DraftingConfig::exampleCharacters();
-
         /** @var array<int, string> $targets */
         $targets = [];
 
         foreach ($channels as $channel) {
             $targets[$channel->id] = $channel->platform;
         }
+
+        $budget = DraftingConfig::exampleCharactersFor(count($targets));
 
         if ($perChannel === 0 || $budget === 0 || $targets === []) {
             return ExampleSelection::none();
@@ -143,10 +146,16 @@ final class SelectExamplePosts
             }
         }
 
-        $kept = self::withinBudget($chosen, $scores, $budget);
+        $kept = [];
+
+        foreach ($chosen as $variants) {
+            $kept += self::withinBudget($variants, $scores, $budget);
+        }
+
+        $leftOut = count(array_diff_key($scores, $kept));
 
         if ($kept === []) {
-            return ExampleSelection::none();
+            return new ExampleSelection(performanceLeftOut: $leftOut);
         }
 
         $pillars = Pillar::query()
@@ -185,27 +194,26 @@ final class SelectExamplePosts
         sort($postIds);
         sort($performancePostIds);
 
-        return new ExampleSelection($examples, $postIds, $performancePostIds);
+        return new ExampleSelection($examples, $postIds, $performancePostIds, $leftOut);
     }
 
     /**
-     * Leaves out texts until the rest fits: first those chosen for how
-     * they did, lowest score first, then those with the oldest approval.
-     * What a tight limit takes away first is the newer half of the idea,
-     * and what stays is the choice as it was before posts were measured.
+     * Leaves out texts of one target channel until the rest fits: first
+     * those chosen for how they did, lowest score first, then those with
+     * the oldest approval. What a tight limit takes away first is the
+     * newer half of the idea, and what stays is the choice as it was
+     * before posts were measured.
      *
-     * @param  array<int, list<PostVariant>>  $chosen
+     * @param  list<PostVariant>  $variants  the texts chosen for one target channel
      * @param  array<int, float>  $scores  variant id => score, of the texts chosen for how they did
      * @return array<int, PostVariant> keyed by variant id
      */
-    private static function withinBudget(array $chosen, array $scores, int $budget): array
+    private static function withinBudget(array $variants, array $scores, int $budget): array
     {
         $kept = [];
 
-        foreach ($chosen as $variants) {
-            foreach ($variants as $variant) {
-                $kept[$variant->id] = $variant;
-            }
+        foreach ($variants as $variant) {
+            $kept[$variant->id] = $variant;
         }
 
         // Chosen for how it did before chosen for being recent, the lower

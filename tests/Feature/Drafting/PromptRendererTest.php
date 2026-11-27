@@ -262,6 +262,13 @@ describe('v2, one idea written for each channel', function () {
             ->toBe('18c37d3ae0f3ed3f79582b0f3282458f6631fa5fa92e000f1b286bf46054919e');
     });
 
+    it('leaves v3 as it was released: it is what a new run is sent', function () {
+        expect(hash('sha256', (string) file_get_contents(resource_path('prompts/draft/v3/system.blade.php'))))
+            ->toBe('201179860c5b74082a819573a8c8ad6aade725e676c3e7c20d318398595d5152')
+            ->and(hash('sha256', (string) file_get_contents(resource_path('prompts/draft/v3/user.blade.php'))))
+            ->toBe('0a3f1a268ccd55369d8dfbcb5d59776324fc721c16f5dff0b1cc443a50d7c1a6');
+    });
+
     it('changes nothing in v3 but the examples: its system part is that of v2, word for word', function () {
         expect($this->renderer->render(fullRequest(), 'v3')->system)->toBe($this->renderer->render(fullRequest(), 'v2')->system)
             ->and($this->renderer->render(fullRequest(), 'v3')->user)->toBe($this->renderer->render(fullRequest(), 'v2')->user);
