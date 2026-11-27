@@ -20,6 +20,9 @@ Schedule::command('noongun:discard-pending-channels')->everyFiveMinutes()->witho
 // Images. Removes stored images that no post has used for a day. It never
 // touches an image that is on a post.
 Schedule::command('noongun:prune-unused-media')->hourly()->withoutOverlapping(30);
+// Once a week: files on the media disk that no image points to, left by an
+// upload that was killed between writing the file and writing its row.
+Schedule::command('noongun:sweep-orphaned-media-files')->weeklyOn(1, '03:30')->withoutOverlapping(120);
 
 // Drafting. Marks draft runs that lost their worker as failed. It never asks
 // a provider again.
