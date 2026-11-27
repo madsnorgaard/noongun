@@ -1,6 +1,8 @@
 <?php
 
 use App\Domain\Channels\Contracts\Metric;
+use App\Domain\Channels\Contracts\MetricReading;
+use App\Domain\Insights\MetricTotals;
 use App\Domain\Insights\Performance;
 use App\Domain\Insights\PerformanceSummary;
 use App\Domain\Insights\PostPerformance;
@@ -35,6 +37,24 @@ beforeEach(function () {
     };
 });
 
+describe('the comparable score', function () {
+    it('counts reactions, comments and shares by their weights, and neither clicks nor reach', function () {
+        expect(Performance::comparableScore(new MetricReading(reactions: 10, comments: 4, shares: 2, clicks: 700, reach: 5000)))->toBe(24.0)
+            ->and(Performance::comparableScore(new MetricReading(reactions: 10, comments: 4, shares: 2)))->toBe(24.0)
+            ->and(Performance::comparableScore(new MetricTotals(reactions: 0)))->toBe(0.0)
+            // A channel that only gave clicks or reach has nothing to compare by.
+            ->and(Performance::comparableScore(new MetricReading(clicks: 9, reach: 100)))->toBeNull()
+            ->and(Performance::comparableScore(new MetricReading))->toBeNull();
+    });
+
+    it('takes its weights from the configuration', function () {
+        config(['noongun.insights.score' => ['reactions' => '0.5', 'comments' => 0, 'shares' => 4, 'clicks' => 100]]);
+
+        expect(Performance::comparableWeights())->toBe(['reactions' => 0.5, 'comments' => 0.0, 'shares' => 4.0])
+            ->and(Performance::comparableScore(new MetricReading(reactions: 10, comments: 4, shares: 2, clicks: 7)))->toBe(13.0);
+    });
+});
+
 describe('the readings of several variants over time', function () {
     it('gives the rows of each variant oldest first, in one query', function () {
         $first = publishedVariant($this->workspace, $this->page);
@@ -65,7 +85,7 @@ describe('the readings of several variants over time', function () {
 });
 
 describe('the summary of each pillar', function () {
-    it('counts for each number the posts that have it, so that an average is not taken over posts without it', function () {
+    it('counts for each number the channel posts that have it, so that an average is not taken over posts without it', function () {
         $pillar = pillarIn($this->workspace, ['name' => 'Harbour']);
 
         $withReach = publishedVariant($this->workspace, $this->page, now()->subDay(), $pillar);
@@ -73,7 +93,7 @@ describe('the summary of each pillar', function () {
         $reachOnly = publishedVariant($this->workspace, $this->page, now()->subDay(), $pillar);
         publishedVariant($this->workspace, $this->page, now()->subDay(), $pillar);
 
-        snapshotFor($withReach, ['reactions' => 10, 'comments' => 2, 'shares' => 1, 'reach' => 900]);
+        snapshotFor($withReach, ['reactions' => 10, 'comments' => 2, 'shares' => 1, 'clicks' => 50, 'reach' => 900]);
         snapshotFor($withoutReach, ['reactions' => 20, 'comments' => 0, 'shares' => 0]);
         snapshotFor($reachOnly, ['reach' => 100]);
 
@@ -85,34 +105,63 @@ describe('the summary of each pillar', function () {
         $harbour = $summaries[0];
 
         expect([$harbour->id, $harbour->name])->toBe([$pillar->id, 'Harbour'])
-            ->and([$harbour->posts, $harbour->measuredPosts, $harbour->scoredPosts])->toBe([4, 3, 2])
-            ->and($harbour->totals->toArray())->toBe(['reactions' => 30, 'comments' => 2, 'shares' => 1, 'clicks' => null, 'reach' => 1000])
-            ->and($harbour->postsWith)->toBe(['reactions' => 2, 'comments' => 2, 'shares' => 2, 'clicks' => 0, 'reach' => 2])
+            ->and([$harbour->posts, $harbour->channelPosts, $harbour->measured, $harbour->scored])->toBe([4, 4, 3, 2])
+            ->and($harbour->with)->toBe(['reactions' => 2, 'comments' => 2, 'shares' => 2, 'clicks' => 1, 'reach' => 2])
             ->and($harbour->average(Metric::Reactions))->toBe(15.0)
-            // 1000 over the two posts that have reach, not over the three measured.
+            // 1000 over the two that have reach, not over the three measured.
             ->and($harbour->average(Metric::Reach))->toBe(500.0)
-            ->and($harbour->average(Metric::Clicks))->toBeNull()
-            // (10 + 2 x 2 + 1 x 3) + 20 = 37, over the two posts that have a score.
+            ->and($harbour->average(Metric::Clicks))->toBe(50.0)
+            // (10 + 2 x 2 + 1 x 3) + 20 = 37: the clicks are not in it.
             ->and($harbour->score)->toBe(37.0)
             ->and($harbour->averageScore())->toBe(18.5);
     });
 
-    it('counts a post on several channels once and keeps posts without a pillar apart', function () {
-        $pillar = pillarIn($this->workspace, ['name' => 'Harbour']);
+    it('takes one post on one channel as the unit, so that going to three channels does not triple a pillar', function () {
+        $wide = pillarIn($this->workspace, ['name' => 'On three channels']);
+        $narrow = pillarIn($this->workspace, ['name' => 'On one channel']);
         $second = channelIn($this->workspace);
+        $third = channelIn($this->workspace);
 
-        $onPage = publishedVariant($this->workspace, $this->page, now()->subDay(), $pillar);
+        $onPage = publishedVariant($this->workspace, $this->page, now()->subDay(), $wide);
         $onSecond = alsoPublishedOn($this->workspace, $onPage, $second);
+        $onThird = alsoPublishedOn($this->workspace, $onPage, $third);
+        $single = publishedVariant($this->workspace, $this->page, now()->subDay(), $narrow);
         $loose = publishedVariant($this->workspace, $this->page, now()->subDay());
 
-        snapshotFor($onPage, ['reactions' => 4]);
-        snapshotFor($onSecond, ['reactions' => 6, 'reach' => 50]);
+        foreach ([$onPage, $onSecond, $onThird, $single] as $variant) {
+            snapshotFor($variant, ['reactions' => 10]);
+        }
+
         snapshotFor($loose, ['reactions' => 1]);
 
-        $summaries = inWorkspace($this->workspace, fn () => $this->performance->pillarSummaries($this->from, $this->until));
+        $rows = fn (?int $channelId = null) => array_map(
+            fn (PerformanceSummary $summary) => [$summary->name, $summary->posts, $summary->channelPosts, $summary->measured, $summary->totals->reactions, $summary->averageScore()],
+            inWorkspace($this->workspace, fn () => $this->performance->pillarSummaries($this->from, $this->until, $channelId)),
+        );
 
-        expect(array_map(fn (PerformanceSummary $summary) => [$summary->name, $summary->posts, $summary->measuredPosts, $summary->totals->reactions, $summary->postsWith(Metric::Reach)], $summaries))
-            ->toBe([['Harbour', 1, 1, 10, 1], [null, 1, 1, 1, 0]]);
+        // The same post did the same on every channel: the same average.
+        expect($rows())->toBe([
+            ['On one channel', 1, 1, 1, 10, 10.0],
+            ['On three channels', 1, 3, 3, 30, 10.0],
+            [null, 1, 1, 1, 1, 1.0],
+        ])
+            // One channel alone: only what went out there.
+            ->and($rows($second->id))->toBe([['On three channels', 1, 1, 1, 10, 10.0]])
+            ->and($rows(999999))->toBe([]);
+    });
+
+    it('counts a post that is too young as published and not as measured', function () {
+        $pillar = pillarIn($this->workspace, ['name' => 'Harbour']);
+
+        snapshotFor(publishedVariant($this->workspace, $this->page, now()->subDays(3), $pillar), ['reactions' => 20]);
+        snapshotFor(publishedVariant($this->workspace, $this->page, now()->subHours(48), $pillar), ['reactions' => 10]);
+        snapshotFor(publishedVariant($this->workspace, $this->page, now()->subHours(2), $pillar), ['reactions' => 0]);
+
+        $harbour = inWorkspace($this->workspace, fn () => $this->performance->pillarSummaries($this->from, $this->until, null, now()->subHours(48)))[0];
+
+        expect([$harbour->posts, $harbour->channelPosts, $harbour->measured, $harbour->scored])->toBe([3, 3, 2, 2])
+            ->and($harbour->totals->reactions)->toBe(30)
+            ->and($harbour->averageScore())->toBe(15.0);
     });
 
     it('leaves out what was published outside the period and what belongs to another workspace', function () {
@@ -145,16 +194,17 @@ describe('the summary of each channel', function () {
         [$summaries, $queries] = ($this->counted)(fn () => $this->performance->channelSummaries($this->from, $this->until));
 
         expect($queries)->toBe(1)
-            ->and(array_map(fn (PerformanceSummary $summary) => [$summary->id, $summary->posts, $summary->measuredPosts, $summary->totals->reactions, $summary->postsWith(Metric::Clicks), $summary->score], $summaries))
+            ->and(array_map(fn (PerformanceSummary $summary) => [$summary->id, $summary->channelPosts, $summary->measured, $summary->totals->reactions, $summary->with(Metric::Clicks), $summary->score], $summaries))
             ->toBe([
-                [$this->page->id, 3, 2, 3, 1, 10.0],
+                // The seven clicks are a number of the channel, not part of its score.
+                [$this->page->id, 3, 2, 3, 1, 3.0],
                 [$profile->id, 1, 0, null, 0, null],
             ]);
     });
 });
 
 describe('the posts that did best', function () {
-    it('ranks posts by the score of all their channels, the newest first among equals', function () {
+    it('ranks posts by the comparable score of all their channels, the newest first among equals', function () {
         $second = channelIn($this->workspace);
 
         $best = publishedVariant($this->workspace, $this->page, now()->subDays(3));
@@ -164,17 +214,18 @@ describe('the posts that did best', function () {
         $sameMinuteLower = publishedVariant($this->workspace, $this->page, now()->subDays(4));
         $sameMinuteHigher = publishedVariant($this->workspace, $this->page, now()->subDays(4));
         $zero = publishedVariant($this->workspace, $this->page, now()->subDay());
-        $reachOnly = publishedVariant($this->workspace, $this->page, now()->subDay());
+        $clicksOnly = publishedVariant($this->workspace, $this->page, now()->subDay());
         publishedVariant($this->workspace, $this->page, now()->subDay());
 
         snapshotFor($best, ['reactions' => 6]);
         snapshotFor($bestElsewhere, ['reactions' => 6, 'reach' => 40]);
         snapshotFor($tiedOlder, ['reactions' => 10]);
         snapshotFor($tiedNewer, ['comments' => 5]);
-        snapshotFor($sameMinuteLower, ['reactions' => 2]);
+        // Many clicks do not lift a post over the others.
+        snapshotFor($sameMinuteLower, ['reactions' => 2, 'clicks' => 5000]);
         snapshotFor($sameMinuteHigher, ['reactions' => 2]);
         snapshotFor($zero, ['reactions' => 0]);
-        snapshotFor($reachOnly, ['reach' => 5000]);
+        snapshotFor($clicksOnly, ['clicks' => 900, 'reach' => 5000]);
 
         [$top, $queries] = ($this->counted)(fn () => $this->performance->topPosts($this->from, $this->until, 10));
 
@@ -187,7 +238,31 @@ describe('the posts that did best', function () {
                 [$sameMinuteLower->post_id, 2.0],
                 [$zero->post_id, 0.0],
             ])
-            ->and([$top[0]->measuredVariants, $top[0]->totals->reactions, $top[0]->totals->reach])->toBe([2, 12, 40]);
+            ->and([$top[0]->measuredVariants, $top[0]->totals->reactions])->toBe([2, 12]);
+
+        // On one channel alone, the post that was on two counts once.
+        $onSecond = inWorkspace($this->workspace, fn () => $this->performance->topPosts($this->from, $this->until, 10, $second->id));
+
+        expect(array_map(fn (PostPerformance $post) => [$post->postId, $post->score, $post->measuredVariants], $onSecond))
+            ->toBe([[$best->post_id, 6.0, 1]]);
+    });
+
+    it('leaves out posts that are too young to compete', function () {
+        $settled = publishedVariant($this->workspace, $this->page, now()->subDays(3));
+        $atTheLine = publishedVariant($this->workspace, $this->page, now()->subHours(48));
+        $young = publishedVariant($this->workspace, $this->page, now()->subHours(47));
+
+        snapshotFor($settled, ['reactions' => 1]);
+        snapshotFor($atTheLine, ['reactions' => 2]);
+        snapshotFor($young, ['reactions' => 300]);
+
+        $ids = fn (?DateTimeInterface $settledBefore) => array_map(
+            fn (PostPerformance $post) => $post->postId,
+            inWorkspace($this->workspace, fn () => $this->performance->topPosts($this->from, $this->until, 10, null, $settledBefore)),
+        );
+
+        expect($ids(now()->subHours(48)))->toBe([$atTheLine->post_id, $settled->post_id])
+            ->and($ids(null))->toBe([$young->post_id, $atTheLine->post_id, $settled->post_id]);
     });
 
     it('stops at the limit and keeps to the period and the workspace', function () {
