@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Media;
 
 use App\Domain\Content\Actions\StoreMedia;
+use App\Domain\Content\Exceptions\MediaBusy;
 use App\Domain\Content\Exceptions\MediaFileMissing;
 use App\Domain\Content\Exceptions\MediaRefused;
 use App\Domain\Content\Media\MediaConfig;
@@ -15,6 +16,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -29,9 +31,6 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class MediaController extends Controller
 {
-    /** How long a browser may show its own copy without asking again. */
-    private const CACHE_SECONDS = 86400;
-
     public function store(Request $request, StoreMedia $store): JsonResponse
     {
         Gate::authorize('create', Media::class);
@@ -40,23 +39,62 @@ class MediaController extends Controller
 
         abort_unless($user instanceof User, 401);
 
-        $file = $request->file('file');
-
-        // One file, sent whole. The size is checked again on the file
-        // itself, and what it is, is decided from its content.
-        if (! $file instanceof UploadedFile || ! $file->isValid()) {
-            throw ValidationException::withMessages([
-                'file' => [(string) __('Choose one image to upload. The limit is :limit MB.', ['limit' => round(MediaConfig::maxBytes() / 1024 / 1024, 1)])],
-            ]);
-        }
-
         try {
-            $media = $store->handle($user, (string) $file->getRealPath());
+            $media = $store->handle($user, $this->uploadedPath($request));
         } catch (MediaRefused $e) {
             throw ValidationException::withMessages(['file' => [$e->getMessage()]]);
+        } catch (MediaBusy $e) {
+            // Not a judgement on the file: the same request works a moment
+            // later. The sentence is where a refusal has its sentence, so
+            // that a page can show either the same way.
+            return response()->json(
+                ['message' => $e->getMessage(), 'errors' => ['file' => [$e->getMessage()]]],
+                429,
+                ['Retry-After' => (string) $e->retryAfterSeconds],
+            );
         }
 
         return response()->json(MediaPresenter::present($media), 201);
+    }
+
+    /**
+     * Where PHP put the one file of the request. The size is checked again
+     * on the file itself, and what it is, is decided from its content.
+     *
+     * When PHP did not take the file, the reason decides what the person is
+     * told: a file that is too large is theirs to change, a full disk is
+     * not, and neither is helped by "choose an image".
+     *
+     * @throws MediaRefused
+     */
+    private function uploadedPath(Request $request): string
+    {
+        $file = $request->file('file');
+
+        if (! $file instanceof UploadedFile) {
+            throw MediaRefused::nothingSent(MediaConfig::maxBytes());
+        }
+
+        if ($file->isValid()) {
+            return (string) $file->getRealPath();
+        }
+
+        throw match ($file->getError()) {
+            UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE => MediaRefused::tooManyBytes(MediaConfig::maxBytes()),
+            UPLOAD_ERR_PARTIAL => MediaRefused::interrupted(),
+            UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE, UPLOAD_ERR_EXTENSION => $this->cannotStore($file->getError()),
+            default => MediaRefused::nothingSent(MediaConfig::maxBytes()),
+        };
+    }
+
+    private function cannotStore(int $error): MediaRefused
+    {
+        Log::error('PHP could not take an uploaded image. Check the temporary directory of the app container and the room on its disk.', [
+            'upload_error' => $error,
+            'upload_tmp_dir' => ini_get('upload_tmp_dir') ?: sys_get_temp_dir(),
+        ]);
+
+        return MediaRefused::serverCannotStore();
     }
 
     public function show(Request $request, int $media, CurrentWorkspace $workspace): Response
@@ -85,7 +123,12 @@ class MediaController extends Controller
 
         $headers = [
             'ETag' => $etag,
-            'Cache-Control' => 'private, max-age='.self::CACHE_SECONDS,
+            // The browser keeps its copy and asks every time whether it may
+            // still show it. The answer is a 304 without the file, and it
+            // is only given after the checks above, so an image stops
+            // opening the moment its viewer signs out or leaves the
+            // workspace.
+            'Cache-Control' => 'private, no-cache',
             // The type is the one this application gave the file when it
             // wrote it. Nothing in the response can run or be framed.
             'Content-Type' => $thumbnail ? 'image/jpeg' : $media->mime,

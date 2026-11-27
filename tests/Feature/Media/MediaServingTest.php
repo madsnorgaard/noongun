@@ -3,6 +3,8 @@
 use App\Domain\Workspaces\Models\Workspace;
 use App\Domain\Workspaces\Role;
 use App\Models\User;
+use Illuminate\Session\ArraySessionHandler;
+use Illuminate\Support\Facades\Auth;
 
 require_once __DIR__.'/../../Support/publishing.php';
 require_once __DIR__.'/../../Support/media.php';
@@ -36,7 +38,107 @@ it('serves it as an image and as nothing else', function () {
         ->assertHeader('Referrer-Policy', 'same-origin')
         ->assertHeader('ETag', '"'.substr($this->media->content_hash, 0, 32).'"');
 
-    expect($response->headers->get('Cache-Control'))->toContain('private')->toContain('max-age=86400')->not->toContain('public');
+    expect($response->headers->get('Cache-Control'))->toContain('private')->toContain('no-cache')->not->toContain('public')->not->toContain('max-age');
+});
+
+describe('a copy in the browser', function () {
+    it('may be kept, and is asked about every time before it is shown', function (string $route) {
+        $member = userWithRole($this->workspace, Role::Viewer);
+        $first = $this->actingAs($member)->get(route($route, $this->media->id))->assertOk();
+
+        // "no-cache" is not "do not store": the browser keeps the file and
+        // must have it confirmed. The confirmation is the 304 below.
+        expect($first->headers->get('Cache-Control'))->toBe('no-cache, private');
+
+        $this->withHeaders(['If-None-Match' => $first->headers->get('ETag')])
+            ->get(route($route, $this->media->id))
+            ->assertStatus(304)
+            ->assertHeader('Cache-Control', 'no-cache, private');
+    })->with(['media.show', 'media.thumb']);
+
+    it('stops opening when its viewer signs out', function () {
+        $member = userWithRole($this->workspace, Role::Viewer);
+        $etag = $this->actingAs($member)->get(route('media.show', $this->media->id))->headers->get('ETag');
+
+        $this->post(route('logout'));
+
+        $this->withHeaders(['If-None-Match' => $etag])->get(route('media.show', $this->media->id))->assertNotFound();
+    });
+
+    it('stops opening when its viewer is taken out of the workspace', function () {
+        $member = userWithRole($this->workspace, Role::Viewer);
+        $etag = $this->actingAs($member)->get(route('media.show', $this->media->id))->headers->get('ETag');
+
+        $member->memberships()->delete();
+
+        $this->withHeaders(['If-None-Match' => $etag])->get(route('media.show', $this->media->id))->assertNotFound();
+        $this->withHeaders(['If-None-Match' => $etag.'-t'])->get(route('media.thumb', $this->media->id))->assertNotFound();
+    });
+});
+
+describe('an image is not a page', function () {
+    it('knows who is signed in from the session', function () {
+        $member = userWithRole($this->workspace, Role::Viewer);
+
+        $this->withSession([Auth::guard('web')->getName() => $member->id])
+            ->get(route('media.show', $this->media->id))
+            ->assertOk();
+
+        expect(Auth::id())->toBe($member->id);
+    });
+
+    it('is not noted as the page to go back to', function (string $route) {
+        $member = userWithRole($this->workspace, Role::Editor);
+
+        $this->actingAs($member)->get(route('queue.index'))->assertOk();
+
+        expect(session()->previousUrl())->toBe(route('queue.index'));
+
+        $this->get(route($route, $this->media->id))->assertOk();
+        $this->get(route($route, 999999))->assertNotFound();
+
+        expect(session()->previousUrl())->toBe(route('queue.index'));
+
+        // A form that fails goes back to the page, not to a picture.
+        $this->post(route('posts.store'), [])->assertRedirect(route('queue.index'));
+    })->with(['media.show', 'media.thumb']);
+
+    it('does not write the session and sends no cookie', function () {
+        $member = userWithRole($this->workspace, Role::Editor);
+        $handler = Mockery::mock(ArraySessionHandler::class, [120])->makePartial();
+
+        session()->setHandler($handler);
+
+        $image = $this->actingAs($member)->get(route('media.show', $this->media->id))->assertOk();
+        $thumb = $this->get(route('media.thumb', $this->media->id))->assertOk();
+        $unchanged = $this->withHeaders(['If-None-Match' => $image->headers->get('ETag')])->get(route('media.show', $this->media->id))->assertStatus(304);
+
+        $handler->shouldNotHaveReceived('write');
+
+        expect($image->headers->getCookies())->toBe([])
+            ->and($thumb->headers->getCookies())->toBe([])
+            ->and($unchanged->headers->getCookies())->toBe([]);
+
+        // A page does both, so the check above can fail.
+        $page = $this->get(route('queue.index'))->assertOk();
+
+        $handler->shouldHaveReceived('write');
+
+        expect($page->headers->getCookies())->not->toBe([]);
+    });
+
+    it('keeps what a page left in the session for the next page', function () {
+        $member = userWithRole($this->workspace, Role::Editor);
+
+        $this->actingAs($member)->withSession(['workspace_id' => $this->workspace->id]);
+        session()->flash('status', 'The draft is saved.');
+        session()->save();
+
+        $this->get(route('media.thumb', $this->media->id))->assertOk();
+        $this->get(route('media.thumb', $this->media->id))->assertOk();
+
+        expect(session()->get('status'))->toBe('The draft is saved.');
+    });
 });
 
 it('takes the content type from its own record, never from the file', function () {
