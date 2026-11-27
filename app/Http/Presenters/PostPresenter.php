@@ -220,6 +220,10 @@ final class PostPresenter
             'link' => $variant->link,
             'link_title' => $card ? $variant->link_title : null,
             'link_description' => $card ? $variant->link_description : null,
+            // The link with its campaign parameters. Where the images take
+            // the place of the link card, this is the last line of the
+            // text, and the editor counts it as the readiness check does.
+            'link_as_sent' => $variant->linkToSend(),
             'media' => $variant->images()
                 ->filter(fn (MediaAttachment $attachment): bool => $attachment->media !== null)
                 ->map(fn (MediaAttachment $attachment): array => [...MediaPresenter::present($attachment->image()), 'alt_text' => $attachment->alt_text])
